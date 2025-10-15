@@ -139,3 +139,72 @@
             border-radius: 10px;
             margin-top: 30px;
         }
+
+
+
+        /* 語音按鈕樣式 */
+.btn-voice {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    margin-left: 10px;
+}
+
+.btn-voice:hover {
+    background-color: #45a049;
+    transform: scale(1.05);
+}
+
+.btn-voice:active {
+    transform: scale(0.95);
+}
+
+/* 語音錄製狀態 */
+.btn-voice.recording {
+    background-color: #ff4444;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+/* 系統消息樣式 */
+.system-message {
+    text-align: center;
+    margin: 10px 0;
+    color: #666;
+    font-style: italic;
+}
+
+.system-message span {
+    background-color: #f0f0f0;
+    padding: 5px 15px;
+    border-radius: 15px;
+    display: inline-block;
+}
+
+/* 響應式設計 */
+@media (max-width: 768px) {
+    .btn-voice {
+        padding: 8px 12px;
+        font-size: 14px;
+        margin-left: 5px;
+    }
+    
+    .input-container {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .input-container input {
+        margin-bottom: 5px;
+    }
+}
