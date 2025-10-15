@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>关怀老人助手 - 聊天机器人</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        /* 基础样式 */
+        body {
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* 头部设计 */
+        header {
+            text-align: center;
+            padding: 30px 0;
+            background-color: #4a6fa5;
+            color: white;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin: 0;
+            font-weight: normal;
+        }
+
+        header p {
+            font-size: 1.2rem;
+            margin-top: 10px;
+        }
+
+        /* 功能按钮样式 */
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .feature {
+            background-color: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            transition: transform 0.3s ease;
+            cursor: pointer;
+        }
+
+        .feature:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .feature h2 {
+            color: #4a6fa5;
+            font-size: 1.5rem;
+            margin-top: 10px;
+            margin-bottom: 15px;
+        }
+
+        .feature img {
+            width: 80px;
+            height: 80px;
+            object-fit: contain;
+            margin-bottom: 15px;
+        }
+
+        .feature p {
+            font-size: 1.1rem;
+            line-height: 1.5;
+        }
+
+        /* 登录区域样式 */
+        .login-section {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-section h2 {
+            color: #4a6fa5;
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+        }
+
+        .login-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .login-button {
+            padding: 12px 25px;
+            font-size: 1.2rem;
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .login-button:hover {
+            background-color: #3a5a8c;
+        }
+
+        /* 语音交互按钮 */
+        .voice-button {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 70px;
+            height: 70px;
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+        }
+
+        /* 页脚样式 */
+        footer {
+            text-align: center;
+            padding: 20px;
+            background-color: #4a6fa5;
+            color: white;
+            border-radius: 10px;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    <div class="container">
+        <!-- 头部 -->
+        <header>
+            <h1>关怀老人助手</h1>
+            <p>通过聊天、游戏和提醒，让您的生活更加美好！</p>
+        </header>
+
+        <!-- 功能按钮区域 -->
+        <div class="features">
+            <!-- 日常聊天 -->
+            <div class="feature" onclick="navigateToChat()">
+                <img src="https://cdn-icons-png.flaticon.com/512/3583/3583704.png" alt="日常聊天">
+                <h2>日常聊天</h2>
+                <p>与机器人聊天，分享您的心情，获得贴心的问候！</p>
+            </div>
+
+            <!-- 记忆游戏 -->
+            <div class="feature" onclick="navigateToMemoryGame()">
+                <img src="https://cdn-icons-png.flaticon.com/512/2945/2945801.png" alt="记忆游戏">
+                <h2>记忆游戏</h2>
+                <p>参与有趣的小游戏，锻炼您的记忆力！</p>
+            </div>
+
+            <!-- 健康提醒 -->
+            <div class="feature" onclick="navigateToHealthReminders()">
+                <img src="https://cdn-icons-png.flaticon.com/512/3018/3018409.png" alt="健康提醒">
+                <h2>健康提醒</h2>
+                <p>获取定时提醒，帮助您保持健康的生活习惯！</p>
+            </div>
+        </div>
+
+        <!-- 登录区域 -->
+        <div class="login-section">
+            <h2>用户登录</h2>
+            <div class="login-buttons">
+                <button class="login-button" onclick="showLoginModal()">登录</button>
+                <button class="login-button" onclick="showRegisterModal()">注册</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 语音交互按钮 -->
+    <button class="voice-button" onclick="startVoiceInteraction()">
+        <i>🎤</i>
+    </button>
+
+    <!-- 页脚 -->
+    <footer>
+        <p>© 2025 关怀老人助手 | 关爱老年人，从这里开始</p>
+    </footer>
+
+    <script>
+        // 导航函数（可根据实际需求修改）
+        function navigateToChat() {
+            alert("正在前往日常聊天功能...");
+            // window.location.href = "chat.html"; // 示例跳转
+        }
+
+        function navigateToMemoryGame() {
+            alert("正在前往记忆游戏功能...");
+            // window.location.href = "game.html"; // 示例跳转
+        }
+
+        function navigateToHealthReminders() {
+            alert("正在前往健康提醒功能...");
+            // window.location.href = "reminders.html"; // 示例跳转
+        }
+
+        // 登录和注册功能（弹窗示例）
+        function showLoginModal() {
+            alert("正在打开登录界面...");
+            // 实际项目中可以替换为登录弹窗
+        }
+
+        function showRegisterModal() {
+            alert("正在打开注册界面...");
+            // 实际项目中可以替换为注册弹窗
+        }
+
+        // 语音交互功能
+        function startVoiceInteraction() {
+            alert("正在启动语音交互...");
+            // 实际项目中可以替换为语音识别功能调用
+        }
+    </script>
+</body>
+</html>
