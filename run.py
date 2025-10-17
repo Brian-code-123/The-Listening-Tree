@@ -8,7 +8,7 @@ import threading
 from database_manager import db_manager
 from dialo_gpt_chatbot import chatbot
 from voice_recognition import voice_recognizer
-from sentiment_analyzer import sentiment_analyzer
+
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here-change-in-production'

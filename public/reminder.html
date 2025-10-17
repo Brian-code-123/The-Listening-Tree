@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elderly Reminder System</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h2 id="title">Elderly Reminder System</h2>
+
+        <label for="language">Choose Language:</label>
+        <select id="language" onchange="changeLanguage()">
+            <option value="en">English</option>
+            <option value="hi">हिन्दी</option>
+            <option value="mr">मराठी</option>
+        </select>
+        
+        <form id="reminderForm">
+            <input type="text" id="reminderType" placeholder="Reminder Type (e.g., Medicine, Exercise)" required>
+            <input type="time" id="reminderTime" required>
+            <button type="submit" id="setReminderBtn">Set Reminder</button>
+        </form>
+
+        <div id="reminderList">
+            <h3 id="scheduledReminders">Scheduled Reminders</h3>
+            <ul id="reminders"></ul>
+        </div>
+    </div>
+
+    <!-- Audio Reminder -->
+    <audio id="reminderSound" preload="auto">
+        <source src="reminders.wav" type="audio/mpeg">
+    </audio>
+
+    <!-- Notification Div -->
+    <div id="reminderNotification" class="notification"></div>
+
+    <script>
+        // Language Translations
+        const translations = {
+            en: {
+                title: "Elderly Reminder System",
+                setReminder: "Set Reminder",
+                scheduledReminders: "Scheduled Reminders",
+                chooseLanguage: "Choose Language:"
+            },
+            hi: {
+                title: "वरिष्ठ नागरिक अनुस्मारक प्रणाली",
+                setReminder: "अनुस्मारक सेट करें",
+                scheduledReminders: "अनुसूचित अनुस्मारक",
+                chooseLanguage: "भाषा चुनें:"
+            },
+            mr: {
+                title: "ज्येष्ठ नागरिक आठवण प्रणाली",
+                setReminder: "आठवण सेट करा",
+                scheduledReminders: "नियोजित आठवणी",
+                chooseLanguage: "भाषा निवडा:"
+            }
+        };
+
+        function changeLanguage() {
+            const lang = document.getElementById("language").value;
+            document.getElementById("title").textContent = translations[lang].title;
+            document.getElementById("setReminderBtn").textContent = translations[lang].setReminder;
+            document.getElementById("scheduledReminders").textContent = translations[lang].scheduledReminders;
+        }
+
+        // Reminder Handling with Local Storage
+        const reminderForm = document.getElementById('reminderForm');
+        const reminderList = document.getElementById('reminders');
+        let reminders = JSON.parse(localStorage.getItem('reminders')) || [];
+
+        function updateReminders() {
+            reminderList.innerHTML = '';
+            reminders.forEach((reminder, index) => {
+                const li = document.createElement('li');
+                li.textContent = `${reminder.type} at ${reminder.time}`;
+                
+                const editBtn = document.createElement('button');
+                editBtn.textContent = 'Edit';
+                editBtn.onclick = () => editReminder(index);
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.onclick = () => {
+                    reminders.splice(index, 1);
+                    saveReminders();
+                    updateReminders();
+                };
+                
+                li.appendChild(editBtn);
+                li.appendChild(deleteBtn);
+                reminderList.appendChild(li);
+            });
+        }
+
+        function saveReminders() {
+            localStorage.setItem('reminders', JSON.stringify(reminders));
+        }
+
+        reminderForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            
+            const type = document.getElementById('reminderType').value;
+            const time = document.getElementById('reminderTime').value;
+            
+            reminders.push({ type, time });
+            saveReminders();
+            updateReminders();
+            reminderForm.reset();
+        });
+
+        function editReminder(index) {
+            const newType = prompt("Edit reminder type:", reminders[index].type);
+            const newTime = prompt("Edit reminder time:", reminders[index].time);
+            
+            if (newType && newTime) {
+                reminders[index] = { type: newType, time: newTime };
+                saveReminders();
+                updateReminders();
+            }
+        }
+
+        // Play Sound
+        function playSound() {
+            const audio = document.getElementById('reminderSound');
+            audio.play().catch(error => console.error("Audio playback error:", error));
+        }
+
+        // Show Notification
+        function showNotification(message) {
+            const notificationDiv = document.getElementById('reminderNotification');
+            notificationDiv.innerHTML = `<p>${message}</p>`;
+            notificationDiv.style.display = 'block';
+
+            // Hide notification after 10 seconds
+            setTimeout(() => {
+                notificationDiv.style.display = 'none';
+            }, 10000);
+        }
+
+        // Check Reminders
+        function checkReminders() {
+            const now = new Date().toTimeString().slice(0, 5);
+            
+            reminders.forEach(reminder => {
+                const reminderTime = reminder.time;
+                const diff = (new Date(`1970-01-01T${reminderTime}:00`).getTime() - new Date(`1970-01-01T${now}:00`).getTime()) / 60000;
+
+                if ([10, 5, 1].includes(diff)) {
+                    showNotification(`Reminder in ${diff} minutes: Time for ${reminder.type}`);
+                    playSound();
+                }
+
+                if (reminderTime === now) {
+                    showNotification(`Reminder: Time for ${reminder.type}!`);
+                    playSound();
+                }
+            });
+        }
+
+        // Check reminders every minute
+        setInterval(checkReminders, 60000);
+
+        // Load saved reminders on startup
+        updateReminders();
+
+        // Allow audio playback on first user interaction
+        document.addEventListener("click", () => {
+            const audio = document.getElementById("reminderSound");
+            audio.play().catch(error => console.log("Audio playback blocked:", error));
+        }, { once: true });
+
+    </script>
+
+    <style>
+        .container {
+            max-width: 400px;
+            margin: auto;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        input, button, select {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+        }
+
+        button {
+            background-color: #00796b;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #004d40;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #00796b;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+            font-size: 1.2em;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        ul li {
+            display: flex;
+            justify-content: space-between;
+            background: #f9f9f9;
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+
+</body>
+</html>

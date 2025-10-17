@@ -47,7 +47,7 @@
         left: -50%;
         width: 200%;
         height: 200%;
-        background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
         opacity: 0.5;
     }
 
@@ -199,9 +199,20 @@
     }
 
     @keyframes pulse {
-        0% { transform: scale(1); box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4); }
-        50% { transform: scale(1.05); box-shadow: 0 8px 25px rgba(231, 76, 60, 0.6); }
-        100% { transform: scale(1); box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4); }
+        0% {
+            transform: scale(1);
+            box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
+        }
+
+        50% {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(231, 76, 60, 0.6);
+        }
+
+        100% {
+            transform: scale(1);
+            box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
+        }
     }
 
     /* 页脚样式 */
@@ -422,36 +433,36 @@
         .container {
             padding: 15px;
         }
-        
+
         header h1 {
             font-size: 2.2rem;
         }
-        
+
         .features {
             grid-template-columns: 1fr;
         }
-        
+
         .login-buttons {
             flex-direction: column;
             align-items: center;
         }
-        
+
         .login-button {
             width: 100%;
             max-width: 250px;
         }
-        
+
         .voice-button {
             width: 70px;
             height: 70px;
             bottom: 20px;
             right: 20px;
         }
-        
+
         .chat-container {
             height: 500px;
         }
-        
+
         .message-bubble {
             max-width: 85%;
         }
@@ -470,7 +481,8 @@
         <div class="user-info" id="userInfo">
             <h3>欢迎回来，<span id="userName">用户</span>！</h3>
             <p>今天感觉怎么样？我们可以聊天、玩游戏或者查看健康提醒。</p>
-            <button class="login-button" onclick="logout()" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">退出登录</button>
+            <button class="login-button" onclick="logout()"
+                style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">退出登录</button>
         </div>
 
         <!-- 功能按钮区域 -->
@@ -587,14 +599,14 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
         integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxMv+D2scQbITxI"
         crossorigin="anonymous"></script>
-        
+
     <script>
         // 用户状态管理
         let currentUser = null;
         let isListening = false;
 
         // 页面加载时检查用户登录状态
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             checkLoginStatus();
         });
 
@@ -649,8 +661,8 @@
                 showLoginModal();
                 return;
             }
-            alert("健康提醒功能开发中...");
-            // window.location.href = "reminders.html";
+            // 跳转到健康提醒页面
+            window.location.href = "/reminder";
         }
 
         // 返回主界面
@@ -683,19 +695,19 @@
         function performLogin() {
             const username = document.getElementById('loginUsername').value;
             const password = document.getElementById('loginPassword').value;
-            
+
             if (!username || !password) {
                 alert('请输入用户名和密码');
                 return;
             }
-            
+
             // 模拟登录成功
             currentUser = {
                 id: 'user_' + Date.now(),
                 name: username,
                 age: 65
             };
-            
+
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
             closeLoginModal();
             showUserInfo();
@@ -708,12 +720,12 @@
             const age = document.getElementById('registerAge').value;
             const username = document.getElementById('registerUsername').value;
             const password = document.getElementById('registerPassword').value;
-            
+
             if (!name || !age || !username || !password) {
                 alert('请填写所有必填字段');
                 return;
             }
-            
+
             // 模拟注册成功
             currentUser = {
                 id: 'user_' + Date.now(),
@@ -721,7 +733,7 @@
                 age: parseInt(age),
                 medical: document.getElementById('registerMedical').value
             };
-            
+
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
             closeRegisterModal();
             showUserInfo();
@@ -743,18 +755,18 @@
                 showLoginModal();
                 return;
             }
-            
+
             const voiceButton = document.getElementById('voiceButton');
-            
+
             if (!isListening) {
                 // 开始语音识别
                 isListening = true;
                 voiceButton.classList.add('listening');
                 voiceButton.innerHTML = '<i class="fas fa-stop"></i>';
-                
+
                 // 这里应该调用语音识别API
                 alert("语音识别已启动，请开始说话...");
-                
+
                 // 模拟语音识别结果
                 setTimeout(() => {
                     const simulatedText = "今天我感觉很好，想聊聊天";
@@ -763,12 +775,12 @@
                     getBotResponse(simulatedText);
                     stopVoiceRecognition();
                 }, 3000);
-                
+
             } else {
                 stopVoiceRecognition();
             }
         }
-        
+
         function stopVoiceRecognition() {
             isListening = false;
             const voiceButton = document.getElementById('voiceButton');
@@ -780,31 +792,31 @@
         function sendMessage() {
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
-            
+
             if (message === '') return;
-            
+
             addMessage(message, 'user');
             input.value = '';
-            
+
             getBotResponse(message);
         }
-        
+
         function addMessage(text, sender) {
             const messagesContainer = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${sender}-message`;
-            
+
             const bubbleDiv = document.createElement('div');
             bubbleDiv.className = 'message-bubble';
             bubbleDiv.textContent = text;
-            
+
             messageDiv.appendChild(bubbleDiv);
             messagesContainer.appendChild(messageDiv);
-            
+
             // 滚动到底部
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
-        
+
         function getBotResponse(userMessage) {
             // 模拟AI响应
             const responses = [
@@ -815,7 +827,7 @@
                 "您有没有什么兴趣爱好？我们可以聊聊您喜欢的事情。",
                 "记住，保持积极的心态对健康非常重要。您今天笑了吗？"
             ];
-            
+
             // 根据用户消息选择响应
             let response;
             if (userMessage.includes('感觉') || userMessage.includes('心情')) {
@@ -828,22 +840,22 @@
                 // 随机选择响应
                 response = responses[Math.floor(Math.random() * responses.length)];
             }
-            
+
             // 模拟网络延迟
             setTimeout(() => {
                 addMessage(response, 'bot');
             }, 1000);
         }
-        
+
         // 回车键发送消息
-        document.getElementById('chatInput').addEventListener('keypress', function(e) {
+        document.getElementById('chatInput').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') {
                 sendMessage();
             }
         });
-        
+
         // 点击模态框外部关闭
-        window.addEventListener('click', function(e) {
+        window.addEventListener('click', function (e) {
             if (e.target === document.getElementById('loginModal')) {
                 closeLoginModal();
             }
@@ -853,4 +865,5 @@
         });
     </script>
 </body>
+
 </html>
