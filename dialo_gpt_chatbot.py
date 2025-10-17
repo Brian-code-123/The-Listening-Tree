@@ -1,5 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from database_manager import db_manager  # 使用統一的數據庫管理器
 import sqlite3
 import json
 from datetime import datetime
