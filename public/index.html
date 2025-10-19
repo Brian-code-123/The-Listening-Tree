@@ -1,869 +1,172 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
+<!doctype html>
+<html lang="en">
 
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>关怀老人助手 - 聊天机器人</title>
+    <title>Bootstrap demo</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"
         integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-
-<style>
-    /* 基础样式 */
-    body {
-        font-family: "Microsoft YaHei", Arial, sans-serif;
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        margin: 0;
-        padding: 0;
-        color: #333;
-        min-height: 100vh;
-    }
-
-    .container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 20px;
-    }
-
-    /* 头部设计 */
-    header {
-        text-align: center;
-        padding: 30px 0;
-        background: linear-gradient(135deg, #4a6fa5 0%, #3a5a8c 100%);
-        color: white;
-        border-radius: 15px;
-        margin-bottom: 30px;
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
-        position: relative;
-        overflow: hidden;
-    }
-
-    header::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
-        opacity: 0.5;
-    }
-
-    header h1 {
-        font-size: 2.8rem;
-        margin: 0;
-        font-weight: 300;
-        position: relative;
-    }
-
-    header p {
-        font-size: 1.3rem;
-        margin-top: 10px;
-        opacity: 0.9;
-        position: relative;
-    }
-
-    /* 功能按钮样式 */
-    .features {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 25px;
-        margin-bottom: 30px;
-    }
-
-    .feature {
-        background: white;
-        padding: 30px 25px;
-        border-radius: 15px;
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
-        text-align: center;
-        transition: all 0.3s ease;
-        cursor: pointer;
-        border: 1px solid rgba(74, 111, 165, 0.1);
-        position: relative;
-        overflow: hidden;
-    }
-
-    .feature::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 5px;
-        background: linear-gradient(90deg, #4a6fa5, #3a5a8c);
-    }
-
-    .feature:hover {
-        transform: translateY(-8px);
-        box-shadow: 0 12px 25px rgba(0, 0, 0, 0.15);
-    }
-
-    .feature h2 {
-        color: #4a6fa5;
-        font-size: 1.6rem;
-        margin-top: 15px;
-        margin-bottom: 15px;
-        font-weight: 500;
-    }
-
-    .feature img {
-        width: 90px;
-        height: 90px;
-        object-fit: contain;
-        margin-bottom: 20px;
-        filter: hue-rotate(180deg) brightness(0.9);
-    }
-
-    .feature p {
-        font-size: 1.1rem;
-        line-height: 1.6;
-        color: #555;
-    }
-
-    /* 登录区域样式 */
-    .login-section {
-        background: white;
-        padding: 35px;
-        border-radius: 15px;
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
-        text-align: center;
-        margin-bottom: 30px;
-        border: 1px solid rgba(74, 111, 165, 0.1);
-    }
-
-    .login-section h2 {
-        color: #4a6fa5;
-        font-size: 2rem;
-        margin-bottom: 25px;
-        font-weight: 400;
-    }
-
-    .login-buttons {
-        display: flex;
-        justify-content: center;
-        gap: 20px;
-        flex-wrap: wrap;
-    }
-
-    .login-button {
-        padding: 14px 30px;
-        font-size: 1.2rem;
-        background: linear-gradient(135deg, #4a6fa5 0%, #3a5a8c 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 10px rgba(74, 111, 165, 0.3);
-        min-width: 140px;
-    }
-
-    .login-button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 6px 15px rgba(74, 111, 165, 0.4);
-        background: linear-gradient(135deg, #3a5a8c 0%, #2a4a7c 100%);
-    }
-
-    /* 语音交互按钮 */
-    .voice-button {
-        position: fixed;
-        bottom: 30px;
-        right: 30px;
-        width: 80px;
-        height: 80px;
-        background: linear-gradient(135deg, #4a6fa5 0%, #3a5a8c 100%);
-        color: white;
-        border: none;
-        border-radius: 50%;
-        font-size: 1.8rem;
-        cursor: pointer;
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
-        z-index: 100;
-        transition: all 0.3s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .voice-button:hover {
-        transform: scale(1.1);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
-    }
-
-    .voice-button.listening {
-        background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-        animation: pulse 1.5s infinite;
-    }
-
-    @keyframes pulse {
-        0% {
-            transform: scale(1);
-            box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
-        }
-
-        50% {
-            transform: scale(1.05);
-            box-shadow: 0 8px 25px rgba(231, 76, 60, 0.6);
-        }
-
-        100% {
-            transform: scale(1);
-            box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
-        }
-    }
-
-    /* 页脚样式 */
-    footer {
-        text-align: center;
-        padding: 25px;
-        background: linear-gradient(135deg, #4a6fa5 0%, #3a5a8c 100%);
-        color: white;
-        border-radius: 15px;
-        margin-top: 30px;
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
-    }
-
-    /* 聊天界面样式 */
-    .chat-container {
-        display: none;
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
-        overflow: hidden;
-        margin-bottom: 30px;
-        height: 600px;
-        flex-direction: column;
-    }
-
-    .chat-header {
-        background: linear-gradient(135deg, #4a6fa5 0%, #3a5a8c 100%);
-        color: white;
-        padding: 20px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .chat-header h2 {
-        margin: 0;
-        font-size: 1.5rem;
-        font-weight: 400;
-    }
-
-    .back-button {
-        background: rgba(255, 255, 255, 0.2);
-        color: white;
-        border: none;
-        border-radius: 5px;
-        padding: 8px 15px;
-        cursor: pointer;
-        transition: background 0.3s ease;
-    }
-
-    .back-button:hover {
-        background: rgba(255, 255, 255, 0.3);
-    }
-
-    .chat-messages {
-        flex: 1;
-        padding: 20px;
-        overflow-y: auto;
-        background: #f9f9f9;
-    }
-
-    .message {
-        margin-bottom: 15px;
-        display: flex;
-    }
-
-    .user-message {
-        justify-content: flex-end;
-    }
-
-    .bot-message {
-        justify-content: flex-start;
-    }
-
-    .message-bubble {
-        max-width: 70%;
-        padding: 12px 18px;
-        border-radius: 18px;
-        font-size: 1.1rem;
-        line-height: 1.4;
-    }
-
-    .user-message .message-bubble {
-        background: linear-gradient(135deg, #4a6fa5 0%, #3a5a8c 100%);
-        color: white;
-        border-bottom-right-radius: 5px;
-    }
-
-    .bot-message .message-bubble {
-        background: white;
-        color: #333;
-        border: 1px solid #e0e0e0;
-        border-bottom-left-radius: 5px;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-    }
-
-    .chat-input-container {
-        display: flex;
-        padding: 20px;
-        background: white;
-        border-top: 1px solid #e0e0e0;
-    }
-
-    .chat-input {
-        flex: 1;
-        padding: 12px 15px;
-        border: 1px solid #ddd;
-        border-radius: 25px;
-        font-size: 1.1rem;
-        outline: none;
-        transition: border 0.3s ease;
-    }
-
-    .chat-input:focus {
-        border-color: #4a6fa5;
-    }
-
-    .send-button {
-        background: linear-gradient(135deg, #4a6fa5 0%, #3a5a8c 100%);
-        color: white;
-        border: none;
-        border-radius: 25px;
-        padding: 12px 25px;
-        margin-left: 10px;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        font-size: 1.1rem;
-    }
-
-    .send-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 10px rgba(74, 111, 165, 0.3);
-    }
-
-    /* 模态框样式 */
-    .modal-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 1000;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .modal-content {
-        background: white;
-        border-radius: 15px;
-        padding: 30px;
-        width: 90%;
-        max-width: 500px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-        position: relative;
-    }
-
-    .close-modal {
-        position: absolute;
-        top: 15px;
-        right: 20px;
-        font-size: 1.5rem;
-        cursor: pointer;
-        color: #777;
-    }
-
-    .modal-title {
-        color: #4a6fa5;
-        margin-bottom: 20px;
-        text-align: center;
-        font-size: 1.8rem;
-    }
-
-    .form-group {
-        margin-bottom: 20px;
-    }
-
-    .form-group label {
-        display: block;
-        margin-bottom: 8px;
-        font-weight: 500;
-        color: #555;
-    }
-
-    .form-control {
-        width: 100%;
-        padding: 12px 15px;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        font-size: 1.1rem;
-        transition: border 0.3s ease;
-    }
-
-    .form-control:focus {
-        border-color: #4a6fa5;
-        outline: none;
-    }
-
-    /* 用户信息显示 */
-    .user-info {
-        display: none;
-        background: white;
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
-        margin-bottom: 30px;
-        text-align: center;
-    }
-
-    .user-info h3 {
-        color: #4a6fa5;
-        margin-bottom: 15px;
-    }
-
-    /* 响应式设计 */
-    @media (max-width: 768px) {
-        .container {
-            padding: 15px;
-        }
-
-        header h1 {
-            font-size: 2.2rem;
-        }
-
-        .features {
-            grid-template-columns: 1fr;
-        }
-
-        .login-buttons {
-            flex-direction: column;
-            align-items: center;
-        }
-
-        .login-button {
-            width: 100%;
-            max-width: 250px;
-        }
-
-        .voice-button {
-            width: 70px;
-            height: 70px;
-            bottom: 20px;
-            right: 20px;
-        }
-
-        .chat-container {
-            height: 500px;
-        }
-
-        .message-bubble {
-            max-width: 85%;
-        }
-    }
-</style>
-
 <body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-robot"></i>
+                <h1>Elderly Companion Chatbot</h1>
+            </div>
+        </div>
+    </header>
+
     <div class="container">
-        <!-- 头部 -->
-        <header>
-            <h1>关怀老人助手</h1>
-            <p>通过智能聊天、健康提醒和娱乐活动，让您的生活更加美好！</p>
-        </header>
-
-        <!-- 用户信息显示 -->
-        <div class="user-info" id="userInfo">
-            <h3>欢迎回来，<span id="userName">用户</span>！</h3>
-            <p>今天感觉怎么样？我们可以聊天、玩游戏或者查看健康提醒。</p>
-            <button class="login-button" onclick="logout()"
-                style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">退出登录</button>
-        </div>
-
-        <!-- 功能按钮区域 -->
-        <div class="features" id="mainFeatures">
-            <!-- 日常聊天 -->
-            <div class="feature" onclick="navigateToChat()">
-                <img src="https://cdn-icons-png.flaticon.com/512/3583/3583704.png" alt="日常聊天">
-                <h2>日常聊天</h2>
-                <p>与智能助手聊天，分享您的心情，获得贴心的问候和支持！</p>
-            </div>
-
-            <!-- 记忆游戏 -->
-            <div class="feature" onclick="navigateToMemoryGame()">
-                <img src="https://cdn-icons-png.flaticon.com/512/2945/2945801.png" alt="记忆游戏">
-                <h2>记忆游戏</h2>
-                <p>参与有趣的记忆训练游戏，保持思维活跃！</p>
-            </div>
-
-            <!-- 健康提醒 -->
-            <div class="feature" onclick="navigateToHealthReminders()">
-                <img src="https://cdn-icons-png.flaticon.com/512/3018/3018409.png" alt="健康提醒">
-                <h2>健康提醒</h2>
-                <p>获取用药提醒、锻炼计划和健康建议！</p>
-            </div>
-        </div>
-
-        <!-- 登录区域 -->
-        <div class="login-section" id="loginSection">
-            <h2>用户登录</h2>
-            <div class="login-buttons">
-                <button class="login-button" onclick="showLoginModal()">登录</button>
-                <button class="login-button" onclick="showRegisterModal()">注册</button>
-            </div>
-        </div>
-
-        <!-- 聊天界面 -->
-        <div class="chat-container" id="chatContainer">
-            <div class="chat-header">
-                <h2>智能聊天助手</h2>
-                <button class="back-button" onclick="backToMain()">
-                    <i class="fas fa-arrow-left"></i> 返回
-                </button>
-            </div>
-            <div class="chat-messages" id="chatMessages">
-                <div class="message bot-message">
-                    <div class="message-bubble">
-                        您好！我是您的智能陪伴助手。有什么我可以帮助您的吗？
+        <div class="main-content">
+            <!-- Chat Section -->
+            <section class="chat-section">
+                <div class="chat-header">
+                    <i class="fas fa-comments"></i>
+                    <h2>Chat with Companion</h2>
+                </div>
+                
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message bot-message">
+                        Hello! I'm your companion chatbot. How are you feeling today?
+                    </div>
+                    <div class="message user-message">
+                        I'm doing well, thank you for asking.
+                    </div>
+                    <div class="message bot-message">
+                        I'm glad to hear that! Would you like to play a game or talk about something you're interested in?
                     </div>
                 </div>
-            </div>
-            <div class="chat-input-container">
-                <input type="text" class="chat-input" id="chatInput" placeholder="请输入您想说的话...">
-                <button class="send-button" onclick="sendMessage()">发送</button>
+                
+                <div class="input-area">
+                    <input type="text" id="messageInput" placeholder="Type your message..." aria-label="Type message">
+                    <button class="btn voice-btn" id="voiceBtn" aria-label="Voice input">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <button class="btn btn-primary" id="sendBtn">
+                        <i class="fas fa-paper-plane"></i> Send
+                    </button>
+                </div>
+            </section>
+            
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <!-- User Info/Login -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-user"></i>
+                        <h3>User Information</h3>
+                    </div>
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <div>
+                            <p>John Smith</p>
+                            <p>Logged In</p>
+                        </div>
+                    </div>
+                    <div class="login-section">
+                        <button class="btn btn-secondary">
+                            <i class="fas fa-cog"></i> Preferences
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Memory Games -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-brain"></i>
+                        <h3>Memory Games</h3>
+                    </div>
+                    <div class="game-options">
+                        <button class="game-btn">
+                            <i class="fas fa-question-circle"></i> General Knowledge Quiz
+                        </button>
+                        <button class="game-btn">
+                            <i class="fas fa-puzzle-piece"></i> Word Recall
+                        </button>
+                        <button class="game-btn">
+                            <i class="fas fa-history"></i> Memory Training
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Wellness Reminders -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-bell"></i>
+                        <h3>Wellness Reminders</h3>
+                    </div>
+                    <div class="reminder-list">
+                        <div class="reminder-item">
+                            <i class="fas fa-pills"></i>
+                            <span>10:00 AM - Take blood pressure medication</span>
+                        </div>
+                        <div class="reminder-item">
+                            <i class="fas fa-walking"></i>
+                            <span>3:00 PM - 30-minute walk</span>
+                        </div>
+                        <div class="reminder-item">
+                            <i class="fas fa-utensils"></i>
+                            <span>6:30 PM - Dinner time</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" style="margin-top: 15px;">
+                        <i class="fas fa-plus"></i> Add Reminder
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- 语音交互按钮 -->
-    <button class="voice-button" id="voiceButton" onclick="toggleVoiceRecognition()">
-        <i class="fas fa-microphone"></i>
-    </button>
-
-    <!-- 页脚 -->
     <footer>
-        <p>© 2025 关怀老人助手 | 关爱老年人，从这里开始</p>
+        <div class="container">
+            <p>Elderly Companion Chatbot &copy; 2023 - Supporting Senior Well-being</p>
+        </div>
     </footer>
-
-    <!-- 登录模态框 -->
-    <div class="modal-overlay" id="loginModal">
-        <div class="modal-content">
-            <span class="close-modal" onclick="closeLoginModal()">&times;</span>
-            <h2 class="modal-title">用户登录</h2>
-            <div class="form-group">
-                <label for="loginUsername">用户名</label>
-                <input type="text" id="loginUsername" class="form-control" placeholder="请输入用户名">
-            </div>
-            <div class="form-group">
-                <label for="loginPassword">密码</label>
-                <input type="password" id="loginPassword" class="form-control" placeholder="请输入密码">
-            </div>
-            <button class="login-button" onclick="performLogin()" style="width: 100%;">登录</button>
-        </div>
-    </div>
-
-    <!-- 注册模态框 -->
-    <div class="modal-overlay" id="registerModal">
-        <div class="modal-content">
-            <span class="close-modal" onclick="closeRegisterModal()">&times;</span>
-            <h2 class="modal-title">用户注册</h2>
-            <div class="form-group">
-                <label for="registerName">姓名</label>
-                <input type="text" id="registerName" class="form-control" placeholder="请输入您的姓名">
-            </div>
-            <div class="form-group">
-                <label for="registerAge">年龄</label>
-                <input type="number" id="registerAge" class="form-control" placeholder="请输入您的年龄">
-            </div>
-            <div class="form-group">
-                <label for="registerUsername">用户名</label>
-                <input type="text" id="registerUsername" class="form-control" placeholder="请设置用户名">
-            </div>
-            <div class="form-group">
-                <label for="registerPassword">密码</label>
-                <input type="password" id="registerPassword" class="form-control" placeholder="请设置密码">
-            </div>
-            <div class="form-group">
-                <label for="registerMedical">健康状况</label>
-                <textarea id="registerMedical" class="form-control" placeholder="请简要描述您的健康状况（可选）" rows="3"></textarea>
-            </div>
-            <button class="login-button" onclick="performRegister()" style="width: 100%;">注册</button>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxMv+D2scQbITxI"
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI"
         crossorigin="anonymous"></script>
-
     <script>
-        // 用户状态管理
-        let currentUser = null;
-        let isListening = false;
+$(document).ready(function() {
+        // Handle form submission
+        $('#messageArea').on('submit', function(event) {
+            event.preventDefault();
+            var user_input = $('#text').val().trim();
+            if (user_input === '') return;
 
-        // 页面加载时检查用户登录状态
-        document.addEventListener('DOMContentLoaded', function () {
-            checkLoginStatus();
+            // Get current time
+            var time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            // User message HTML (from README.md)
+            var userHtml = '<div class="d-flex justify-content-end mb-4"><div class="msg_cotainer_send">' + user_input + '<span class="msg_time_send">' + time + '</span></div><div class="img_cont_msg"><img src="https://i.ibb.co/d5b84Xw/Untitled-design.png" class="rounded-circle user_img_msg"></div></div>';
+
+            // Append user message and clear input
+            $('#messageFormeight').append(userHtml);
+            $('#text').val('');
+            $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
+
+            // Send AJAX request to backend
+            $.ajax({
+                type: 'POST',
+                url: '/get_response',
+                data: { msg: user_input },
+                success: function(data) {
+                    var bot_response = data.response;
+
+                    // Bot message HTML (from README.md)
+                    var botHtml = '<div class="d-flex justify-content-start mb-4"><div class="img_cont_msg"><img src="https://i.ibb.co/fSNP7Rz/icons8-chatgpt-512.png" class="rounded-circle user_img_msg"></div><div class="msg_cotainer">' + bot_response + '<span class="msg_time">' + time + '</span></div></div>';
+
+                    // Append bot response
+                    $('#messageFormeight').append(botHtml);
+                    $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
+                },
+                error: function() {
+                    alert('Error getting response from bot.');
+                }
+            });
         });
-
-        // 检查登录状态
-        function checkLoginStatus() {
-            // 这里应该从本地存储或服务器检查登录状态
-            const savedUser = localStorage.getItem('currentUser');
-            if (savedUser) {
-                currentUser = JSON.parse(savedUser);
-                showUserInfo();
-            }
-        }
-
-        // 显示用户信息
-        function showUserInfo() {
-            document.getElementById('userInfo').style.display = 'block';
-            document.getElementById('loginSection').style.display = 'none';
-            document.getElementById('userName').textContent = currentUser.name;
-        }
-
-        // 隐藏用户信息
-        function hideUserInfo() {
-            document.getElementById('userInfo').style.display = 'none';
-            document.getElementById('loginSection').style.display = 'block';
-        }
-
-        // 导航函数
-        function navigateToChat() {
-            if (!currentUser) {
-                alert('请先登录再使用聊天功能');
-                showLoginModal();
-                return;
-            }
-            document.getElementById('mainFeatures').style.display = 'none';
-            document.getElementById('userInfo').style.display = 'none';
-            document.getElementById('chatContainer').style.display = 'flex';
-        }
-
-        function navigateToMemoryGame() {
-            if (!currentUser) {
-                alert('请先登录再使用游戏功能');
-                showLoginModal();
-                return;
-            }
-            alert("记忆游戏功能开发中...");
-            // window.location.href = "game.html";
-        }
-
-        function navigateToHealthReminders() {
-            if (!currentUser) {
-                alert('请先登录再使用健康提醒功能');
-                showLoginModal();
-                return;
-            }
-            // 修改为实际的文件名
-            window.location.href = "reminder.html"; // 或者您实际的文件名
-        }
-
-        // 返回主界面
-        function backToMain() {
-            document.getElementById('chatContainer').style.display = 'none';
-            document.getElementById('mainFeatures').style.display = 'grid';
-            if (currentUser) {
-                document.getElementById('userInfo').style.display = 'block';
-            }
-        }
-
-        // 登录和注册模态框功能
-        function showLoginModal() {
-            document.getElementById('loginModal').style.display = 'flex';
-        }
-
-        function closeLoginModal() {
-            document.getElementById('loginModal').style.display = 'none';
-        }
-
-        function showRegisterModal() {
-            document.getElementById('registerModal').style.display = 'flex';
-        }
-
-        function closeRegisterModal() {
-            document.getElementById('registerModal').style.display = 'none';
-        }
-
-        // 执行登录
-        function performLogin() {
-            const username = document.getElementById('loginUsername').value;
-            const password = document.getElementById('loginPassword').value;
-
-            if (!username || !password) {
-                alert('请输入用户名和密码');
-                return;
-            }
-
-            // 模拟登录成功
-            currentUser = {
-                id: 'user_' + Date.now(),
-                name: username,
-                age: 65
-            };
-
-            localStorage.setItem('currentUser', JSON.stringify(currentUser));
-            closeLoginModal();
-            showUserInfo();
-            alert('登录成功！');
-        }
-
-        // 执行注册
-        function performRegister() {
-            const name = document.getElementById('registerName').value;
-            const age = document.getElementById('registerAge').value;
-            const username = document.getElementById('registerUsername').value;
-            const password = document.getElementById('registerPassword').value;
-
-            if (!name || !age || !username || !password) {
-                alert('请填写所有必填字段');
-                return;
-            }
-
-            // 模拟注册成功
-            currentUser = {
-                id: 'user_' + Date.now(),
-                name: name,
-                age: parseInt(age),
-                medical: document.getElementById('registerMedical').value
-            };
-
-            localStorage.setItem('currentUser', JSON.stringify(currentUser));
-            closeRegisterModal();
-            showUserInfo();
-            alert('注册成功！');
-        }
-
-        // 退出登录
-        function logout() {
-            currentUser = null;
-            localStorage.removeItem('currentUser');
-            hideUserInfo();
-            alert('已退出登录');
-        }
-
-        // 语音交互功能
-        function toggleVoiceRecognition() {
-            if (!currentUser) {
-                alert('请先登录再使用语音功能');
-                showLoginModal();
-                return;
-            }
-
-            const voiceButton = document.getElementById('voiceButton');
-
-            if (!isListening) {
-                // 开始语音识别
-                isListening = true;
-                voiceButton.classList.add('listening');
-                voiceButton.innerHTML = '<i class="fas fa-stop"></i>';
-
-                // 这里应该调用语音识别API
-                alert("语音识别已启动，请开始说话...");
-
-                // 模拟语音识别结果
-                setTimeout(() => {
-                    const simulatedText = "今天我感觉很好，想聊聊天";
-                    document.getElementById('chatInput').value = simulatedText;
-                    addMessage(simulatedText, 'user');
-                    getBotResponse(simulatedText);
-                    stopVoiceRecognition();
-                }, 3000);
-
-            } else {
-                stopVoiceRecognition();
-            }
-        }
-
-        function stopVoiceRecognition() {
-            isListening = false;
-            const voiceButton = document.getElementById('voiceButton');
-            voiceButton.classList.remove('listening');
-            voiceButton.innerHTML = '<i class="fas fa-microphone"></i>';
-        }
-
-        // 聊天功能
-        function sendMessage() {
-            const input = document.getElementById('chatInput');
-            const message = input.value.trim();
-
-            if (message === '') return;
-
-            addMessage(message, 'user');
-            input.value = '';
-
-            getBotResponse(message);
-        }
-
-        function addMessage(text, sender) {
-            const messagesContainer = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender}-message`;
-
-            const bubbleDiv = document.createElement('div');
-            bubbleDiv.className = 'message-bubble';
-            bubbleDiv.textContent = text;
-
-            messageDiv.appendChild(bubbleDiv);
-            messagesContainer.appendChild(messageDiv);
-
-            // 滚动到底部
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
-
-        function getBotResponse(userMessage) {
-            // 模拟AI响应
-            const responses = [
-                "听起来很不错！您今天有什么特别想聊的吗？",
-                "我理解您的感受。老年人生活中有时候会感到孤独，我很高兴能和您聊天。",
-                "您的健康是我最关心的。最近睡眠怎么样？",
-                "如果您需要，我可以提醒您服药或者做一些简单的运动。",
-                "您有没有什么兴趣爱好？我们可以聊聊您喜欢的事情。",
-                "记住，保持积极的心态对健康非常重要。您今天笑了吗？"
-            ];
-
-            // 根据用户消息选择响应
-            let response;
-            if (userMessage.includes('感觉') || userMessage.includes('心情')) {
-                response = "我理解您的感受。老年人生活中有时候会感到孤独，我很高兴能和您聊天。";
-            } else if (userMessage.includes('健康') || userMessage.includes('身体')) {
-                response = "您的健康是我最关心的。最近睡眠怎么样？";
-            } else if (userMessage.includes('药') || userMessage.includes('吃药')) {
-                response = "如果您需要，我可以提醒您服药或者做一些简单的运动。";
-            } else {
-                // 随机选择响应
-                response = responses[Math.floor(Math.random() * responses.length)];
-            }
-
-            // 模拟网络延迟
-            setTimeout(() => {
-                addMessage(response, 'bot');
-            }, 1000);
-        }
-
-        // 回车键发送消息
-        document.getElementById('chatInput').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-
-        // 点击模态框外部关闭
-        window.addEventListener('click', function (e) {
-            if (e.target === document.getElementById('loginModal')) {
-                closeLoginModal();
-            }
-            if (e.target === document.getElementById('registerModal')) {
-                closeRegisterModal();
-            }
-        });
+    });
     </script>
 </body>
-
 </html>
