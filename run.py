@@ -17,7 +17,7 @@ chat_history_ids = None
 
 # Vosk models (adjust paths if needed)
 EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
-CN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-cn-0.22')
+
 
 # Load English model by default (you can add a param to switch languages later)
 vosk_model = Model(EN_MODEL_PATH)
