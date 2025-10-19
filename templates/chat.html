@@ -1,22 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Elderly Companion Chatbot</title>
-    
+
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    
+
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-   
+
 </head>
+
 <body>
     <div class="container-fluid h-100">
-        <div class="row justify-content-center h-100">		
+        <div class="row justify-content-center h-100">
             <div class="col-md-10 col-xl-8 chat">
                 <div class="card">
                     <!-- Chat Header -->
@@ -29,7 +31,7 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Chat Body -->
                     <div id="messageFormeight" class="card-body msg_card_body">
                         <!-- Initial welcome message -->
@@ -41,11 +43,15 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Chat Footer -->
                     <div class="card-footer">
                         <form id="messageArea" class="d-flex">
-                            <input type="text" id="text" name="msg" placeholder="Type your message..." autocomplete="off" class="form-control type_msg" required>
+                            <input type="text" id="text" name="msg" placeholder="Type your message..."
+                                autocomplete="off" class="form-control type_msg" required>
+                            <button type="button" id="micBtn" class="send_btn mic-btn">
+                                <i class="fas fa-microphone"></i>
+                            </button>
                             <button type="submit" id="send" class="send_btn">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
@@ -58,18 +64,18 @@
 
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    
+
     <!-- Bootstrap 5 JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        $(document).ready(function() {
+        $(document).ready(function () {
             // Set current time for initial message
             const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             $('#currentTime').text(currentTime);
-            
+
             // Handle form submission
-            $('#messageArea').on('submit', function(event) {
+            $('#messageArea').on('submit', function (event) {
                 event.preventDefault();
                 const user_input = $('#text').val().trim();
                 if (user_input === '') return;
@@ -116,10 +122,10 @@
                     type: 'POST',
                     url: '/get_response',
                     data: { msg: user_input },
-                    success: function(data) {
+                    success: function (data) {
                         // Remove typing indicator
                         $('.typing-indicator').parent().parent().remove();
-                        
+
                         const bot_response = data.response;
 
                         // Bot message HTML
@@ -136,12 +142,12 @@
                         $('#messageFormeight').append(botHtml);
                         $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
                     },
-                    error: function(xhr, status, error) {
+                    error: function (xhr, status, error) {
                         // Remove typing indicator
                         $('.typing-indicator').parent().parent().remove();
-                        
+
                         console.error("Error getting response:", error);
-                        
+
                         // Error message HTML
                         const errorHtml = `
                             <div class="d-flex justify-content-start mb-4">
@@ -152,16 +158,91 @@
                                 </div>
                             </div>
                         `;
-                        
+
                         $('#messageFormeight').append(errorHtml);
                         $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
                     }
                 });
             });
-            
+
             // Auto-focus on input when page loads
             $('#text').focus();
         });
+
+
+
+
+        // Voice recording variables
+        let recorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // Mic button handler
+        $('#micBtn').on('click', function () {
+            if (!isRecording) {
+                // Start recording
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        recorder = new MediaRecorder(stream);
+                        recorder.start();
+                        audioChunks = [];
+                        isRecording = true;
+                        $('#micBtn').addClass('recording');
+                        recorder.ondataavailable = e => audioChunks.push(e.data);
+
+                        // Auto-stop after 10 seconds (adjust as needed)
+                        setTimeout(() => {
+                            if (isRecording) stopRecording();
+                        }, 10000);
+                    })
+                    .catch(err => {
+                        console.error('Mic access error:', err);
+                        alert('Please allow microphone access.');
+                    });
+            } else {
+                // Stop recording
+                stopRecording();
+            }
+        });
+
+        function stopRecording() {
+            recorder.stop();
+            isRecording = false;
+            $('#micBtn').removeClass('recording');
+            recorder.onstop = () => {
+                const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                sendAudio(blob);
+            };
+        }
+
+        function sendAudio(blob) {
+            const formData = new FormData();
+            formData.append('audio', blob, 'recording.webm');
+            // formData.append('lang', 'en');  // Or 'cn' if toggled
+
+            $.ajax({
+                type: 'POST',
+                url: '/transcribe',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function (data) {
+                    if (data.text) {
+                        $('#text').val(data.text);  // Put in input for review
+                        $('#messageArea').submit();  // Auto-send to bot
+                    } else {
+                        alert('No speech detected. Try again.');
+                    }
+                },
+                error: function () {
+                    alert('Error transcribing audio.');
+                }
+            });
+        }
+
     </script>
+
+
 </body>
+
 </html>

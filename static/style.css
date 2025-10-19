@@ -189,3 +189,10 @@
                 max-width: 85%;
             }
         }
+
+
+        /* voice */
+        .mic-btn.recording {
+            background-color: #ff0000;
+            /* Red when recording */
+        }
