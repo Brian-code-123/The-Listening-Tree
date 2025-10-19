@@ -10,7 +10,8 @@
             --box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
 
-        body, html {
+        body,
+        html {
             height: 100%;
             margin: 0;
             background: #7F7FD5;
@@ -105,7 +106,7 @@
             padding: 12px 20px;
             position: relative;
             max-width: 70%;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
         .msg_cotainer_send {
@@ -118,7 +119,7 @@
             padding: 12px 20px;
             position: relative;
             max-width: 70%;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
         .msg_time {
@@ -182,9 +183,9 @@
             .card {
                 height: 500px;
             }
-            
-            .msg_cotainer, .msg_cotainer_send {
+
+            .msg_cotainer,
+            .msg_cotainer_send {
                 max-width: 85%;
             }
         }
-  

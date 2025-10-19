@@ -11,7 +11,7 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <link rel='stylesheet' href='../stylesheets/style.css' />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
    
 </head>
 <body>
@@ -22,10 +22,7 @@
                     <!-- Chat Header -->
                     <div class="card-header msg_head">
                         <div class="d-flex bd-highlight">
-                            <div class="img_cont">
-                                <img src="https://i.ibb.co/fSNP7Rz/icons8-chatgpt-512.png" class="rounded-circle user_img">
-                                <span class="online_icon"></span>
-                            </div>
+                            <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
                             <div class="user_info ms-3">
                                 <span>Elderly Companion Chatbot</span>
                                 <p>Your friendly AI companion</p>
@@ -37,9 +34,7 @@
                     <div id="messageFormeight" class="card-body msg_card_body">
                         <!-- Initial welcome message -->
                         <div class="d-flex justify-content-start mb-4">
-                            <div class="img_cont_msg">
-                                <img src="https://i.ibb.co/fSNP7Rz/icons8-chatgpt-512.png" class="rounded-circle user_img_msg">
-                            </div>
+                            <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
                             <div class="msg_cotainer">
                                 Hello! I'm your companion chatbot. How are you feeling today?
                                 <span class="msg_time" id="currentTime"></span>
@@ -102,9 +97,7 @@
                 // Show typing indicator
                 const typingHtml = `
                     <div class="d-flex justify-content-start mb-4">
-                        <div class="img_cont_msg">
-                            <img src="https://i.ibb.co/fSNP7Rz/icons8-chatgpt-512.png" class="rounded-circle user_img_msg">
-                        </div>
+                        <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
                         <div class="msg_cotainer">
                             <div class="typing-indicator">
                                 <span></span>
@@ -132,9 +125,7 @@
                         // Bot message HTML
                         const botHtml = `
                             <div class="d-flex justify-content-start mb-4">
-                                <div class="img_cont_msg">
-                                    <img src="https://i.ibb.co/fSNP7Rz/icons8-chatgpt-512.png" class="rounded-circle user_img_msg">
-                                </div>
+                                <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
                                 <div class="msg_cotainer">${bot_response}
                                     <span class="msg_time">${time}</span>
                                 </div>
@@ -154,9 +145,7 @@
                         // Error message HTML
                         const errorHtml = `
                             <div class="d-flex justify-content-start mb-4">
-                                <div class="img_cont_msg">
-                                    <img src="https://i.ibb.co/fSNP7Rz/icons8-chatgpt-512.png" class="rounded-circle user_img_msg">
-                                </div>
+                                <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
                                 <div class="msg_cotainer">
                                     I'm having trouble connecting right now. Please try again in a moment.
                                     <span class="msg_time">${time}</span>
