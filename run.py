@@ -1,12 +1,8 @@
 from flask import Flask, render_template, request, jsonify
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
-import os
 
-# 获取 index.html 所在的目录路径
-template_dir = '../public'
-
-app = Flask(__name__, template_folder=template_dir)
+app = Flask(__name__)
 
 # Load the pre-trained DialoGPT model and tokenizer
 model_name = "microsoft/DialoGPT-medium"
@@ -18,7 +14,7 @@ chat_history_ids = None
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('chat.html')
 
 @app.route('/get_response', methods=['POST'])
 def get_response():
