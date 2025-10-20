@@ -35,14 +35,9 @@ def transcribe():
         return jsonify({'error': 'No audio file provided'}), 400
 
     audio_file = request.files['audio']
-    # Language param (optional; default 'en')
-    lang = request.form.get('lang', 'en')
 
-    # Select model based on lang
-    if lang == 'cn':
-        vosk_model = Model(CN_MODEL_PATH)
-    else:
-        vosk_model = Model(EN_MODEL_PATH)
+    # No lang check needed; always use English
+    vosk_model = Model(EN_MODEL_PATH)  # Or keep the global if you move loading outside
 
     # Convert WebM/Opus to WAV using pydub (in-memory to avoid temp files)
     audio = AudioSegment.from_file(io.BytesIO(audio_file.read()), format="webm")
