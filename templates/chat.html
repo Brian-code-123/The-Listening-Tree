@@ -37,6 +37,9 @@
                             <button type="button" id="micBtn" class="send_btn mic-btn">
                                 <i class="fas fa-microphone"></i>
                             </button>
+                            <button type="button" id="stopBtn" class="send_btn stop-btn d-none">
+                                <i class="fas fa-stop"></i>
+                            </button>
                             <button type="submit" id="send" class="send_btn">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
@@ -48,7 +51,20 @@
             <div class="col-md-2">
                 <div class="card h-100" id="notificationPanel">
                     <div class="card-header">Reminders</div>
-                    <div class="card-body" id="reminderList"></div>
+                    <div class="card-body">
+                        <form id="reminderForm">
+                            <div class="mb-3">
+                                <label for="reminderLabel" class="form-label">Reminder</label>
+                                <input type="text" class="form-control" id="reminderLabel" placeholder="e.g., walk" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="reminderTime" class="form-label">Time (HH:MM)</label>
+                                <input type="time" class="form-control" id="reminderTime" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100">Set Reminder</button>
+                        </form>
+                        <div id="reminderList"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -133,7 +149,7 @@
 
             $('#text').focus();
 
-            // Voice recording
+            // Voice recording with manual control and stop button
             let recorder, audioChunks = [], isRecording = false;
             $('#micBtn').on('click', function () {
                 if (!isRecording) {
@@ -144,8 +160,8 @@
                             audioChunks = [];
                             isRecording = true;
                             $('#micBtn').addClass('recording');
+                            $('#stopBtn').removeClass('d-none');
                             recorder.ondataavailable = e => audioChunks.push(e.data);
-                            setTimeout(() => { if (isRecording) stopRecording(); }, 10000);
                         })
                         .catch(err => {
                             console.error('Mic access error:', err);
@@ -156,14 +172,21 @@
                 }
             });
 
+            $('#stopBtn').on('click', function () {
+                stopRecording();
+            });
+
             function stopRecording() {
-                recorder.stop();
-                isRecording = false;
-                $('#micBtn').removeClass('recording');
-                recorder.onstop = () => {
-                    const blob = new Blob(audioChunks, { type: 'audio/webm' });
-                    sendAudio(blob);
-                };
+                if (recorder && isRecording) {
+                    recorder.stop();
+                    isRecording = false;
+                    $('#micBtn').removeClass('recording');
+                    $('#stopBtn').addClass('d-none');
+                    recorder.onstop = () => {
+                        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                        sendAudio(blob);
+                    };
+                }
             }
 
             function sendAudio(blob) {
@@ -191,19 +214,39 @@
 
             // Notification handling
             function checkReminders() {
-                $.get('/get_reminders', function(data) {
+                $.get('/get_reminders', function (data) {
                     $('#reminderList').empty();
                     data.reminders.forEach(reminder => {
-                        $('#reminderList').append(`<div>${reminder.label} at ${reminder.time}</div>`);
+                        $('#reminderList').append(`
+                            <div class="reminder-item">
+                                ${reminder.label} at ${reminder.time}
+                                <button class="btn btn-danger btn-sm float-end delete-reminder" data-label="${reminder.label}">Delete</button>
+                            </div>
+                        `);
+                    });
+                    $('.delete-reminder').on('click', function () {
+                        const label = $(this).data('label');
+                        $.ajax({
+                            type: 'POST',
+                            url: '/get_response',
+                            data: { msg: `delete reminder ${label}` },
+                            success: function (data) {
+                                alert(data.response);
+                                checkReminders(); // Refresh list
+                            },
+                            error: function () {
+                                alert('Error deleting reminder.');
+                            }
+                        });
                     });
                 });
                 setTimeout(checkReminders, 60000); // Check every minute
             }
             checkReminders();
 
-            // Audio/popup alert (simulated; needs server push for real-time)
+            // Audio/popup alert
             setInterval(() => {
-                $.get('/get_reminders', function(data) {
+                $.get('/get_reminders', function (data) {
                     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     data.reminders.forEach(reminder => {
                         if (reminder.time === now && reminder.active) {
@@ -214,6 +257,28 @@
                     });
                 });
             }, 60000);
+
+            $('#reminderForm').on('submit', function (event) {
+                event.preventDefault();
+                const label = $('#reminderLabel').val().trim();
+                const time = $('#reminderTime').val();
+                if (label && time) {
+                    $.ajax({
+                        type: 'POST',
+                        url: '/get_response',
+                        data: { msg: `set reminder ${label} ${time}` },
+                        success: function (data) {
+                            $('#reminderLabel').val('');
+                            $('#reminderTime').val('');
+                            alert(data.response);
+                            checkReminders(); // Refresh list immediately
+                        },
+                        error: function () {
+                            alert('Error setting reminder.');
+                        }
+                    });
+                }
+            });
         });
     </script>
 </body>

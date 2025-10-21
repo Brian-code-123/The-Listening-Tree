@@ -197,6 +197,8 @@
             /* Red when recording */
         }
 
+        .stop-btn { background-color: #dc3545; }  /* Red for stop */
+
 
         /* notification */
         #notificationPanel {
@@ -210,6 +212,19 @@
             padding: 5px;
             background: #f0f0f0;
             margin-bottom: 5px;
+        }
+
+        .mic-btn.recording {
+            background-color: #ff0000;
+        }
+
+        /* reminder */
+        .reminder-item {
+            margin-bottom: 10px;
+        }
+
+        .delete-reminder {
+            margin-left: 10px;
         }
 
         .mic-btn.recording {

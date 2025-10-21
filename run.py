@@ -11,7 +11,6 @@ from datetime import datetime
 import threading
 from playsound import playsound
 
-
 app = Flask(__name__)
 
 # Load models
@@ -56,12 +55,9 @@ def check_reminders():
         current_time = datetime.now().strftime('%H:%M')
         for label, time in reminders:
             if time == current_time:
-                # Trigger notification (simulated here; will be handled by JS)
-                with open('static/notification.mp3', 'wb') as f:
-                    f.write(b'')  # Placeholder; replace with actual audio file
-                print(f"Reminder: {label} at {time}")
+                print(f"Reminder: {label} at {time}")  # JS handles alert/audio
         conn.close()
-        import time; time.sleep(60)  # Check every minute
+        import time; time.sleep(60)
 
 threading.Thread(target=check_reminders, daemon=True).start()
 
@@ -103,19 +99,31 @@ def get_response():
             is_game_mode = False
             return jsonify({'response': "Game error. Returning to chat mode."})
 
-    # Reminder setup (e.g., "set reminder walk 14:00")
     if user_input.startswith("set reminder"):
         parts = user_input.split()
-        if len(parts) >= 4 and parts[2].isdigit() and len(parts[3]) == 5 and parts[3][2] == ':':
-            label = ' '.join(parts[2:-1])
+        if len(parts) > 3:
             time = parts[-1]
+            if len(time) == 5 and time[2] == ':' and time[:2].isdigit() and time[3:].isdigit() and 0 <= int(time[:2]) <= 23 and 0 <= int(time[3:]) <= 59:
+                label = ' '.join(parts[2:-1])
+                conn = sqlite3.connect('reminders.db')
+                c = conn.cursor()
+                c.execute("INSERT INTO reminders (label, time, active) VALUES (?, ?, 1)", (label, time))
+                conn.commit()
+                conn.close()
+                return jsonify({'response': f"Reminder set for {label} at {time}"})
+        return jsonify({'response': "Invalid format. Use: set reminder [label] [HH:MM] (e.g., set reminder walk 14:00)"})
+
+    if user_input.startswith("delete reminder"):
+        parts = user_input.split()
+        if len(parts) > 2:
+            label = ' '.join(parts[2:])
             conn = sqlite3.connect('reminders.db')
             c = conn.cursor()
-            c.execute("INSERT INTO reminders (label, time, active) VALUES (?, ?, 1)", (label, time))
+            c.execute("DELETE FROM reminders WHERE label = ? AND active = 1", (label,))
             conn.commit()
             conn.close()
-            return jsonify({'response': f"Reminder set for {label} at {time}"})
-        return jsonify({'response': "Invalid format. Use: set reminder [label] [HH:MM] (e.g., set reminder walk 14:00)"})
+            return jsonify({'response': f"Deleted reminder for {label}" if c.rowcount > 0 else "No matching reminder found"})
+        return jsonify({'response': "Invalid format. Use: delete reminder [label] (e.g., delete reminder walk)"})
 
     new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
     bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids], dim=-1) if chat_history_ids is not None else new_user_input_ids
@@ -136,7 +144,6 @@ def transcribe():
         return jsonify({'error': 'No audio file provided'}), 400
 
     audio_file = request.files['audio']
-    vosk_model = Model(EN_MODEL_PATH)
 
     audio = AudioSegment.from_file(io.BytesIO(audio_file.read()), format="webm")
     wav_data = audio.set_frame_rate(16000).set_sample_width(2).set_channels(1).export(format="wav").read()
@@ -150,7 +157,6 @@ def transcribe():
         return jsonify({'error': 'No speech detected'}), 400
 
     return jsonify({'text': text})
-
 
 @app.route('/get_reminders', methods=['GET'])
 def get_reminders():
