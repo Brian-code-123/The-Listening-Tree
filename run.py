@@ -11,6 +11,7 @@ from datetime import datetime
 import threading
 from playsound import playsound
 
+
 app = Flask(__name__)
 
 # Load models
