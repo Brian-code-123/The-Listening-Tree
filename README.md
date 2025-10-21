@@ -8,6 +8,8 @@ pip install -r requirements.txt
 
 python run.py
 
+git pull origin main
+
 Project Title:	Companion Chatbot for Reducing Loneliness in Elderly Populations 
 
 Objective: 
