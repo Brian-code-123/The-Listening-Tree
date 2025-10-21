@@ -5,21 +5,23 @@ import os
 from vosk import Model, KaldiRecognizer
 import json
 from pydub import AudioSegment
-import io  # For in-memory processing
+import io
+import sqlite3
+from datetime import datetime
+import threading
+from playsound import playsound
 
 app = Flask(__name__)
 
-# Load DialoGPT
+# Load models
 model_name = "microsoft/DialoGPT-medium"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 chat_history_ids = None
-
-# Vosk models
 EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
 vosk_model = Model(EN_MODEL_PATH)
 
-# Game state and questions
+# Game state
 is_game_mode = False
 current_question = None
 correct_answer = None
@@ -30,6 +32,38 @@ questions = [
 ]
 current_index = 0
 
+# SQLite setup
+def init_db():
+    conn = sqlite3.connect('reminders.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS reminders 
+                 (id INTEGER PRIMARY KEY, label TEXT, time TEXT, active INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS preferences 
+                 (id INTEGER PRIMARY KEY, user_id TEXT, key TEXT, value TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# Check reminders in a separate thread
+def check_reminders():
+    while True:
+        conn = sqlite3.connect('reminders.db')
+        c = conn.cursor()
+        c.execute("SELECT label, time FROM reminders WHERE active = 1")
+        reminders = c.fetchall()
+        current_time = datetime.now().strftime('%H:%M')
+        for label, time in reminders:
+            if time == current_time:
+                # Trigger notification (simulated here; will be handled by JS)
+                with open('static/notification.mp3', 'wb') as f:
+                    f.write(b'')  # Placeholder; replace with actual audio file
+                print(f"Reminder: {label} at {time}")
+        conn.close()
+        import time; time.sleep(60)  # Check every minute
+
+threading.Thread(target=check_reminders, daemon=True).start()
+
 @app.route('/')
 def index():
     return render_template('chat.html')
@@ -39,7 +73,6 @@ def get_response():
     global chat_history_ids, is_game_mode, current_question, correct_answer, current_index
     user_input = request.form['msg'].lower().strip()
 
-    # Game mode handling
     if user_input == "play game" and not is_game_mode:
         is_game_mode = True
         current_index = 0
@@ -64,12 +97,25 @@ def get_response():
                 correct_answer = questions[current_index]["answer"]
                 return jsonify({'response': f"Correct! Next question: {current_question}"})
             else:
-                return jsonify({'response': f"Nope, that's not it. Try again: {current_question} (Hint: The answer is {correct_answer})"})
+                return jsonify({'response': f"Nope, that's not it. Try again: {current_question}"})
         else:
             is_game_mode = False
             return jsonify({'response': "Game error. Returning to chat mode."})
 
-    # Normal chat mode
+    # Reminder setup (e.g., "set reminder walk 14:00")
+    if user_input.startswith("set reminder"):
+        parts = user_input.split()
+        if len(parts) >= 4 and parts[2].isdigit() and len(parts[3]) == 5 and parts[3][2] == ':':
+            label = ' '.join(parts[2:-1])
+            time = parts[-1]
+            conn = sqlite3.connect('reminders.db')
+            c = conn.cursor()
+            c.execute("INSERT INTO reminders (label, time, active) VALUES (?, ?, 1)", (label, time))
+            conn.commit()
+            conn.close()
+            return jsonify({'response': f"Reminder set for {label} at {time}"})
+        return jsonify({'response': "Invalid format. Use: set reminder [label] [HH:MM] (e.g., set reminder walk 14:00)"})
+
     new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
     bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids], dim=-1) if chat_history_ids is not None else new_user_input_ids
     chat_history_ids = model.generate(
@@ -89,7 +135,7 @@ def transcribe():
         return jsonify({'error': 'No audio file provided'}), 400
 
     audio_file = request.files['audio']
-    vosk_model = Model(EN_MODEL_PATH)  # Reload each time (or move to global for efficiency)
+    vosk_model = Model(EN_MODEL_PATH)
 
     audio = AudioSegment.from_file(io.BytesIO(audio_file.read()), format="webm")
     wav_data = audio.set_frame_rate(16000).set_sample_width(2).set_channels(1).export(format="wav").read()
@@ -103,6 +149,16 @@ def transcribe():
         return jsonify({'error': 'No speech detected'}), 400
 
     return jsonify({'text': text})
+
+
+@app.route('/get_reminders', methods=['GET'])
+def get_reminders():
+    conn = sqlite3.connect('reminders.db')
+    c = conn.cursor()
+    c.execute("SELECT label, time, active FROM reminders WHERE active = 1")
+    reminders = [{"label": row[0], "time": row[1], "active": bool(row[2])} for row in c.fetchall()]
+    conn.close()
+    return jsonify({'reminders': reminders})
 
 if __name__ == '__main__':
     app.run(debug=True)

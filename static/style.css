@@ -196,3 +196,22 @@
             background-color: #ff0000;
             /* Red when recording */
         }
+
+
+        /* notification */
+        #notificationPanel {
+            position: fixed;
+            right: 10px;
+            top: 10px;
+            width: 200px;
+        }
+
+        #reminderList div {
+            padding: 5px;
+            background: #f0f0f0;
+            margin-bottom: 5px;
+        }
+
+        .mic-btn.recording {
+            background-color: #ff0000;
+        }
