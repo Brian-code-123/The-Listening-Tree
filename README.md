@@ -4,9 +4,10 @@ https://github.com/Brian-code-123/Companion-Chatbot-for-Reducing-Loneliness-in-E
 
 https://github.com/binary-hood/ChatBot-Starter?tab=readme-ov-file
 
-pip install -r requirements.txt
 
-python run.py
+Step 1: docker build -t elderly-companion-chatbot
+
+Step 2: Access at http://localhost:5000
 
 git pull origin main
 

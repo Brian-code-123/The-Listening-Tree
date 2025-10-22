@@ -9,7 +9,7 @@ import io
 import sqlite3
 from datetime import datetime
 import threading
-from playsound import playsound
+
 
 app = Flask(__name__)
 

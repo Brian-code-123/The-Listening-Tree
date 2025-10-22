@@ -1,6 +1,5 @@
-flask
+flask==3.0.0
 transformers
 torch
 vosk
 pydub
-playsound
