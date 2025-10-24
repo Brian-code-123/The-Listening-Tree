@@ -7,7 +7,9 @@ https://github.com/binary-hood/ChatBot-Starter?tab=readme-ov-file
 
 Step 1: docker build -t elderly-companion-chatbot
 
-Step 2: Access at http://localhost:5000
+Step 2: docker run elderly-companion-chatbot
+
+Step 3: Access at http://localhost:5000
 
 git pull origin main
 

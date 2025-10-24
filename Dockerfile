@@ -44,6 +44,8 @@ COPY --from=builder /app/voice_models /app/voice_models
 # Copy app code
 COPY . .
 
+# Expose port (assuming Flask default; adjust if needed)
 EXPOSE 5000
 
-CMD ["python run.py"]
+# Run the app
+CMD ["python", "run.py"]
