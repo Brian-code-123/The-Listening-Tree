@@ -70,35 +70,7 @@ def get_response():
     global chat_history_ids, is_game_mode, current_question, correct_answer, current_index
     user_input = request.form['msg'].lower().strip()
 
-    if user_input == "play game" and not is_game_mode:
-        is_game_mode = True
-        current_index = 0
-        current_question = questions[current_index]["question"]
-        correct_answer = questions[current_index]["answer"]
-        return jsonify({'response': f"Let's play a memory game! Here's your first question: {current_question}"})
-    
-    elif user_input == "exit game" and is_game_mode:
-        is_game_mode = False
-        current_question = None
-        correct_answer = None
-        return jsonify({'response': "Game ended. Feel free to chat with me!"})
-    
-    elif is_game_mode:
-        if current_question:
-            if user_input == correct_answer:
-                current_index = (current_index + 1) % len(questions)
-                if current_index == 0:
-                    is_game_mode = False
-                    return jsonify({'response': "Great job! You answered all questions correctly. Game over!"})
-                current_question = questions[current_index]["question"]
-                correct_answer = questions[current_index]["answer"]
-                return jsonify({'response': f"Correct! Next question: {current_question}"})
-            else:
-                return jsonify({'response': f"Nope, that's not it. Try again: {current_question}"})
-        else:
-            is_game_mode = False
-            return jsonify({'response': "Game error. Returning to chat mode."})
-
+    # Move reminder checks to the top to allow them in any mode (including game mode)
     if user_input.startswith("set reminder"):
         parts = user_input.split()
         if len(parts) > 3:
@@ -125,6 +97,37 @@ def get_response():
             return jsonify({'response': f"Deleted reminder for {label}" if c.rowcount > 0 else "No matching reminder found"})
         return jsonify({'response': "Invalid format. Use: delete reminder [label] (e.g., delete reminder walk)"})
 
+    # Original game logic (unchanged)
+    if user_input == "play game" and not is_game_mode:
+        is_game_mode = True
+        current_index = 0
+        current_question = questions[current_index]["question"]
+        correct_answer = questions[current_index]["answer"]
+        return jsonify({'response': f"Let's play a memory game! Here's your first question: {current_question}"})
+    
+    elif user_input == "exit game" and is_game_mode:
+        is_game_mode = False
+        current_question = None
+        correct_answer = None
+        return jsonify({'response': "Game ended. Feel free to chat with me!"})
+    
+    elif is_game_mode:
+        if current_question:
+            if user_input == correct_answer:
+                current_index = (current_index + 1) % len(questions)
+                if current_index == 0:
+                    is_game_mode = False
+                    return jsonify({'response': "Great job! You answered all questions correctly. Game over!"})
+                current_question = questions[current_index]["question"]
+                correct_answer = questions[current_index]["answer"]
+                return jsonify({'response': f"Correct! Next question: {current_question}"})
+            else:
+                return jsonify({'response': f"Nope, that's not it. Try again: {current_question}"})
+        # Fallback if no question (shouldn't happen)
+        is_game_mode = False
+        return jsonify({'response': "Game error. Returning to chat mode."})
+
+    # Normal chat response (unchanged)
     new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
     bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids], dim=-1) if chat_history_ids is not None else new_user_input_ids
     chat_history_ids = model.generate(
@@ -168,4 +171,4 @@ def get_reminders():
     return jsonify({'reminders': reminders})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', debug=True)
