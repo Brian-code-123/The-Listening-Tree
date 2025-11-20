@@ -20,16 +20,11 @@
                                 <span>Elderly Companion Chatbot</span>
                                 <p>Your friendly AI companion</p>
                             </div>
+                            <a href="{{ url_for('logout') }}" class="ms-auto btn btn-sm btn-danger">Logout</a>
                         </div>
                     </div>
                     <div id="messageFormeight" class="card-body msg_card_body">
-                        <div class="d-flex justify-content-start mb-4">
-                            <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
-                            <div class="msg_cotainer">
-                                Hello! I'm your companion chatbot. How are you feeling today?
-                                <span class="msg_time" id="currentTime"></span>
-                            </div>
-                        </div>
+                        <!-- Chat history will be loaded here -->
                     </div>
                     <div class="card-footer">
                         <form id="messageArea" class="d-flex">
@@ -74,8 +69,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
     $(document).ready(function () {
-        function appendMessage(sender, message) {
-            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        function appendMessage(sender, message, time) {
             const imgSrc = sender === 'bot' ? "{{ url_for('static', filename='Chatbot.png') }}" : 'https://via.placeholder.com/50?text=User';
             const justify = sender === 'bot' ? 'start' : 'end';
             const msgClass = sender === 'bot' ? 'msg_cotainer' : 'msg_cotainer_send';
@@ -92,7 +86,17 @@
             $('#messageFormeight').append(msg).scrollTop($('#messageFormeight')[0].scrollHeight);
         }
 
-        // Update time
+        // Load chat history on page load
+        function loadChatHistory() {
+            $.get('/get_chat_history', function (data) {
+                data.history.forEach(item => {
+                    appendMessage(item.sender, item.message, item.timestamp.split(' ')[1]);
+                });
+            });
+        }
+        loadChatHistory();
+
+        // Update time (unchanged)
         function updateTime() {
             const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             $('#currentTime').text(now);
@@ -100,21 +104,21 @@
         setInterval(updateTime, 60000);
         updateTime();
 
-        // Handle text input
+        // Handle text input (unchanged, but refresh reminders and history if needed)
         $('#messageArea').on('submit', function (event) {
             event.preventDefault();
             const text = $('#text').val().trim();
             if (text) {
-                appendMessage('user', text);
+                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                appendMessage('user', text, time);
                 $.ajax({
                     type: 'POST',
                     url: '/get_response',
                     data: { msg: text },
                     success: function (data) {
-                        appendMessage('bot', data.response);
+                        appendMessage('bot', data.response, time);
                         $('#text').val('');
 
-                        // NEW: Refresh reminders if this was a reminder command
                         if (text.toLowerCase().startsWith('set reminder') || text.toLowerCase().startsWith('delete reminder')) {
                             checkReminders();
                         }
@@ -126,7 +130,7 @@
             }
         });
 
-        // Voice input (unchanged, but truncated for brevity)
+        // Voice input (unchanged)
         let mediaRecorder;
         let audioChunks = [];
 
@@ -194,7 +198,7 @@
                         data: { msg: `delete reminder ${label}` },
                         success: function (data) {
                             alert(data.response);
-                            checkReminders(); // Refresh list
+                            checkReminders();
                         },
                         error: function () {
                             alert('Error deleting reminder.');
@@ -202,9 +206,9 @@
                     });
                 });
             });
-            setTimeout(checkReminders, 60000); // Check every minute
         }
         checkReminders();
+        setInterval(checkReminders, 60000);
 
         // Audio/popup alert (unchanged)
         setInterval(() => {
@@ -233,7 +237,7 @@
                         $('#reminderLabel').val('');
                         $('#reminderTime').val('');
                         alert(data.response);
-                        checkReminders(); // Refresh list immediately
+                        checkReminders();
                     },
                     error: function () {
                         alert('Error setting reminder.');
@@ -242,6 +246,6 @@
             }
         });
     });
-</script>
+    </script>
 </body>
 </html>

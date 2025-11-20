@@ -5,9 +5,9 @@ https://github.com/Brian-code-123/Companion-Chatbot-for-Reducing-Loneliness-in-E
 https://github.com/binary-hood/ChatBot-Starter?tab=readme-ov-file
 
 
-Step 1: docker build -t elderly-companion-chatbot
+Step 1: docker build -t elderly-companion-chatbot / docker build -t elderly-companion-chatbot 
 
-Step 2: docker run elderly-companion-chatbot
+Step 2: docker run -p 5000:5000 -v elderly_data:/app elderly-companion-chatbot
 
 Step 3: Access at http://localhost:5000
 
