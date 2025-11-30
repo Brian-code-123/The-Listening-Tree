@@ -14,6 +14,10 @@ import secrets
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)  # Secure random secret key for sessions
 
+# Per-user states
+user_chat_histories = {}  # {user_id: chat_history_ids tensor}
+user_game_states = {}     # {user_id: {'is_game_mode': bool, 'current_index': int, 'current_question': str, 'correct_answer': str}}
+
 # Load models
 model_name = "microsoft/DialoGPT-medium"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -21,16 +25,12 @@ model = AutoModelForCausalLM.from_pretrained(model_name)
 EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
 vosk_model = Model(EN_MODEL_PATH)
 
-# Game state (global for simplicity; per-user in production)
-is_game_mode = False
-current_question = None
-correct_answer = None
+# Questions (global, read-only)
 questions = [
     {"question": "What’s the capital of France?", "answer": "paris"},
     {"question": "What’s 2 + 2?", "answer": "4"},
     {"question": "What color is the sky on a clear day?", "answer": "blue"}
 ]
-current_index = 0
 
 # SQLite setup
 def init_db():
@@ -189,38 +189,45 @@ def get_response():
         conn.close()
         return jsonify({'response': response})
 
-    # Game logic (global state; for multi-user, store per user)
-    global is_game_mode, current_question, correct_answer, current_index
-    if user_input == "play game" and not is_game_mode:
-        is_game_mode = True
-        current_index = 0
-        current_question = questions[current_index]["question"]
-        correct_answer = questions[current_index]["answer"]
-        response = f"Let's play a memory game! Here's your first question: {current_question}"
-    elif user_input == "exit game" and is_game_mode:
-        is_game_mode = False
-        current_question = None
-        correct_answer = None
+    # Get per-user game state
+    game_state = user_game_states.setdefault(user_id, {
+        'is_game_mode': False,
+        'current_index': 0,
+        'current_question': None,
+        'correct_answer': None
+    })
+
+    # Game logic
+    if user_input == "play game" and not game_state['is_game_mode']:
+        game_state['is_game_mode'] = True
+        game_state['current_index'] = 0
+        game_state['current_question'] = questions[game_state['current_index']]["question"]
+        game_state['correct_answer'] = questions[game_state['current_index']]["answer"]
+        response = f"Let's play a memory game! Here's your first question: {game_state['current_question']}"
+    elif user_input == "exit game" and game_state['is_game_mode']:
+        game_state['is_game_mode'] = False
+        game_state['current_question'] = None
+        game_state['correct_answer'] = None
         response = "Game ended. Feel free to chat with me!"
-    elif is_game_mode:
-        if current_question:
-            if user_input == correct_answer:
-                current_index = (current_index + 1) % len(questions)
-                if current_index == 0:
-                    is_game_mode = False
+    elif game_state['is_game_mode']:
+        if game_state['current_question']:
+            if user_input == game_state['correct_answer']:
+                game_state['current_index'] = (game_state['current_index'] + 1) % len(questions)
+                if game_state['current_index'] == 0:
+                    game_state['is_game_mode'] = False
                     response = "Great job! You answered all questions correctly. Game over!"
                 else:
-                    current_question = questions[current_index]["question"]
-                    correct_answer = questions[current_index]["answer"]
-                    response = f"Correct! Next question: {current_question}"
+                    game_state['current_question'] = questions[game_state['current_index']]["question"]
+                    game_state['correct_answer'] = questions[game_state['current_index']]["answer"]
+                    response = f"Correct! Next question: {game_state['current_question']}"
             else:
-                response = f"Nope, that's not it. Try again: {current_question}"
+                response = f"Nope, that's not it. Try again: {game_state['current_question']}"
         else:
-            is_game_mode = False
+            game_state['is_game_mode'] = False
             response = "Game error. Returning to chat mode."
     else:
-        # Normal chat (global chat_history_ids; per-user needed for production)
-        global chat_history_ids
+        # Normal chat (per-user chat_history_ids)
+        chat_history_ids = user_chat_histories.get(user_id, None)
         new_user_input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
         bot_input_ids = torch.cat([chat_history_ids, new_user_input_ids], dim=-1) if chat_history_ids is not None else new_user_input_ids
         chat_history_ids = model.generate(
@@ -232,6 +239,8 @@ def get_response():
             top_k=50
         )
         response = tokenizer.decode(chat_history_ids[:, bot_input_ids.shape[-1]:][0], skip_special_tokens=True)
+        # Update per-user history
+        user_chat_histories[user_id] = chat_history_ids
 
     # Store bot response
     c.execute("INSERT INTO chat_history (user_id, timestamp, sender, message) VALUES (?, ?, ?, ?)",

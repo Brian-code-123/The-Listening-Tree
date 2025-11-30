@@ -70,7 +70,9 @@
     <script>
     $(document).ready(function () {
         function appendMessage(sender, message, time) {
-            const imgSrc = sender === 'bot' ? "{{ url_for('static', filename='Chatbot.png') }}" : 'https://via.placeholder.com/50?text=User';
+            const botImg = "{{ url_for('static', filename='Chatbot.png') }}";
+            const userImg = "{{ url_for('static', filename='User.png') }}";
+            const imgSrc = sender === 'bot' ? botImg : userImg;
             const justify = sender === 'bot' ? 'start' : 'end';
             const msgClass = sender === 'bot' ? 'msg_cotainer' : 'msg_cotainer_send';
             const msg = `
@@ -210,19 +212,31 @@
         checkReminders();
         setInterval(checkReminders, 60000);
 
-        // Audio/popup alert (unchanged)
-        setInterval(() => {
+        // Audio/popup alert (modified for simultaneous playback and precise timing)
+        function scheduleReminderCheck() {
+            const now = new Date();
+            const secondsToNextMinute = 60 - now.getSeconds();
+            setTimeout(() => {
+                checkForRemindersNow();
+                setInterval(checkForRemindersNow, 60000);  // After first check, run every 60 seconds
+            }, secondsToNextMinute * 1000);
+        }
+
+        function checkForRemindersNow() {
             $.get('/get_reminders', function (data) {
                 const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 data.reminders.forEach(reminder => {
                     if (reminder.time === now && reminder.active) {
-                        alert(`Reminder: ${reminder.label}! Time to ${reminder.label.split(' ')[0]}!`);
                         const audio = new Audio('{{ url_for("static", filename="notification.mp3") }}');
                         audio.play().catch(err => console.log("Audio play failed:", err));
+                        // Alert after audio starts for simultaneous feel
+                        alert(`Reminder: ${reminder.label}! Time to ${reminder.label.split(' ')[0]}!`);
                     }
                 });
             });
-        }, 60000);
+        }
+
+        scheduleReminderCheck();  // Initialize the scheduled checks
 
         $('#reminderForm').on('submit', function (event) {
             event.preventDefault();
