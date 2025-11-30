@@ -4,15 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Elderly Companion Chatbot</title>
+    <!-- Bootstrap 5 for responsive layout and styling -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome for icons (microphone, send, etc.) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container-fluid h-100">
         <div class="row justify-content-center h-100">
+            <!-- Main Chat Area -->
             <div class="col-md-10 col-xl-8 chat">
                 <div class="card">
+                    <!-- Chat Header: Shows bot avatar, name, and logout button -->
                     <div class="card-header msg_head">
                         <div class="d-flex bd-highlight">
                             <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
@@ -23,18 +27,25 @@
                             <a href="{{ url_for('logout') }}" class="ms-auto btn btn-sm btn-danger">Logout</a>
                         </div>
                     </div>
+
+                    <!-- Chat Messages Container - Dynamically populated -->
                     <div id="messageFormeight" class="card-body msg_card_body">
-                        <!-- Chat history will be loaded here -->
+                        <!-- Chat history will be loaded here via AJAX on page load -->
                     </div>
+
+                    <!-- Message Input Area -->
                     <div class="card-footer">
                         <form id="messageArea" class="d-flex">
                             <input type="text" id="text" name="msg" placeholder="Type your message..." autocomplete="off" class="form-control type_msg" required>
+                            <!-- Microphone button - starts voice recording -->
                             <button type="button" id="micBtn" class="send_btn mic-btn">
                                 <i class="fas fa-microphone"></i>
                             </button>
+                            <!-- Stop button - appears only during recording -->
                             <button type="button" id="stopBtn" class="send_btn stop-btn d-none">
                                 <i class="fas fa-stop"></i>
                             </button>
+                            <!-- Send button - submits text message -->
                             <button type="submit" id="send" class="send_btn">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
@@ -42,15 +53,17 @@
                     </div>
                 </div>
             </div>
-            <!-- Sidebar for Notifications -->
+
+            <!-- Sidebar: Reminder Panel -->
             <div class="col-md-2">
                 <div class="card h-100" id="notificationPanel">
                     <div class="card-header">Reminders</div>
                     <div class="card-body">
+                        <!-- Form to create new reminders -->
                         <form id="reminderForm">
                             <div class="mb-3">
                                 <label for="reminderLabel" class="form-label">Reminder</label>
-                                <input type="text" class="form-control" id="reminderLabel" placeholder="e.g., walk" required>
+                                <input type="text" class="form-control" id="reminderLabel" placeholder="e.g., take medicine" required>
                             </div>
                             <div class="mb-3">
                                 <label for="reminderTime" class="form-label">Time (HH:MM)</label>
@@ -58,107 +71,131 @@
                             </div>
                             <button type="submit" class="btn btn-primary w-100">Set Reminder</button>
                         </form>
-                        <div id="reminderList"></div>
+                        <!-- List of active reminders -->
+                        <div id="reminderList" class="mt-3"></div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Scripts -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
     <script>
     $(document).ready(function () {
+
+        /**
+         * Appends a message bubble to the chat window
+         * @param {string} sender - 'bot' or 'user'
+         * @param {string} message - Text content
+         * @param {string} time - Formatted time (e.g., "14:35")
+         */
         function appendMessage(sender, message, time) {
             const botImg = "{{ url_for('static', filename='Chatbot.png') }}";
             const userImg = "{{ url_for('static', filename='User.png') }}";
             const imgSrc = sender === 'bot' ? botImg : userImg;
             const justify = sender === 'bot' ? 'start' : 'end';
             const msgClass = sender === 'bot' ? 'msg_cotainer' : 'msg_cotainer_send';
-            const msg = `
+
+            const msgHTML = `
                 <div class="d-flex justify-content-${justify} mb-4">
                     ${sender === 'bot' ? `<img src="${imgSrc}" class="rounded-circle user_img">` : ''}
                     <div class="${msgClass}">
                         ${message}
                         <span class="msg_time">${time}</span>
                     </div>
-                    ${sender !== 'bot' ? `<img src="${imgSrc}" class="rounded-circle user_img_msg">` : ''}
+                    ${sender === 'user' ? `<img src="${imgSrc}" class="rounded-circle user_img_msg">` : ''}
                 </div>
             `;
-            $('#messageFormeight').append(msg).scrollTop($('#messageFormeight')[0].scrollHeight);
+            $('#messageFormeight').append(msgHTML).scrollTop($('#messageFormeight')[0].scrollHeight);
         }
 
-        // Load chat history on page load
+        // Load previous conversation when page loads
         function loadChatHistory() {
             $.get('/get_chat_history', function (data) {
                 data.history.forEach(item => {
-                    appendMessage(item.sender, item.message, item.timestamp.split(' ')[1]);
+                    const time = item.timestamp.split(' ')[1].substring(0, 5); // Extract HH:MM
+                    appendMessage(item.sender, item.message, time);
                 });
             });
         }
         loadChatHistory();
 
-        // Update time (unchanged)
+        // Update current time display every minute (optional feature)
         function updateTime() {
             const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            $('#currentTime').text(now);
+            $('#currentTime').text(now); // Note: element doesn't exist in current HTML
         }
         setInterval(updateTime, 60000);
         updateTime();
 
-        // Handle text input (unchanged, but refresh reminders and history if needed)
+        // Handle text message submission
         $('#messageArea').on('submit', function (event) {
             event.preventDefault();
             const text = $('#text').val().trim();
-            if (text) {
-                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                appendMessage('user', text, time);
-                $.ajax({
-                    type: 'POST',
-                    url: '/get_response',
-                    data: { msg: text },
-                    success: function (data) {
-                        appendMessage('bot', data.response, time);
-                        $('#text').val('');
+            if (!text) return;
 
-                        if (text.toLowerCase().startsWith('set reminder') || text.toLowerCase().startsWith('delete reminder')) {
-                            checkReminders();
-                        }
-                    },
-                    error: function () {
-                        alert('Error sending message.');
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            appendMessage('user', text, time);
+
+            $.ajax({
+                type: 'POST',
+                url: '/get_response',
+                data: { msg: text },
+                success: function (data) {
+                    appendMessage('bot', data.response, time);
+                    $('#text').val('');
+
+                    // Refresh reminder list if user modified reminders via chat
+                    if (text.toLowerCase().includes('reminder')) {
+                        checkReminders();
                     }
-                });
-            }
+                },
+                error: function () {
+                    alert('Error sending message. Please try again.');
+                }
+            });
         });
 
-        // Voice input 
+        // ====================== Voice Recording & Transcription ======================
         let mediaRecorder;
         let audioChunks = [];
 
         $('#micBtn').on('click', function () {
-            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-                mediaRecorder = new MediaRecorder(stream);
-                mediaRecorder.start();
-                $('#micBtn').addClass('d-none');
-                $('#stopBtn').removeClass('d-none');
-                audioChunks = [];
-                mediaRecorder.addEventListener("dataavailable", event => {
-                    audioChunks.push(event.data);
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.start();
+                    audioChunks = [];
+
+                    $('#micBtn').addClass('d-none');
+                    $('#stopBtn').removeClass('d-none');
+
+                    mediaRecorder.addEventListener("dataavailable", event => {
+                        audioChunks.push(event.data);
+                    });
+                })
+                .catch(err => {
+                    alert('Microphone access denied or unavailable: ' + err);
                 });
-            }).catch(err => {
-                alert('Microphone access denied or error: ' + err);
-            });
         });
 
         $('#stopBtn').on('click', function () {
-            mediaRecorder.stop();
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Clean up
+            }
+
             $('#stopBtn').addClass('d-none');
             $('#micBtn').removeClass('d-none');
+
             mediaRecorder.addEventListener("stop", () => {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                 const formData = new FormData();
                 formData.append('audio', audioBlob, 'recording.webm');
+
                 $.ajax({
                     type: 'POST',
                     url: '/transcribe',
@@ -168,94 +205,84 @@
                     success: function (data) {
                         if (data.text) {
                             $('#text').val(data.text);
-                            $('#messageArea').submit();
+                            $('#messageArea').submit(); // Auto-send transcribed text
                         } else {
-                            alert('No speech detected. Try again.');
+                            alert('No speech detected. Please try again.');
                         }
                     },
                     error: function () {
-                        alert('Error transcribing audio.');
+                        alert('Transcription failed. Please try again.');
                     }
                 });
             });
         });
 
-        // Notification handling 
+        // ====================== Reminder Management ======================
         function checkReminders() {
             $.get('/get_reminders', function (data) {
                 $('#reminderList').empty();
                 data.reminders.forEach(reminder => {
-                    $('#reminderList').append(`
-                        <div class="reminder-item">
+                    const item = `
+                        <div class="reminder-item mb-2 p-2 border rounded">
                             ${reminder.label} at ${reminder.time}
-                            <button class="btn btn-danger btn-sm float-end delete-reminder" data-label="${reminder.label}">Delete</button>
+                            <button class="btn btn-danger btn-sm float-end delete-reminder" data-label="${reminder.label}">
+                                Delete
+                            </button>
                         </div>
-                    `);
+                    `;
+                    $('#reminderList').append(item);
                 });
-                $('.delete-reminder').on('click', function () {
+
+                // Bind delete buttons
+                $('.delete-reminder').off('click').on('click', function () {
                     const label = $(this).data('label');
-                    $.ajax({
-                        type: 'POST',
-                        url: '/get_response',
-                        data: { msg: `delete reminder ${label}` },
-                        success: function (data) {
-                            alert(data.response);
-                            checkReminders();
-                        },
-                        error: function () {
-                            alert('Error deleting reminder.');
-                        }
+                    $.post('/get_response', { msg: `delete reminder ${label}` }, function (res) {
+                        alert(res.response);
+                        checkReminders();
                     });
                 });
             });
         }
         checkReminders();
-        setInterval(checkReminders, 60000);
+        setInterval(checkReminders, 60000); // Refresh list every minute
 
-        // Audio and popup alert 
+        // Check for due reminders every minute and trigger alert + sound
         function scheduleReminderCheck() {
             const now = new Date();
-            const secondsToNextMinute = 60 - now.getSeconds();
+            const delay = (60 - now.getSeconds()) * 1000;
             setTimeout(() => {
                 checkForRemindersNow();
-                setInterval(checkForRemindersNow, 60000);  // After first check, run every 60 seconds
-            }, secondsToNextMinute * 1000);
+                setInterval(checkForRemindersNow, 60000);
+            }, delay);
         }
 
         function checkForRemindersNow() {
             $.get('/get_reminders', function (data) {
-                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 data.reminders.forEach(reminder => {
-                    if (reminder.time === now && reminder.active) {
+                    if (reminder.time === currentTime && reminder.active) {
                         const audio = new Audio('{{ url_for("static", filename="notification.mp3") }}');
-                        audio.play().catch(err => console.log("Audio play failed:", err));
-                        // Alert after audio starts for simultaneous feel
-                        alert(`Reminder: ${reminder.label}! Time to ${reminder.label.split(' ')[0]}!`);
+                        audio.play().catch(err => console.log("Audio play blocked:", err));
+                        setTimeout(() => {
+                            alert(`Reminder: ${reminder.label}!\nTime to ${reminder.label.toLowerCase()}!`);
+                        }, 300);
                     }
                 });
             });
         }
+        scheduleReminderCheck();
 
-        scheduleReminderCheck();  // Initialize the scheduled checks
-
-        $('#reminderForm').on('submit', function (event) {
-            event.preventDefault();
+        // Submit new reminder from sidebar form
+        $('#reminderForm').on('submit', function (e) {
+            e.preventDefault();
             const label = $('#reminderLabel').val().trim();
             const time = $('#reminderTime').val();
             if (label && time) {
-                $.ajax({
-                    type: 'POST',
-                    url: '/get_response',
-                    data: { msg: `set reminder ${label} ${time}` },
-                    success: function (data) {
-                        $('#reminderLabel').val('');
-                        $('#reminderTime').val('');
-                        alert(data.response);
-                        checkReminders();
-                    },
-                    error: function () {
-                        alert('Error setting reminder.');
-                    }
+                $.post('/get_response', { msg: `set reminder ${label} ${time}` }, function (data) {
+                    alert(data.response);
+                    $('#reminderLabel').val('');
+                    $('#reminderTime').val('');
+                    checkReminders();
                 });
             }
         });
