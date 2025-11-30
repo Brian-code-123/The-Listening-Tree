@@ -34,6 +34,9 @@ tokenizer.pad_token = tokenizer.eos_token
 EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
 vosk_model = Model(EN_MODEL_PATH)
 
+# NEW: Maximum token length for chat history to prevent memory leaks
+MAX_HISTORY_TOKENS = 1024  # Adjust as needed (e.g., 512 for lower memory, 2048 for more context)
+
 # =============================================================================
 # Quiz Game Questions (simple memory game)
 # =============================================================================
@@ -247,6 +250,13 @@ def get_response():
         else:
             chat_history_ids = user_chat_histories.get(user_id)
             input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
+
+            # NEW: Truncate history if it exceeds max tokens to prevent memory leak
+            if chat_history_ids is not None:
+                if chat_history_ids.shape[-1] > MAX_HISTORY_TOKENS:
+                    # Keep the most recent tokens (truncate from the start)
+                    chat_history_ids = chat_history_ids[:, -MAX_HISTORY_TOKENS:]
+
             bot_input_ids = torch.cat([chat_history_ids, input_ids], dim=-1) if chat_history_ids is not None else input_ids
 
             # Generate response with sampling for more natural replies
@@ -273,6 +283,7 @@ def get_response():
 # =============================================================================
 # Speech-to-Text (Offline using Vosk)
 # =============================================================================
+# UPDATED: Added try-except for error handling, logging, and better JSON responses to diagnose failures (e.g., FFmpeg missing)
 @app.route('/transcribe', methods=['POST'])
 @login_required
 def transcribe():
@@ -282,18 +293,26 @@ def transcribe():
     audio_file = request.files['audio']
     audio_bytes = audio_file.read()
 
-    # Convert webm → wav in memory
-    audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
-    wav_io = io.BytesIO()
-    audio.set_frame_rate(16000).set_channels(1).set_sample_width(2).export(wav_io, format="wav")
-    wav_data = wav_io.getvalue()
+    try:
+        # Convert webm → wav in memory
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
+        wav_io = io.BytesIO()
+        audio.set_frame_rate(16000).set_channels(1).set_sample_width(2).export(wav_io, format="wav")
+        wav_data = wav_io.getvalue()
 
-    recognizer = KaldiRecognizer(vosk_model, 16000)
-    recognizer.AcceptWaveform(wav_data)
-    result = json.loads(recognizer.Result())
+        recognizer = KaldiRecognizer(vosk_model, 16000)
+        if not recognizer.AcceptWaveform(wav_data):
+            print("Vosk: Partial result available, but proceeding to final.")  # NEW: Debugging log for partial waveforms
+        result = json.loads(recognizer.Result())
 
-    text = result.get("text", "").strip()
-    return jsonify({'text': text}) if text else jsonify({'error': 'No speech detected'}), 400
+        text = result.get("text", "").strip()
+        if text:
+            return jsonify({'text': text})
+        else:
+            return jsonify({'error': 'No speech detected'}), 400
+    except Exception as e:
+        print(f"Transcription error: {str(e)}")  # NEW: Log errors to console for debugging (e.g., FFmpeg not found)
+        return jsonify({'error': f'Transcription failed: {str(e)}'}), 500
 
 # =============================================================================
 # API Endpoints for Frontend

@@ -9,6 +9,21 @@
     <!-- Font Awesome for icons (microphone, send, etc.) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- NEW: Added CSS for recording indicator (blinking red dot) -->
+    <style>
+        .recording-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background-color: red;
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+    </style>
 </head>
 <body>
     <div class="container-fluid h-100">
@@ -163,15 +178,17 @@
         let mediaRecorder;
         let audioChunks = [];
 
+        // UPDATED: Added recording indicator (blinking dot) and placeholder change during recording
         $('#micBtn').on('click', function () {
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
                     mediaRecorder = new MediaRecorder(stream);
                     mediaRecorder.start();
                     audioChunks = [];
-
                     $('#micBtn').addClass('d-none');
                     $('#stopBtn').removeClass('d-none');
+                    // NEW: Show recording indicator and update placeholder
+                    $('#text').attr('placeholder', 'Recording...').after('<span class="recording-dot ms-2"></span>');
 
                     mediaRecorder.addEventListener("dataavailable", event => {
                         audioChunks.push(event.data);
@@ -182,6 +199,7 @@
                 });
         });
 
+        // UPDATED: Remove indicator on stop, improved error handling in AJAX to show detailed server errors
         $('#stopBtn').on('click', function () {
             if (mediaRecorder && mediaRecorder.state === "recording") {
                 mediaRecorder.stop();
@@ -190,6 +208,9 @@
 
             $('#stopBtn').addClass('d-none');
             $('#micBtn').removeClass('d-none');
+            // NEW: Remove recording indicator and reset placeholder
+            $('.recording-dot').remove();
+            $('#text').attr('placeholder', 'Type your message...');
 
             mediaRecorder.addEventListener("stop", () => {
                 const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
@@ -207,11 +228,15 @@
                             $('#text').val(data.text);
                             $('#messageArea').submit(); // Auto-send transcribed text
                         } else {
-                            alert('No speech detected. Please try again.');
+                            alert(data.error || 'No speech detected. Please try again.');
                         }
                     },
-                    error: function () {
-                        alert('Transcription failed. Please try again.');
+                    error: function (xhr) {
+                        let errorMsg = 'Transcription failed. Please try again.';
+                        if (xhr.responseJSON && xhr.responseJSON.error) {
+                            errorMsg = xhr.responseJSON.error;  // NEW: Show detailed error from server (e.g., FFmpeg issue)
+                        }
+                        alert(errorMsg);
                     }
                 });
             });
