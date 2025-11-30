@@ -132,7 +132,7 @@
             }
         });
 
-        // Voice input (unchanged)
+        // Voice input 
         let mediaRecorder;
         let audioChunks = [];
 
@@ -180,7 +180,7 @@
             });
         });
 
-        // Notification handling (unchanged)
+        // Notification handling 
         function checkReminders() {
             $.get('/get_reminders', function (data) {
                 $('#reminderList').empty();
@@ -212,7 +212,7 @@
         checkReminders();
         setInterval(checkReminders, 60000);
 
-        // Audio/popup alert (modified for simultaneous playback and precise timing)
+        // Audio and popup alert 
         function scheduleReminderCheck() {
             const now = new Date();
             const secondsToNextMinute = 60 - now.getSeconds();
