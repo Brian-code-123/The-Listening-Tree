@@ -21,7 +21,7 @@ user_chat_histories = {}  # Stores conversation context (token IDs) per user for
 user_game_states = {}     # Tracks quiz game progress per user
 
 # =============================================================================
-# Model Loading (DialoGPT for chat, Vosk for offline speech recognition)
+# Model Loading (DialoGPT-Medium for chat, Vosk for offline speech recognition)
 # =============================================================================
 model_name = "microsoft/DialoGPT-medium"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -34,16 +34,20 @@ tokenizer.pad_token = tokenizer.eos_token
 EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
 vosk_model = Model(EN_MODEL_PATH)
 
-# NEW: Maximum token length for chat history to prevent memory leaks
-MAX_HISTORY_TOKENS = 1024  # Adjust as needed (e.g., 512 for lower memory, 2048 for more context)
+# Maximum token length for chat history to prevent memory leaks
+MAX_HISTORY_TOKENS = 1024  # e.g. 512 for lower memory, 2048 for more context
 
 # =============================================================================
-# Quiz Game Questions (simple memory game)
+# Quiz Game Questions (simple memory game) update: 5 question and show the score
+
 # =============================================================================
 questions = [
     {"question": "What’s the capital of France?", "answer": "paris"},
     {"question": "What’s 2 + 2?", "answer": "4"},
-    {"question": "What color is the sky on a clear day?", "answer": "blue"}
+    {"question": "What color is the sky on a clear day?", "answer": "blue"},
+    {"question": "There is a fruit with a red outer skin and white inside with small black seeds. What is it?", "answer": "Watermelon"},
+    {"question": "Which month has 28 days?", "answer": "Every month has at least 28 days"},
+    {"question": "What is the chemical symbol for water?", "answer": "h2o"}
 ]
 
 # =============================================================================
@@ -106,7 +110,7 @@ def login_required(f):
 def register():
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password']  # WARNING: In production, hash this!
+        password = request.form['password']  
         conn = sqlite3.connect('reminders.db')
         c = conn.cursor()
         try:
@@ -218,40 +222,45 @@ def get_response():
     else:
         game = user_game_states.setdefault(user_id, {
             'is_game_mode': False, 'current_index': 0,
-            'current_question': None, 'correct_answer': None
+            'current_question': None, 'correct_answer': None, 'score': 0
         })
 
         if user_input == "play game" and not game['is_game_mode']:
             game['is_game_mode'] = True
             game['current_index'] = 0
-            game['current_question'] = questions[0]["question"]
-            game['correct_answer'] = questions[0]["answer"]
-            response = f"Let's play! First question: {game['current_question']}"
+            game['score'] = 0
+            q = questions[0]
+            game['current_question'] = q["question"]
+            game['correct_answer'] = q["answer"]
+            response = f"Let's play! You have {len(questions)} questions. Current score: 0. First question: {game['current_question']}"
 
         elif user_input == "exit game" and game['is_game_mode']:
             game['is_game_mode'] = False
-            response = "Game stopped. Back to normal chat!"
+            response = f"Game stopped. You got {game['score']} out of {game['current_index']} correct so far!"
 
         elif game['is_game_mode']:
             if user_input.strip() == game['correct_answer']:
-                game['current_index'] = (game['current_index'] + 1) % len(questions)
-                if game['current_index'] == 0:
-                    game['is_game_mode'] = False
-                    response = "Amazing! You completed the game!"
-                else:
-                    q = questions[game['current_index']]
-                    game['current_question'] = q["question"]
-                    game['correct_answer'] = q["answer"]
-                    response = f"Correct! Next: {q['question']}"
+                game['score'] += 1
+                response = f"Correct! Score: {game['score']}"
             else:
-                response = f"Not quite. Try again: {game['current_question']}"
+                response = f"Incorrect. The answer was {game['correct_answer']}. Score: {game['score']}"
+
+            game['current_index'] += 1
+            if game['current_index'] == len(questions):
+                response += f"\nGame over! You successfully answered {game['score']} out of {len(questions)} questions correctly."
+                game['is_game_mode'] = False
+            else:
+                q = questions[game['current_index']]
+                game['current_question'] = q["question"]
+                game['correct_answer'] = q["answer"]
+                response += f" Next question: {q['question']}"
 
         # --------------------- Normal Conversational AI ---------------------
         else:
             chat_history_ids = user_chat_histories.get(user_id)
             input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors='pt')
 
-            # NEW: Truncate history if it exceeds max tokens to prevent memory leak
+            #  Truncate history if it exceeds max tokens to prevent memory leak
             if chat_history_ids is not None:
                 if chat_history_ids.shape[-1] > MAX_HISTORY_TOKENS:
                     # Keep the most recent tokens (truncate from the start)
