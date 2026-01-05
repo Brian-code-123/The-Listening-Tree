@@ -38,15 +38,14 @@ vosk_model = Model(EN_MODEL_PATH)
 MAX_HISTORY_TOKENS = 1024  # e.g. 512 for lower memory, 2048 for more context
 
 # =============================================================================
-# Quiz Game Questions (simple memory game) update: 5 question and show the score
-
+# Quiz Game Questions (simple memory game)
 # =============================================================================
 questions = [
     {"question": "What’s the capital of France?", "answer": "paris"},
     {"question": "What’s 2 + 2?", "answer": "4"},
     {"question": "What color is the sky on a clear day?", "answer": "blue"},
-    {"question": "There is a fruit with a red outer skin and white inside with small black seeds. What is it?", "answer": "Watermelon"},
-    {"question": "Which month has 28 days?", "answer": "Every month has at least 28 days"},
+    {"question": "There is a fruit with a red outer skin and white inside with small black seeds. What is it?", "answer": "watermelon"},
+    {"question": "Which month has 28 days?", "answer": "every month has at least 28 days"},
     {"question": "What is the chemical symbol for water?", "answer": "h2o"}
 ]
 
@@ -197,11 +196,11 @@ def get_response():
         parts = user_input.split(maxsplit=2)
         if len(parts) == 3:
             label = parts[2]
-            c.execute("DELETE FROM reminders WHERE user_id = ? AND label = ? AND active = 1", (user_id, label))
+            c.execute("DELETE FROM reminders WHERE user_id = ? AND label = ?", (user_id, label))
             if c.rowcount > 0:
                 response = f"Deleted reminder: {label}"
             else:
-                response = "No active reminder found with that name."
+                response = "No reminder found with that name."
             conn.commit()
         else:
             response = "Usage: delete reminder [activity]"
@@ -290,6 +289,21 @@ def get_response():
     return jsonify({'response': response})
 
 # =============================================================================
+# Deactivate Reminder
+# =============================================================================
+@app.route('/deactivate_reminder', methods=['POST'])
+@login_required
+def deactivate_reminder():
+    user_id = session['user_id']
+    label = request.form['label']
+    conn = sqlite3.connect('reminders.db')
+    c = conn.cursor()
+    c.execute("UPDATE reminders SET active = 0 WHERE user_id = ? AND label = ?", (user_id, label))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+# =============================================================================
 # Speech-to-Text (Offline using Vosk)
 # =============================================================================
 # UPDATED: Added try-except for error handling, logging, and better JSON responses to diagnose failures (e.g., FFmpeg missing)
@@ -332,8 +346,8 @@ def get_reminders():
     user_id = session['user_id']
     conn = sqlite3.connect('reminders.db')
     c = conn.cursor()
-    c.execute("SELECT label, time FROM reminders WHERE user_id = ? AND active = 1", (user_id,))
-    reminders = [{"label": r[0], "time": r[1], "active": True} for r in c.fetchall()]
+    c.execute("SELECT label, time, active FROM reminders WHERE user_id = ?", (user_id,))
+    reminders = [{"label": r[0], "time": r[1], "active": bool(r[2])} for r in c.fetchall()]
     conn.close()
     return jsonify({'reminders': reminders})
 

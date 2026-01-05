@@ -248,8 +248,8 @@
                 $('#reminderList').empty();
                 data.reminders.forEach(reminder => {
                     const item = `
-                        <div class="reminder-item mb-2 p-2 border rounded">
-                            ${reminder.label} at ${reminder.time}
+                        <div class="reminder-item mb-2 p-2 border rounded ${reminder.active ? '' : 'text-muted'}">
+                            ${reminder.label} at ${reminder.time} ${reminder.active ? '' : '(Done)'}
                             <button class="btn btn-danger btn-sm float-end delete-reminder" data-label="${reminder.label}">
                                 Delete
                             </button>
@@ -262,7 +262,9 @@
                 $('.delete-reminder').off('click').on('click', function () {
                     const label = $(this).data('label');
                     $.post('/get_response', { msg: `delete reminder ${label}` }, function (res) {
-                        alert(res.response);
+                        if (res.response.includes('No ')) {
+                            alert(res.response);
+                        }
                         checkReminders();
                     });
                 });
@@ -287,9 +289,16 @@
                 data.reminders.forEach(reminder => {
                     if (reminder.time === currentTime && reminder.active) {
                         const audio = new Audio('{{ url_for("static", filename="notification.mp3") }}');
+                        audio.loop = true;  // Loop the audio until OK is pressed
                         audio.play().catch(err => console.log("Audio play blocked:", err));
                         setTimeout(() => {
                             alert(`Reminder: ${reminder.label}!\nTime to ${reminder.label.toLowerCase()}!`);
+                            audio.pause();
+                            audio.currentTime = 0;
+                            // Deactivate the reminder after confirmation
+                            $.post('/deactivate_reminder', { label: reminder.label }, function () {
+                                checkReminders();
+                            });
                         }, 300);
                     }
                 });
