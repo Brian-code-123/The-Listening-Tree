@@ -63,7 +63,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS chat_history 
                  (id INTEGER PRIMARY KEY, user_id TEXT, timestamp TEXT, sender TEXT, message TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT)''')
+                 (id INTEGER PRIMARY KEY, email TEXT UNIQUE, password TEXT)''')
     conn.commit()
     conn.close()
 
