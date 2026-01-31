@@ -459,7 +459,7 @@ def get_response():
                 bot_input_ids,
                 attention_mask=attention_mask,
                 max_length=1000,
-                min_length=20,              # Force minimum response length
+                min_length=15,              # Force minimum response length
                 pad_token_id=tokenizer.eos_token_id,
                 do_sample=True,
                 top_p=0.92,                 # Nucleus sampling threshold
