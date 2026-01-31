@@ -3,3 +3,6 @@ transformers
 torch
 vosk
 pydub
+flask-wtf 
+wtforms 
+email_validator
