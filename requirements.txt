@@ -1,6 +1,6 @@
 flask==3.0.0
-transformers==4.37.2
-torch==2.2.0
+transformers>=4.37.2,<5.0.0
+torch>=2.5.0,<3.0.0
 vosk==0.3.44
 pydub==0.25.1
 flask-wtf==1.2.1
