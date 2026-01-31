@@ -75,14 +75,14 @@ questions = [
 ]
 
 # =============================================================================
-# Database (IMPROVED STRUCTURE)
+# Database Setup
 # =============================================================================
 def init_db():
-    """Create tables with improved structure."""
+    # Create tables with improved structure
     conn = sqlite3.connect('reminders.db')
     c = conn.cursor()
 
-    # Users table
+    # Users table - stores user authentication and profile data
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
@@ -93,7 +93,7 @@ def init_db():
         is_active BOOLEAN DEFAULT 1
     )""")
 
-    # Reminders table
+    # Reminders table - daily reminders with auto-expiration support
     c.execute("""CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -107,7 +107,7 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""")
 
-    # Chat history
+    # Chat history - conversation logs with soft delete capability
     c.execute("""CREATE TABLE IF NOT EXISTS chat_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -119,7 +119,7 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""")
 
-    # Preferences
+    # Preferences - user-specific settings
     c.execute("""CREATE TABLE IF NOT EXISTS preferences (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -131,11 +131,12 @@ def init_db():
         UNIQUE(user_id, pref_key)
     )""")
 
-    # Create indexes for better performance
+    # Create indexes for better query performance
     c.execute('CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)')
 
     conn.commit()
     conn.close()
@@ -147,7 +148,8 @@ init_db()
 # Helper Functions
 # =============================================================================
 def cleanup_old_chat_history():
-    """Auto-cleanup chat messages older than retention period (soft delete)"""
+    # Auto-cleanup chat messages older than retention period (soft delete)
+    # Runs periodically to maintain database performance
     conn = sqlite3.connect('reminders.db')
     c = conn.cursor()
     cutoff_time = datetime.now().timestamp() - (CHAT_HISTORY_RETENTION_MINUTES * 60)
@@ -159,23 +161,62 @@ def cleanup_old_chat_history():
     deleted_count = c.rowcount
     conn.commit()
     conn.close()
+
     if deleted_count > 0:
         print(f"[CLEANUP] 🗑️  Marked {deleted_count} old messages as deleted")
+
+def auto_expire_old_reminders():
+    # Automatically expire reminders from previous days
+    # This ensures only today's reminders are shown while preserving history
+    # Reminders are marked inactive but not deleted from database
+    conn = sqlite3.connect('reminders.db')
+    c = conn.cursor()
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Mark reminders created before today as inactive
+    c.execute("""
+        UPDATE reminders 
+        SET is_active = 0, updated_at = ?
+        WHERE DATE(created_at) < ? 
+        AND is_active = 1
+    """, (current_timestamp, today))
+
+    expired_count = c.rowcount
+    conn.commit()
+    conn.close()
+
+    if expired_count > 0:
+        print(f"[EXPIRE] 📅 Marked {expired_count} old reminders as inactive")
+
+    return expired_count
 
 # =============================================================================
 # Background Tasks
 # =============================================================================
 def check_reminders():
-    """Background thread: check reminders and cleanup old chat history"""
+    # Background daemon thread that performs periodic maintenance:
+    # 1. Check and trigger active reminders at scheduled times
+    # 2. Auto-expire old reminders (hourly)
+    # 3. Cleanup old chat history (every 10 minutes)
     while True:
         conn = sqlite3.connect('reminders.db')
         c = conn.cursor()
-        c.execute("""SELECT u.email, r.label, r.reminder_time
-                     FROM reminders r
-                     JOIN users u ON r.user_id = u.id
-                     WHERE r.is_active = 1""")
-        reminders = c.fetchall()
+
+        today = datetime.now().strftime('%Y-%m-%d')
         current_time = datetime.now().strftime('%H:%M')
+
+        # Only check today's active reminders for triggering
+        c.execute("""
+            SELECT u.email, r.label, r.reminder_time
+            FROM reminders r
+            JOIN users u ON r.user_id = u.id
+            WHERE r.is_active = 1 
+            AND DATE(r.created_at) = ?
+        """, (today,))
+
+        reminders = c.fetchall()
 
         for email, label, reminder_time in reminders:
             if reminder_time == current_time:
@@ -183,18 +224,24 @@ def check_reminders():
 
         conn.close()
 
+        # Auto-expire old reminders every hour at minute 0
+        if datetime.now().minute == 0:
+            auto_expire_old_reminders()
+
         # Cleanup old chat history every 10 minutes
         if datetime.now().minute % 10 == 0:
             cleanup_old_chat_history()
 
         threading.Event().wait(60)
 
+# Start background maintenance thread
 threading.Thread(target=check_reminders, daemon=True).start()
 
 # =============================================================================
 # Authentication
 # =============================================================================
 def login_required(f):
+    # Decorator to protect routes that require authentication
     def wrap(*args, **kwargs):
         if 'user_email' not in session:
             return redirect(url_for('login'))
@@ -264,7 +311,7 @@ def index():
     return render_template('chat.html')
 
 # =============================================================================
-# Chat Response (FIXED: Preserve capitalization for better AI quality)
+# Chat Response
 # =============================================================================
 @app.route('/get_response', methods=['POST'])
 @login_required
@@ -407,16 +454,19 @@ def get_response():
             else:
                 bot_input_ids = input_ids
 
-            # Generate response with transformer model
+            # Generate response with improved parameters
             chat_history_ids = model.generate(
                 bot_input_ids,
                 attention_mask=attention_mask,
                 max_length=1000,
+                min_length=20,              # Force minimum response length
                 pad_token_id=tokenizer.eos_token_id,
                 do_sample=True,
-                top_p=0.95,
-                top_k=50,
-                temperature=0.75
+                top_p=0.92,                 # Nucleus sampling threshold
+                top_k=150,                  # Top-k sampling pool
+                temperature=0.90,           # Sampling temperature for creativity
+                repetition_penalty=1.2,     # Penalize repetitive responses
+                no_repeat_ngram_size=3      # Prevent repeating 3-gram phrases
             )
 
             # Decode only the new tokens (exclude input)
@@ -447,6 +497,7 @@ def get_response():
 @app.route('/deactivate_reminder', methods=['POST'])
 @login_required
 def deactivate_reminder():
+    # Manually deactivate a specific reminder
     user_id = session['user_id']
     label = request.form['label']
 
@@ -467,6 +518,7 @@ def deactivate_reminder():
 @app.route('/transcribe', methods=['POST'])
 @login_required
 def transcribe():
+    # Convert audio input to text using Vosk speech recognition
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file'}), 400
 
@@ -474,11 +526,13 @@ def transcribe():
     audio_bytes = audio_file.read()
 
     try:
+        # Convert WebM audio to WAV format for Vosk
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
         wav_io = io.BytesIO()
         audio.set_frame_rate(16000).set_channels(1).set_sample_width(2).export(wav_io, format="wav")
         wav_data = wav_io.getvalue()
 
+        # Perform speech recognition
         recognizer = KaldiRecognizer(vosk_model, 16000)
         if not recognizer.AcceptWaveform(wav_data):
             print("Vosk: Partial result, proceeding to final.")
@@ -500,15 +554,32 @@ def transcribe():
 @app.route('/get_reminders', methods=['GET'])
 @login_required
 def get_reminders():
+    # Fetch reminders for current user
+    # Returns only today's reminders to keep UI clean
+    # Historical reminders remain in database but are not displayed
     user_id = session['user_id']
 
     conn = sqlite3.connect('reminders.db')
     c = conn.cursor()
-    c.execute(
-        "SELECT label, reminder_time, is_active FROM reminders WHERE user_id = ? ORDER BY created_at DESC",
-        (user_id,)
-    )
-    reminders = [{"label": r[0], "time": r[1], "active": bool(r[2])} for r in c.fetchall()]
+
+    # Get today's date for filtering
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    # Only fetch reminders created today
+    c.execute("""
+        SELECT label, reminder_time, is_active, created_at 
+        FROM reminders 
+        WHERE user_id = ? 
+        AND DATE(created_at) = ?
+        ORDER BY created_at DESC
+    """, (user_id, today))
+
+    reminders = [{
+        "label": r[0], 
+        "time": r[1], 
+        "active": bool(r[2])
+    } for r in c.fetchall()]
+
     conn.close()
 
     return jsonify({'reminders': reminders})
@@ -516,6 +587,7 @@ def get_reminders():
 @app.route('/get_chat_history', methods=['GET'])
 @login_required
 def get_chat_history():
+    # Fetch chat history for current user (excluding deleted messages)
     user_id = session['user_id']
 
     conn = sqlite3.connect('reminders.db')
@@ -532,6 +604,7 @@ def get_chat_history():
         "sender": "bot" if r[1] else "user",
         "message": r[2]
     } for r in c.fetchall()]
+
     conn.close()
 
     return jsonify({'history': history})
@@ -541,7 +614,8 @@ def get_chat_history():
 # =============================================================================
 if __name__ == '__main__':
     print("=" * 70)
-    print("🤖 Elderly Companion Chatbot - Enhanced Version")
+    print("Elderly Companion Chatbot - Enhanced Version")
+    print("=" * 70)
     print(f"[INFO] ✅ Chat history retention: {CHAT_HISTORY_RETENTION_MINUTES} minutes")
     print(f"[INFO] ✅ Max history tokens: {MAX_HISTORY_TOKENS}")
     print("=" * 70)
