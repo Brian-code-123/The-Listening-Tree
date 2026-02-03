@@ -1,5 +1,9 @@
 flask==3.0.0
-transformers
-torch
-vosk
-pydub
+transformers>=4.37.2
+torch>=2.5.0
+vosk==0.3.44
+pydub==0.25.1
+flask-wtf==1.2.1
+wtforms==3.1.1
+email_validator==2.1.0
+gunicorn==22.0.0
