@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang if lang else 'en' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Listening Tree</title>
+    <title>{{ translations.app_name if translations else 'The Listening Tree' }}</title>
     
     <!-- Bootstrap 5 for responsive layout and styling -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -27,9 +27,29 @@
             0% { opacity: 1; }
             50% { opacity: 0; }
         }
+        .language-switcher {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .language-switcher .btn {
+            margin: 0 5px;
+        }
     </style>
 </head>
 <body>
+    <!-- Language Switcher -->
+    <div class="language-switcher">
+        <a href="{{ url_for('set_language', lang='en') }}" class="btn btn-sm {{ 'btn-primary' if lang == 'en' else 'btn-outline-primary' }}">EN</a>
+        <a href="{{ url_for('set_language', lang='zh-HK') }}" class="btn btn-sm {{ 'btn-primary' if lang == 'zh-HK' else 'btn-outline-primary' }}">繁中</a>
+        <a href="{{ url_for('accessibility_mode') }}" class="btn btn-sm btn-warning"><i class="fas fa-universal-access"></i></a>
+        <a href="{{ url_for('guidance') }}" class="btn btn-sm btn-info"><i class="fas fa-question-circle"></i></a>
+    </div>
     <div class="container-fluid h-100">
         <div class="row justify-content-center h-100">
             
@@ -41,10 +61,10 @@
                         <div class="d-flex bd-highlight">
                             <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
                             <div class="user_info ms-3">
-                                <span>The Listening Tree</span>
-                                <p>Your friendly companion</p>
+                                <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
+                                <p>{{ translations.tagline if translations else 'Your friendly companion' }}</p>
                             </div>
-                            <a href="{{ url_for('logout') }}" class="ms-auto btn btn-sm btn-danger">Logout</a>
+                            <a href="{{ url_for('logout') }}" class="ms-auto btn btn-sm btn-danger">{{ translations.logout if translations else 'Logout' }}</a>
                         </div>
                     </div>
 
@@ -56,21 +76,21 @@
                     <!-- Message Input Area -->
                     <div class="card-footer">
                         <form id="messageArea" class="d-flex">
-                            <input type="text" id="text" name="msg" placeholder="Type your message..." 
+                            <input type="text" id="text" name="msg" placeholder="{{ translations.type_message if translations else 'Type your message...' }}" 
                                    autocomplete="off" class="form-control type_msg" required>
                             
                             <!-- Microphone button - starts voice recording -->
-                            <button type="button" id="micBtn" class="send_btn mic-btn">
+                            <button type="button" id="micBtn" class="send_btn mic-btn" title="{{ translations.start_voice if translations else 'Start Voice' }}">
                                 <i class="fas fa-microphone"></i>
                             </button>
                             
                             <!-- Stop button - appears only during recording -->
-                            <button type="button" id="stopBtn" class="send_btn stop-btn d-none">
+                            <button type="button" id="stopBtn" class="send_btn stop-btn d-none" title="{{ translations.stop_voice if translations else 'Stop Voice' }}">
                                 <i class="fas fa-stop"></i>
                             </button>
                             
                             <!-- Send button - submits text message -->
-                            <button type="submit" id="send" class="send_btn">
+                            <button type="submit" id="send" class="send_btn" title="{{ translations.send if translations else 'Send' }}">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
                         </form>
@@ -222,6 +242,7 @@
                         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                         const formData = new FormData();
                         formData.append('audio', audioBlob, 'recording.webm');
+                        formData.append('language', '{{ lang if lang else "en" }}'); // Pass current language
 
                         $.ajax({
                             type: 'POST',

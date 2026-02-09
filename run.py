@@ -13,6 +13,7 @@ import threading
 import secrets
 from vosk import Model, KaldiRecognizer
 from pydub import AudioSegment
+from translations import get_text, get_all_translations, TRANSLATIONS
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
@@ -58,6 +59,18 @@ tokenizer.pad_token = tokenizer.eos_token
 
 EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
 vosk_model = Model(EN_MODEL_PATH)
+
+# Cantonese model path (will be downloaded)
+ZH_MODEL_PATH = os.path.join('voice_models', 'vosk-model-cn-0.22')
+vosk_model_zh = None
+try:
+    if os.path.exists(ZH_MODEL_PATH):
+        vosk_model_zh = Model(ZH_MODEL_PATH)
+        print(f"✓ Cantonese model loaded from {ZH_MODEL_PATH}")
+    else:
+        print(f"⚠ Cantonese model not found at {ZH_MODEL_PATH}. Download from https://alphacephei.com/vosk/models")
+except Exception as e:
+    print(f"⚠ Could not load Cantonese model: {e}")
 
 MAX_HISTORY_TOKENS = 1024
 CHAT_HISTORY_RETENTION_MINUTES = 30
@@ -308,7 +321,45 @@ def logout():
 @app.route('/')
 @login_required
 def index():
-    return render_template('chat.html')
+    # Get user language preference (default to 'en')
+    lang = session.get('language', 'en')
+    return render_template('chat.html', lang=lang, translations=get_all_translations(lang))
+
+@app.route('/set_language/<lang>')
+@login_required
+def set_language(lang):
+    """Set user's language preference"""
+    if lang in ['en', 'zh-HK']:
+        session['language'] = lang
+        user_id = session['user_id']
+        
+        # Save to database
+        conn = sqlite3.connect('reminders.db')
+        c = conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
+            (user_id, 'language', lang, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        )
+        conn.commit()
+        conn.close()
+        
+        flash(f"Language changed to {'English' if lang == 'en' else '繁體中文'}", 'success')
+    
+    return redirect(request.referrer or url_for('index'))
+
+@app.route('/accessibility')
+@login_required
+def accessibility_mode():
+    """Accessibility mode with large buttons, high contrast, and voice-first interaction"""
+    lang = session.get('language', 'en')
+    return render_template('accessibility.html', lang=lang, translations=get_all_translations(lang))
+
+@app.route('/guidance')
+@login_required
+def guidance():
+    """Guidance page with examples and instructions"""
+    lang = session.get('language', 'en')
+    return render_template('guidance.html', lang=lang, translations=get_all_translations(lang))
 
 # =============================================================================
 # Chat Response
@@ -518,14 +569,25 @@ def deactivate_reminder():
 @app.route('/transcribe', methods=['POST'])
 @login_required
 def transcribe():
-    # Convert audio input to text using Vosk speech recognition
+    """Convert audio input to text using Vosk speech recognition with multi-language support"""
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file'}), 400
 
     audio_file = request.files['audio']
     audio_bytes = audio_file.read()
+    
+    # Get language preference from request or session
+    lang = request.form.get('language', session.get('language', 'en'))
 
     try:
+        # Select appropriate Vosk model based on language
+        if lang == 'zh-HK' and vosk_model_zh:
+            selected_model = vosk_model_zh
+            print(f"Using Cantonese/Chinese model for transcription")
+        else:
+            selected_model = vosk_model
+            print(f"Using English model for transcription")
+        
         # Convert WebM audio to WAV format for Vosk
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
         wav_io = io.BytesIO()
@@ -533,7 +595,7 @@ def transcribe():
         wav_data = wav_io.getvalue()
 
         # Perform speech recognition
-        recognizer = KaldiRecognizer(vosk_model, 16000)
+        recognizer = KaldiRecognizer(selected_model, 16000)
         if not recognizer.AcceptWaveform(wav_data):
             print("Vosk: Partial result, proceeding to final.")
 
@@ -541,7 +603,7 @@ def transcribe():
         text = result.get("text", "").strip()
 
         if text:
-            return jsonify({'text': text})
+            return jsonify({'text': text, 'language': lang})
         else:
             return jsonify({'error': 'No speech detected'}), 400
     except Exception as e:
