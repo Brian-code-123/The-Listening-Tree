@@ -57,20 +57,12 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 tokenizer.pad_token = tokenizer.eos_token
 
+# English Vosk Model for speech recognition (English only)
+# Cantonese speech recognition is handled client-side via Web Speech API
 EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
 vosk_model = Model(EN_MODEL_PATH)
-
-# Cantonese model path (will be downloaded)
-ZH_MODEL_PATH = os.path.join('voice_models', 'vosk-model-cn-0.22')
-vosk_model_zh = None
-try:
-    if os.path.exists(ZH_MODEL_PATH):
-        vosk_model_zh = Model(ZH_MODEL_PATH)
-        print(f"✓ Cantonese model loaded from {ZH_MODEL_PATH}")
-    else:
-        print(f"⚠ Cantonese model not found at {ZH_MODEL_PATH}. Download from https://alphacephei.com/vosk/models")
-except Exception as e:
-    print(f"⚠ Could not load Cantonese model: {e}")
+print(f"✓ English Vosk model loaded from {EN_MODEL_PATH}")
+print(f"✓ Cantonese speech recognition uses browser Web Speech API (zero server deps)")
 
 MAX_HISTORY_TOKENS = 1024
 CHAT_HISTORY_RETENTION_MINUTES = 30
@@ -569,33 +561,24 @@ def deactivate_reminder():
 @app.route('/transcribe', methods=['POST'])
 @login_required
 def transcribe():
-    """Convert audio input to text using Vosk speech recognition with multi-language support"""
+    """Convert audio input to text using Vosk speech recognition (English only).
+    Cantonese speech recognition is handled client-side via browser Web Speech API.
+    """
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file'}), 400
 
     audio_file = request.files['audio']
     audio_bytes = audio_file.read()
-    
-    # Get language preference from request or session
-    lang = request.form.get('language', session.get('language', 'en'))
 
     try:
-        # Select appropriate Vosk model based on language
-        if lang == 'zh-HK' and vosk_model_zh:
-            selected_model = vosk_model_zh
-            print(f"Using Cantonese/Chinese model for transcription")
-        else:
-            selected_model = vosk_model
-            print(f"Using English model for transcription")
-        
         # Convert WebM audio to WAV format for Vosk
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
         wav_io = io.BytesIO()
         audio.set_frame_rate(16000).set_channels(1).set_sample_width(2).export(wav_io, format="wav")
         wav_data = wav_io.getvalue()
 
-        # Perform speech recognition
-        recognizer = KaldiRecognizer(selected_model, 16000)
+        # Perform speech recognition with English Vosk model
+        recognizer = KaldiRecognizer(vosk_model, 16000)
         if not recognizer.AcceptWaveform(wav_data):
             print("Vosk: Partial result, proceeding to final.")
 
@@ -603,9 +586,10 @@ def transcribe():
         text = result.get("text", "").strip()
 
         if text:
-            return jsonify({'text': text, 'language': lang})
+            return jsonify({'text': text})
         else:
             return jsonify({'error': 'No speech detected'}), 400
+
     except Exception as e:
         print(f"Transcription error: {str(e)}")
         return jsonify({'error': f'Transcription failed: {str(e)}'}), 500

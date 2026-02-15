@@ -6,180 +6,261 @@ This guide explains how to set up Cantonese/Chinese speech recognition for the c
 
 ## Prerequisites
 
-The application already supports English voice recognition. To add Cantonese support, you need to download the Chinese Vosk model.
+The application supports bilingual speech recognition:
+- **English**: Vosk offline model (already included)
+- **繁體中文 (Cantonese)**: SenseVoiceSmall from Alibaba FunAudioLLM (automatic download)
 
-## Step 1: Download the Chinese Vosk Model
+## Setup Instructions
 
-1. Visit the Vosk models page: https://alphacephei.com/vosk/models
+### Step 1: Install Required Dependencies
 
-2. Download the **Chinese model**: `vosk-model-cn-0.22`
-   - Direct download link: https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip
-   - Size: ~1.2 GB
-   - This model supports Mandarin and can understand Cantonese to some extent
-
-3. For better Cantonese support, you can also try:
-   - `vosk-model-small-cn-0.22` (smaller, faster, 42 MB)
-
-## Step 2: Extract and Place the Model
-
-### macOS/Linux:
+The application will automatically download the Cantonese model on first use. Simply ensure you have the required packages:
 
 ```bash
-# Navigate to the project directory
-cd /Users/lochunman/Desktop/Companion-Chatbot-for-Reducing-Loneliness-in-Elderly-Populations
-
-# Create voice_models directory if it doesn't exist
-mkdir -p voice_models
-
-# Extract the downloaded model
-cd voice_models
-unzip ~/Downloads/vosk-model-cn-0.22.zip
-
-# Verify the structure
-ls -la vosk-model-cn-0.22
+pip install -r requirements.txt
 ```
 
-### Windows:
+This will install:
+- `funasr` - Alibaba's speech recognition framework
+- `funasr-onnx` - ONNX runtime support
+- `torchaudio` - Audio processing for PyTorch
 
-```cmd
-cd voice_models
-# Extract the downloaded ZIP file to voice_models/vosk-model-cn-0.22
+### Step 2: Model Information
+
+#### English Speech Recognition
+- **Model**: Vosk Small English US 0.15
+- **Location**: `voice_models/vosk-model-small-en-us-0.15/`
+- **Type**: Offline, pre-downloaded
+- **Size**: ~40 MB
+
+#### Cantonese Speech Recognition  
+- **Model**: SenseVoiceSmall (FunAudioLLM)
+- **Source**: HuggingFace Hub - `FunAudioLLM/SenseVoiceSmall`
+- **Type**: Auto-download on first use
+- **Size**: ~300 MB (downloaded to cache)
+- **Performance**: 
+  - State-of-the-art Cantonese ASR
+  - 5-15x faster than Whisper
+  - Supports emotion recognition
+  - Trained on 9,600 hours of Cantonese speech
+
+### Step 3: How It Works
+
+When you start the Flask server, the application will:
+
+1. Load the English Vosk model (instant - already local)
+2. Attempt to load SenseVoiceSmall for Cantonese:
+   - First run: Downloads from HuggingFace (~300 MB)
+   - Subsequent runs: Loads from local cache
+
+You should see console output like:
+```
+✓ English Vosk model loaded from voice_models/vosk-model-small-en-us-0.15
+Loading SenseVoiceSmall model for Cantonese recognition...
+✓ SenseVoiceSmall (Cantonese) model loaded successfully
 ```
 
-## Step 3: Verify Installation
-
-After extraction, your project structure should look like:
-
-```
-voice_models/
-  ├── vosk-model-small-en-us-0.15/    # English model (already exists)
-  │   ├── am/
-  │   ├── conf/
-  │   ├── graph/
-  │   └── ivector/
-  └── vosk-model-cn-0.22/              # Chinese model (newly added)
-      ├── am/
-      ├── conf/
-      ├── graph/
-      └── ivector/
-```
-
-## Step 4: Test the Application
+### Step 4: Usage
 
 1. Start the Flask server:
    ```bash
    python run.py
    ```
 
-2. Check the console output. You should see:
-   ```
-   ✓ Cantonese model loaded from voice_models/vosk-model-cn-0.22
-   ```
+2. Log in to the application
 
-3. Log in and switch language to 繁中 (Traditional Chinese)
+3. **Switch Language:**
+   - Click `EN` button → English interface + English speech recognition
+   - Click `繁中` button → 繁體中文介面 + 廣東話語音識別
 
-4. Click the microphone button and speak in Cantonese
+4. **Use Voice Input:**
+   - Click the microphone button
+   - Speak in the selected language:
+     - English when `EN` is selected
+     - 廣東話 when `繁中` is selected
+   - The appropriate model will automatically process your speech
 
-## Language Switching
+## Technical Details
 
-### In the Application:
+### Language Detection
+- **Automatic routing**: The `/transcribe` endpoint automatically selects the appropriate model based on the user's language preference
+- **Session-based**: Language preference is stored in Flask session and database
 
-- **Top-right corner buttons:**
-  - `EN` - Switch to English
-  - `繁中` - Switch to Traditional Chinese (繁體中文)
+### Model Comparison
 
-- **Voice Recognition:**
-  - When language is set to EN → Uses English voice model
-  - When language is set to 繁中 → Uses Chinese voice model
+| Feature | English (Vosk) | Cantonese (SenseVoice) |
+|---------|----------------|------------------------|
+| Model Size | 40 MB | 300 MB |
+| Download | Pre-included | Auto-download |
+| Speed | Very Fast | Ultra Fast (15x faster than Whisper) |
+| Accuracy | High | State-of-the-art |
+| Offline | ✓ Yes | ✓ Yes (after first download) |
+| Punctuation | ✗ No | ✓ Yes |
+| Emotion Detection | ✗ No | ✓ Yes |
 
-### Supported Languages:
-
-| Language | Code | Voice Model | UI Translation |
-|----------|------|-------------|----------------|
-| English | en | vosk-model-small-en-us-0.15 | ✓ |
-| Traditional Chinese (Cantonese) | zh-HK | vosk-model-cn-0.22 | ✓ |
+### SenseVoiceSmall Features
+- Multilingual support (50+ languages including Cantonese)
+- Non-autoregressive architecture for low latency
+- Emotion recognition capabilities
+- Audio event detection (applause, laughter, etc.)
+- Trained on 9,600 hours of Cantonese speech data
 
 ## Troubleshooting
 
-### Model Not Loading
+### Model Download Issues
 
-If you see this warning:
+If SenseVoiceSmall fails to download:
+
 ```
-⚠ Cantonese model not found at voice_models/vosk-model-cn-0.22
+⚠ Could not load SenseVoiceSmall model: Connection timeout
 ```
 
-**Solution:**
-- Verify the model directory name matches exactly: `vosk-model-cn-0.22`
-- Check that all required subdirectories (am, conf, graph, ivector) exist
-- Ensure proper file permissions
+**Solutions:**
+1. **Check internet connection** - First download requires internet
+2. **Manual cache setup:**
+   ```bash
+   # Pre-download the model
+   python -c "from funasr import AutoModel; AutoModel(model='FunAudioLLM/SenseVoiceSmall', hub='hf')"
+   ```
+3. **Check disk space** - Model requires ~300 MB
+4. **Firewall/Proxy**: Ensure HuggingFace Hub access is allowed
 
 ### Voice Recognition Not Working
 
 1. **Check browser permissions:**
    - Browser → Settings → Privacy & Security → Microphone
-   - Allow microphone access for localhost/your domain
+   - Allow microphone access for localhost
 
-2. **Check console for errors:**
+2. **Verify model loading:**
+   ```
+   python run.py
+   ```
+   Look for: `✓ SenseVoiceSmall (Cantonese) model loaded successfully`
+
+3. **Check console for errors:**
    - Open browser Developer Tools (F12)
-   - Look for JavaScript errors in the Console tab
+   - Monitor Console and Network tabs
 
-3. **Test microphone:**
-   - Try recording in the normal mode first
+4. **Test microphone:**
    - Speak clearly, 6-12 inches from microphone
+   - Try English first to verify microphone works
 
 ### Poor Recognition Accuracy
 
 **For Cantonese:**
-- The model works best with standard Cantonese pronunciation
-- Speak clearly and at a moderate pace
+- Speak in standard Cantonese (廣州話/香港粵語)
+- Speak at moderate pace, enunciate clearly
 - Reduce background noise
-- Try the accessibility mode for better voice-first interaction
+- Position microphone properly
+- SenseVoice performs best with natural conversational Cantonese
 
-## Alternative Models
+**For English:**
+- Use clear American English accent for best results
+- Avoid extremely fast speech
 
-### For Better Cantonese Support:
+### Memory Issues
 
-1. **Smaller/Faster Model:**
-   ```
-   vosk-model-small-cn-0.22 (42 MB)
-   https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip
-   ```
+If you encounter memory errors:
+```
+RuntimeError: [enforce fail at alloc_cpu.cpp:114] data. DefaultCPUAllocator: not enough memory
+```
 
-2. **Larger/More Accurate Model:**
+**Solutions:**
+1. **Close other applications** to free RAM
+2. **Use CPU mode** (already default):
+   ```python
+   device="cpu"  # in run.py model loading
    ```
-   vosk-model-cn-0.22 (1.2 GB) - Recommended
-   https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip
-   ```
+3. **System Requirements:**
+   - Minimum: 4 GB RAM
+   - Recommended: 8 GB RAM
+
+## GPU Acceleration (Optional)
+
+To use GPU for faster Cantonese recognition, modify [run.py](run.py#L75):
+
+```python
+sensevoice_model = AutoModel(
+    model="FunAudioLLM/SenseVoiceSmall",
+    device="cuda:0",  # Change from "cpu" to "cuda:0"
+    hub="hf",
+)
+```
+
+**Requirements:**
+- NVIDIA GPU with CUDA support
+- PyTorch with CUDA installed
+- Adequate GPU memory (2+ GB VRAM)
 
 ## Docker Setup
 
-If using Docker, update the Dockerfile to download the Chinese model:
+Update your Dockerfile to support the new dependencies:
 
 ```dockerfile
-# Add this in the builder stage
-RUN cd /app/voice_models && \
-    wget https://alphacephei.com/vosk/models/vosk-model-cn-0.22.zip && \
-    unzip vosk-model-cn-0.22.zip && \
-    rm vosk-model-cn-0.22.zip
+FROM python:3.9-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application
+COPY . /app
+WORKDIR /app
+
+# Model will auto-download on first use
+EXPOSE 5000
+CMD ["python", "run.py"]
 ```
 
-## Notes
+## Language Support Table
 
-- The Chinese model supports both Mandarin and Cantonese, with better accuracy for Mandarin
-- For best results with Cantonese, consider training a custom model or using cloud-based services
-- Voice models are loaded once at application startup and kept in memory
-- Each model requires approximately 400-800 MB of RAM when loaded
+| Language | Code | Voice Model | Transcription | UI Translation | Notes |
+|----------|------|-------------|---------------|----------------|-------|
+| English | en | Vosk Small EN | ✓ | ✓ | Offline, 40 MB |
+| Traditional Chinese (Cantonese) | zh-HK | SenseVoiceSmall | ✓ | ✓ | Auto-download, 300 MB |
+
+## Performance Benchmarks
+
+### Cantonese Recognition (Character Error Rate)
+
+Based on [cantonese_asr_eval](https://github.com/AlienKevin/cantonese_asr_eval):
+
+| Domain | SenseVoice CER |
+|--------|----------------|
+| Mixed | 5.55% |
+| Daily Use | 5.64% |
+| Commands | 7.45% |
+| Yue & English | 9.05% |
+| Storytelling | 14.67% |
+| Synthetic | 10.58% |
+
+### Inference Speed
+- **SenseVoice**: ~70ms for 10 seconds of audio
+- **Whisper Large**: ~1050ms (15x slower)
+
+## Additional Resources
+
+- **SenseVoice GitHub**: https://github.com/FunAudioLLM/SenseVoice
+- **SenseVoice HuggingFace**: https://huggingface.co/FunAudioLLM/SenseVoiceSmall
+- **FunASR Documentation**: https://github.com/modelscope/FunASR
+- **Cantonese ASR Evaluation**: https://github.com/AlienKevin/cantonese_asr_eval
 
 ## Getting Help
 
 If you encounter issues:
-1. Check the console logs in the terminal running `python run.py`
-2. Review browser console for JavaScript errors
-3. Verify microphone permissions in your browser
-4. Test with the English model first to isolate the issue
+1. Check terminal logs: `python run.py`
+2. Review browser console (F12 → Console)
+3. Verify microphone permissions
+4. Test with English first to isolate the issue
+5. Check [GitHub Issues](https://github.com/FunAudioLLM/SenseVoice/issues) for known problems
 
-## Additional Resources
+---
 
-- Vosk API Documentation: https://alphacephei.com/vosk/
-- Vosk Models List: https://alphacephei.com/vosk/models
-- GitHub Repository: https://github.com/alphacep/vosk-api
+**Last Updated**: February 2026  
+**Tech Stack**: Flask + Vosk (EN) + SenseVoiceSmall (廣東話)

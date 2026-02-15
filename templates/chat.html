@@ -200,49 +200,106 @@
             });
 
             // ========== Voice Recording & Transcription ==========
+            // Current language from server template
+            const currentLang = '{{ lang if lang else "en" }}';
             let mediaRecorder;
             let audioChunks = [];
 
             $('#micBtn').on('click', function() {
-                navigator.mediaDevices.getUserMedia({ audio: true })
-                    .then(stream => {
-                        mediaRecorder = new MediaRecorder(stream);
-                        mediaRecorder.start();
-                        audioChunks = [];
+                if (currentLang === 'zh-HK') {
+                    // ---- Cantonese: Use browser Web Speech API (zero server deps) ----
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    if (!SpeechRecognition) {
+                        alert('你的瀏覽器不支援語音辨識，請使用 Chrome 或 Edge。');
+                        return;
+                    }
+                    const recognition = new SpeechRecognition();
+                    recognition.lang = 'zh-HK';        // Cantonese
+                    recognition.interimResults = false;  // Only final results
+                    recognition.continuous = false;      // Stop after one phrase
 
-                        $('#micBtn').addClass('d-none');
-                        $('#stopBtn').removeClass('d-none');
-                        
-                        // Show recording indicator and update placeholder
-                        $('#text').attr('placeholder', 'Recording...')
-                                  .after('<span class="recording-dot ms-2"></span>');
+                    $('#micBtn').addClass('d-none');
+                    $('#stopBtn').removeClass('d-none');
+                    $('#text').attr('placeholder', '錄音中...')
+                              .after('<span class="recording-dot ms-2"></span>');
 
-                        mediaRecorder.addEventListener('dataavailable', event => {
-                            audioChunks.push(event.data);
-                        });
-                    })
-                    .catch(err => {
-                        alert('Microphone access denied or unavailable: ' + err);
+                    recognition.start();
+
+                    // Store recognition instance so stop button can abort it
+                    window._activeRecognition = recognition;
+
+                    recognition.addEventListener('result', function(event) {
+                        const text = event.results[0][0].transcript;
+                        if (text) {
+                            $('#text').val(text);
+                            $('#messageArea').submit();
+                        }
                     });
+
+                    recognition.addEventListener('error', function(event) {
+                        console.error('Speech recognition error:', event.error);
+                        if (event.error === 'no-speech') {
+                            alert('未偵測到語音，請再試一次。');
+                        } else if (event.error === 'not-allowed') {
+                            alert('麥克風權限被拒絕，請檢查瀏覽器設定。');
+                        }
+                    });
+
+                    recognition.addEventListener('end', function() {
+                        $('#stopBtn').addClass('d-none');
+                        $('#micBtn').removeClass('d-none');
+                        $('.recording-dot').remove();
+                        $('#text').attr('placeholder', '{{ translations.type_message if translations else "輸入您的訊息..." }}');
+                        window._activeRecognition = null;
+                    });
+
+                } else {
+                    // ---- English: Use Vosk server-side (original, unchanged) ----
+                    navigator.mediaDevices.getUserMedia({ audio: true })
+                        .then(stream => {
+                            mediaRecorder = new MediaRecorder(stream);
+                            mediaRecorder.start();
+                            audioChunks = [];
+
+                            $('#micBtn').addClass('d-none');
+                            $('#stopBtn').removeClass('d-none');
+                            
+                            $('#text').attr('placeholder', 'Recording...')
+                                      .after('<span class="recording-dot ms-2"></span>');
+
+                            mediaRecorder.addEventListener('dataavailable', event => {
+                                audioChunks.push(event.data);
+                            });
+                        })
+                        .catch(err => {
+                            alert('Microphone access denied or unavailable: ' + err);
+                        });
+                }
             });
 
             $('#stopBtn').on('click', function() {
+                // Stop Cantonese Web Speech API recognition if active
+                if (window._activeRecognition) {
+                    window._activeRecognition.stop();
+                    return;
+                }
+
+                // Stop English Vosk recording
                 if (mediaRecorder && mediaRecorder.state === 'recording') {
                     mediaRecorder.stop();
-                    mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Clean up
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
 
                     $('#stopBtn').addClass('d-none');
                     $('#micBtn').removeClass('d-none');
                     
                     // Remove recording indicator and reset placeholder
                     $('.recording-dot').remove();
-                    $('#text').attr('placeholder', 'Type your message...');
+                    $('#text').attr('placeholder', '{{ translations.type_message if translations else "Type your message..." }}');
 
                     mediaRecorder.addEventListener('stop', () => {
                         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                         const formData = new FormData();
                         formData.append('audio', audioBlob, 'recording.webm');
-                        formData.append('language', '{{ lang if lang else "en" }}'); // Pass current language
 
                         $.ajax({
                             type: 'POST',
