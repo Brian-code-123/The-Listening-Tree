@@ -10,15 +10,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+HK:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="page-login">
+<body class="page-login" data-theme="light">
+
+    <!-- Theme Toggle -->
+    <button class="theme-toggle" id="themeToggle" title="{{ translations.theme_toggle if translations else 'Toggle Theme' }}">
+        <i class="fas fa-sun" id="themeIcon"></i>
+    </button>
 
     <!-- Language Switcher -->
     <div class="auth-lang-switch">
-        <a href="{{ url_for('set_language', lang='en') }}" class="{{ 'active' if lang == 'en' or not lang else '' }}">EN</a>
-        <a href="{{ url_for('set_language', lang='zh-HK') }}" class="{{ 'active' if lang == 'zh-HK' else '' }}">繁中</a>
+        <a href="/set_language/en" class="{{ 'active' if lang == 'en' or not lang else '' }}">EN</a>
+        <a href="/set_language/zh-HK" class="{{ 'active' if lang == 'zh-HK' else '' }}">繁中</a>
     </div>
+
     <div class="auth-container">
         <!-- Left Side - Welcome Message -->
         <div class="auth-welcome">
@@ -53,65 +59,47 @@
                 <p class="auth-subtitle">{{ translations.sign_in_desc if translations else 'Please enter your details to continue' }}</p>
             </div>
 
-            <!-- Flash Messages -->
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        <div class="alert alert-{{ category }}" role="alert">
-                            {{ message }}
-                        </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
+            <!-- Error Message -->
+            {% if error %}
+            <div class="alert alert-danger" role="alert">
+                {{ error }}
+            </div>
+            {% endif %}
 
-            <form method="POST" class="auth-form">
-                {{ form.hidden_tag() }}
-
+            <form method="POST" action="/login" class="auth-form">
                 <!-- Email Field -->
-                <div class="form-group">
+                <div class="form-group mb-3">
                     <label for="email" class="form-label">
                         <i class="fas fa-envelope"></i>
-                        {{ form.email.label.text }}
+                        {{ translations.email if translations else 'Email' }}
                     </label>
                     <div class="form-control-wrapper">
-                        {{ form.email(class="form-control", id="email", placeholder="example@gmail.com", autocomplete="email") }}
+                        <input type="email" name="email" class="form-control" id="email" placeholder="example@gmail.com" autocomplete="email" required>
                     </div>
-                    {% for error in form.email.errors %}
-                        <div class="text-danger">{{ error }}</div>
-                    {% endfor %}
                 </div>
 
                 <!-- Password Field -->
-                <div class="form-group">
+                <div class="form-group mb-3">
                     <label for="password" class="form-label">
                         <i class="fas fa-lock"></i>
-                        {{ form.password.label.text }}
+                        {{ translations.password if translations else 'Password' }}
                     </label>
                     <div class="form-control-wrapper">
-                        {{ form.password(class="form-control", id="password", autocomplete="current-password") }}
+                        <input type="password" name="password" class="form-control" id="password" autocomplete="current-password" required>
                         <button type="button" class="password-toggle" onclick="togglePassword()" aria-label="Show password">
                             <i class="fas fa-eye" id="password-icon"></i>
                         </button>
                     </div>
-                    {% for error in form.password.errors %}
-                        <div class="text-danger">{{ error }}</div>
-                    {% endfor %}
                     <div class="form-text text-end forgot-password-link">
-                        <a href="{{ url_for('forgot_password') }}" class="form-link text-decoration-none">
+                        <a href="/forgot_password" class="form-link text-decoration-none">
                             {{ translations.forgot_password if translations else 'Forgot password?' }}
                             <i class="fas fa-arrow-right"></i>
                         </a>
                     </div>
                 </div>
 
-                <!-- Remember Me -->
-                <div class="mb-3 form-check">
-                    {{ form.remember(class="form-check-input", id="remember") }}
-                    {{ form.remember.label(class="form-check-label", for="remember") }}
-                </div>
-
                 <!-- Submit Button -->
-                {{ form.submit(class="btn btn-primary w-100") }}
+                <button type="submit" class="btn btn-primary w-100">{{ translations.sign_in if translations else 'Sign In' }}</button>
             </form>
 
             <!-- Help Section -->
@@ -127,7 +115,7 @@
             <div class="auth-footer">
                 <p class="text-center mt-3">
                     {{ translations.no_account if translations else "Don't have an account?" }}
-                    <a href="{{ url_for('register') }}" class="form-link">
+                    <a href="/register" class="form-link">
                         {{ translations.register if translations else 'Register' }}
                         <i class="fas fa-arrow-right"></i>
                     </a>
@@ -136,13 +124,56 @@
         </div>
     </div>
 
+    <!-- Guide Helper FAB -->
+    <button class="guide-fab" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">?</button>
+    <div class="guide-panel" id="guidePanel">
+        <div class="guide-panel-header">
+            <h3><i class="fas fa-book-open"></i> {{ translations.guide_title if translations else 'Operation Guide' }}</h3>
+            <button class="guide-panel-close" id="guideClose"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="guide-panel-body">
+            <div class="guide-item">
+                <h4><i class="fas fa-sign-in-alt"></i> {{ translations.sign_in if translations else 'Sign In' }}</h4>
+                <p>{{ translations.sign_in_desc if translations else 'Please enter your details to continue' }}</p>
+            </div>
+            <div class="guide-item">
+                <h4><i class="fas fa-globe"></i> {{ translations.guide_lang_title if translations else 'Change Language' }}</h4>
+                <p>{{ translations.guide_lang_desc if translations else 'Click EN or 繁中 to switch language.' }}</p>
+            </div>
+            <div class="guide-item">
+                <h4><i class="fas fa-palette"></i> {{ translations.guide_theme_title if translations else 'Switch Theme' }}</h4>
+                <p>{{ translations.guide_theme_desc if translations else 'Click the sun/moon icon for dark/light mode.' }}</p>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Password toggle functionality
+        // Theme toggle
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.body.setAttribute('data-theme', savedTheme);
+        document.getElementById('themeIcon').className = savedTheme === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
+
+        document.getElementById('themeToggle').addEventListener('click', function() {
+            const current = document.body.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            document.getElementById('themeIcon').className = next === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
+        });
+
+        // Guide helper
+        document.getElementById('guideFab').addEventListener('click', function() {
+            document.getElementById('guidePanel').classList.toggle('show');
+        });
+        document.getElementById('guideClose').addEventListener('click', function() {
+            document.getElementById('guidePanel').classList.remove('show');
+        });
+
+        // Password toggle
         function togglePassword() {
             const field = document.getElementById('password');
             const icon = document.getElementById('password-icon');
-
             if (field.type === 'password') {
                 field.type = 'text';
                 icon.classList.remove('fa-eye');
@@ -154,7 +185,7 @@
             }
         }
 
-        // Auto-dismiss alerts after 5 seconds
+        // Auto-dismiss alerts
         document.addEventListener('DOMContentLoaded', function() {
             const alerts = document.querySelectorAll('.alert');
             alerts.forEach(alert => {

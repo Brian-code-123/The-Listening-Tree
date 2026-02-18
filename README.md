@@ -1,25 +1,7 @@
-<div align="center">
+# The Listening Tree 🌳
+### Bilingual AI Companion Chatbot for Elderly Wellness
 
-# 🌳 The Listening Tree
-
-**A bilingual AI companion chatbot for elderly wellness — reducing loneliness through conversation, voice interaction, and personalised care.**
-
-[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.0.0-000000?style=flat-square&logo=flask&logoColor=white)](https://flask.palletsprojects.com)
-[![License](https://img.shields.io/badge/License-Academic-blue?style=flat-square)](LICENSE)
-[![AI Model](https://img.shields.io/badge/AI-GLM--4--Flash-7C3AED?style=flat-square)](https://open.bigmodel.cn)
-[![Deployment](https://img.shields.io/badge/Deploy-Render-46E3B7?style=flat-square&logo=render&logoColor=white)](https://render.com)
-[![Project Size](https://img.shields.io/badge/Size-4.83_MB-brightgreen?style=flat-square)](.)
-
-[Features](#-features) · [Demo](#-quick-start) · [Architecture](#-architecture) · [Deployment](#-deployment) · [Contributing](#-contributing)
-
-</div>
-
----
-
-## Overview
-
-**The Listening Tree** is a full-stack web application built to address social isolation among the elderly. It provides warm, context-aware AI conversation, bilingual voice interaction (English & Cantonese), cognitive mini-games, and automated wellness reminders — all in a lightweight, accessible package deployable on free-tier hosting.
+A Flask-based elderly companion chatbot designed to reduce loneliness through natural conversations, memory games, and wellness reminders in both **English** and **Cantonese (繁體中文)**.
 
 ---
 

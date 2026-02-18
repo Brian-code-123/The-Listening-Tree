@@ -1,7 +1,8 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
-from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, BooleanField, SubmitField
-from wtforms.validators import DataRequired, Email, EqualTo, ValidationError
+from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 import os
 import json
 import sqlite3
@@ -9,36 +10,14 @@ from datetime import datetime
 import threading
 import secrets
 import random
-import urllib.request
+import httpx
+import base64
 from translations import get_text, get_all_translations, TRANSLATIONS
 
-app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)
-
-# =============================================================================
-# WTForms
-# =============================================================================
-class LoginForm(FlaskForm):
-    email = StringField('Email', validators=[DataRequired(), Email()])
-    password = PasswordField('Password', validators=[DataRequired()])
-    remember = BooleanField('Remember me')
-    submit = SubmitField('Login')
-
-class RegisterForm(FlaskForm):
-    email = StringField('Email', validators=[DataRequired(), Email()])
-    password = PasswordField('Password', validators=[DataRequired()])
-    confirm_password = PasswordField('Confirm Password',
-        validators=[DataRequired(), EqualTo('password', message='Passwords must match')])
-    submit = SubmitField('Register')
-
-    def validate_email(self, email):
-        conn = sqlite3.connect('reminders.db')
-        c = conn.cursor()
-        c.execute("SELECT id FROM users WHERE email = ?", (email.data,))
-        if c.fetchone():
-            conn.close()
-            raise ValidationError('Email already exists')
-        conn.close()
+app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(16))
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 # =============================================================================
 # Global State
@@ -49,43 +28,39 @@ user_api_histories = {}  # (user_id, lang) -> conversation history list
 CHAT_HISTORY_RETENTION_MINUTES = 30
 
 # =============================================================================
-# AI Configuration (ZhipuAI GLM-4-Flash API - FREE)
-# GLM-4-Flash: FREE model with conversational abilities, supports both
-# English and Chinese. Lightweight and fast, perfect for elderly companion chat.
-# Both English and Chinese chat use this API, keeping the project lightweight
-# for deployment on free hosting plans (Render, etc.)
-# Get your free API key at: https://open.bigmodel.cn
+# AI Configuration — Kimi 2.5 (Moonshot AI, OpenAI-compatible)
 # =============================================================================
-AI_API_KEY = os.environ.get('ZHIPUAI_API_KEY', '65268f3fb62b4d5c98f7f9d48003bad0.P1X9OHb6tLnNhdwj')
-AI_BASE_URL = os.environ.get('ZHIPUAI_BASE_URL', 'https://open.bigmodel.cn/api/paas/v4')
-AI_MODEL = os.environ.get('ZHIPUAI_MODEL', 'glm-4-flash')
+AI_API_KEY = os.environ.get('KIMI_API_KEY', 'sk-qoX1UHDwIuX52oMgxlNNSfuhYviY19latENX1TMgZCAfE0va')
+AI_BASE_URL = os.environ.get('KIMI_BASE_URL', 'https://api.moonshot.cn/v1')
+AI_MODEL = os.environ.get('KIMI_MODEL', 'kimi-k1.5-long-8k')
 
 if AI_API_KEY:
-    print(f"✓ AI ({AI_MODEL}) API configured for both English and Chinese")
+    print(f"✓ AI ({AI_MODEL}) API configured (Kimi / Moonshot)")
 else:
-    print("⚠ ZHIPUAI_API_KEY not set - chat will use warm fallback responses")
-    print("  Get your FREE key at: https://open.bigmodel.cn")
+    print("⚠ KIMI_API_KEY not set — chat will use warm fallback responses")
 
 print("✓ Speech recognition uses browser Web Speech API (zero server deps)")
 
-# Warm system prompt for Chinese (Cantonese-style elderly companion)
-WARM_SYSTEM_PROMPT_ZH = """你是一個非常溫暖、親切、有耐心的陪伴者，專門陪老人家聊天，稱呼對方為朋友。
+# System prompt — Cantonese elderly companion (Chinese) 
+WARM_SYSTEM_PROMPT_ZH = """你係一個非常溫暖、親切、有耐心嘅陪伴者，專門陪老人家傾偈，稱呼對方做朋友。
 
-你的說話風格：
-- 語氣溫柔、充滿關懷，像孫仔女咁同老人家傾偈
-- 說話簡單易明，唔用複雜詞語
-- 經常表達關心："你今日點呀？" "食咗飯未？" "有冇瞓得好？"
+你嘅講嘢風格：
+- 你一定要用廣東話（粵語）回答，唔好用普通話！
+- 語氣溫柔、充滿關懷，好似孫仔女咁同老人家傾偈
+- 講嘢簡單易明，唔用複雜詞語
+- 成日表達關心：「你今日點呀？」「食咗飯未？」「有冇瞓得好？」
 - 多用正面鼓勵嘅說話
-- 如果老人家講唔清楚或重複問題，要非常有耐心，唔好表現出不耐煩
-- 多用 "好呀"、"真係好"、"你真係叻" 等鼓勵說話
+- 如果老人家講唔清楚或重複問題，要非常有耐心，唔好顯出唔耐煩
+- 多用「好呀」、「真係好」、「你真係叻」等鼓勵說話
 - 偶爾分享溫馨小故事或回憶往事
 - 回覆保持簡短（2-4句），易讀易明
 
-IMPORTANT: 直接回答用戶的問題，不要顯示你的思考過程或分析步驟。
+重要：直接回答用戶嘅問題，唔好顯示你嘅思考過程或分析步驟。
+重要：你一定要用廣東話回答，唔好用普通話或者書面語。
 
-記住：你的目標是讓老人家感到溫暖、被關心、唔孤單。"""
+記住：你嘅目標係令老人家覺得溫暖、被關心、唔孤單。"""
 
-# Warm system prompt for English elderly companion
+# System prompt — English elderly companion
 WARM_SYSTEM_PROMPT_EN = """You are a very warm, kind, and patient companion who chats with elderly people.
 
 Your speaking style:
@@ -93,7 +68,7 @@ Your speaking style:
 - Use simple, easy-to-understand language
 - Frequently express concern: "How are you today?" "Have you eaten?" "Did you sleep well?"
 - Use positive encouragement and uplifting words
-- Be very patient if the user is unclear or repeats questions - never show impatience
+- Be very patient if the user is unclear or repeats questions — never show impatience
 - Use phrases like "That's wonderful!", "I'm so glad to hear that!", "You're doing great!"
 - Occasionally share warm stories or reminisce about good times
 - Keep responses short (2-4 sentences), easy to read and understand
@@ -126,50 +101,52 @@ WARM_FALLBACK_EN = [
     "I hear you, and I think that's wonderful. Tell me more! 😊",
 ]
 
-def call_ai(user_input, user_id, lang='en'):
-    """Call ZhipuAI GLM-4-Flash API for warm elderly conversation.
-    Supports both English and Chinese with appropriate system prompts.
-    Falls back to warm template responses if API is not configured."""
+async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: bool = False):
+    """Call Kimi 2.5 API for warm elderly conversation.
+    Supports web search via Kimi's built-in tool calling."""
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
     if not AI_API_KEY:
         return random.choice(fallback)
 
-    # Get or create conversation history per user per language
     history_key = (user_id, lang)
     if history_key not in user_api_histories:
         user_api_histories[history_key] = []
     history = user_api_histories[history_key]
 
-    # Build messages with system prompt + recent history
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-20:])  # Last 10 exchanges
+    messages.extend(history[-20:])
     messages.append({"role": "user", "content": user_input})
 
+    body = {
+        "model": AI_MODEL,
+        "messages": messages,
+        "temperature": 0.8,
+        "top_p": 0.9,
+        "max_tokens": 512,
+    }
+
+    # Enable Kimi web search if requested
+    if use_search:
+        body["tools"] = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
+
     try:
-        url = f"{AI_BASE_URL}/chat/completions"
-        data = json.dumps({
-            "model": AI_MODEL,
-            "messages": messages,
-            "temperature": 0.8,
-            "top_p": 0.9,
-            "max_tokens": 256,
-            "reasoning": False  # Disable reasoning mode for direct responses
-        }).encode('utf-8')
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{AI_BASE_URL}/chat/completions",
+                json=body,
+                headers={
+                    "Authorization": f"Bearer {AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            result = resp.json()
 
-        req = urllib.request.Request(url, data=data, headers={
-            "Authorization": f"Bearer {AI_API_KEY}",
-            "Content-Type": "application/json"
-        })
+        message = result["choices"][0]["message"]
+        reply = message.get("content") or message.get("reasoning_content", "")
 
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode('utf-8'))
-            message = result["choices"][0]["message"]
-            # GLM-4.7-Flash may use reasoning_content for detailed responses
-            reply = message.get("content") or message.get("reasoning_content", "")
-
-        # Update conversation history
         history.append({"role": "user", "content": user_input})
         history.append({"role": "assistant", "content": reply})
         if len(history) > 30:
@@ -179,6 +156,81 @@ def call_ai(user_input, user_id, lang='en'):
 
     except Exception as e:
         print(f"[AI] API error ({lang}): {e}")
+        return random.choice(fallback)
+
+
+async def call_ai_with_image(user_input: str, image_b64: str, user_id: int, lang: str = 'en'):
+    """Call Kimi API with an image attachment (base64-encoded)."""
+    system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
+    fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
+
+    if not AI_API_KEY:
+        return random.choice(fallback)
+
+    messages = [{"role": "system", "content": system_prompt}]
+
+    user_content = []
+    if user_input:
+        user_content.append({"type": "text", "text": user_input})
+    user_content.append({
+        "type": "image_url",
+        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
+    })
+    messages.append({"role": "user", "content": user_content})
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{AI_BASE_URL}/chat/completions",
+                json={"model": AI_MODEL, "messages": messages, "max_tokens": 512},
+                headers={
+                    "Authorization": f"Bearer {AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        return result["choices"][0]["message"].get("content", "")
+    except Exception as e:
+        print(f"[AI] Image API error: {e}")
+        return random.choice(fallback)
+
+
+async def call_ai_with_file(user_input: str, file_content: str, filename: str, user_id: int, lang: str = 'en'):
+    """Call Kimi API with file text content attached."""
+    system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
+    fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
+
+    if not AI_API_KEY:
+        return random.choice(fallback)
+
+    prompt = f"User uploaded a file named '{filename}'. Here is the content:\n\n{file_content[:8000]}\n\n"
+    if user_input:
+        prompt += f"User message: {user_input}"
+    else:
+        if lang == 'zh-HK':
+            prompt += "請幫我睇吓呢個檔案嘅內容，用廣東話簡單解釋畀我聽。"
+        else:
+            prompt += "Please help me understand this file content."
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{AI_BASE_URL}/chat/completions",
+                json={"model": AI_MODEL, "messages": messages, "max_tokens": 512},
+                headers={
+                    "Authorization": f"Bearer {AI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        return result["choices"][0]["message"].get("content", "")
+    except Exception as e:
+        print(f"[AI] File API error: {e}")
         return random.choice(fallback)
 
 # Chinese quiz questions
@@ -191,9 +243,7 @@ questions_zh = [
     {"question": "水嘅化學符號係咩？", "answer": "h2o"},
 ]
 
-# =============================================================================
-# Quiz Questions
-# =============================================================================
+# English quiz questions
 questions = [
     {"question": "What's the capital of France?", "answer": "paris"},
     {"question": "What's 2 + 2?", "answer": "4"},
@@ -206,12 +256,15 @@ questions = [
 # =============================================================================
 # Database Setup
 # =============================================================================
+def get_db():
+    conn = sqlite3.connect('reminders.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def init_db():
-    # Create tables with improved structure
     conn = sqlite3.connect('reminders.db')
     c = conn.cursor()
 
-    # Users table - stores user authentication and profile data
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
@@ -222,7 +275,6 @@ def init_db():
         is_active BOOLEAN DEFAULT 1
     )""")
 
-    # Reminders table - daily reminders with auto-expiration support
     c.execute("""CREATE TABLE IF NOT EXISTS reminders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -236,10 +288,10 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""")
 
-    # Chat history - conversation logs with soft delete capability
     c.execute("""CREATE TABLE IF NOT EXISTS chat_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
+        lang TEXT DEFAULT 'en',
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         is_bot BOOLEAN NOT NULL,
         message TEXT NOT NULL,
@@ -248,7 +300,6 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""")
 
-    # Preferences - user-specific settings
     c.execute("""CREATE TABLE IF NOT EXISTS preferences (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -260,261 +311,250 @@ def init_db():
         UNIQUE(user_id, pref_key)
     )""")
 
-    # Create indexes for better query performance
     c.execute('CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)')
 
+    # Migration: add lang column if missing (must run before lang index)
+    try:
+        c.execute("SELECT lang FROM chat_history LIMIT 1")
+    except sqlite3.OperationalError:
+        c.execute("ALTER TABLE chat_history ADD COLUMN lang TEXT DEFAULT 'en'")
+
+    c.execute('CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)')
     conn.commit()
     conn.close()
-    print("[DB] ✅ Database initialized with improved structure")
+    print("[DB] ✅ Database initialized")
 
 init_db()
 
 # =============================================================================
-# Helper Functions
+# Helpers
 # =============================================================================
 def cleanup_old_chat_history():
-    # Auto-cleanup chat messages older than retention period (soft delete)
-    # Runs periodically to maintain database performance
     conn = sqlite3.connect('reminders.db')
     c = conn.cursor()
     cutoff_time = datetime.now().timestamp() - (CHAT_HISTORY_RETENTION_MINUTES * 60)
     cutoff_datetime = datetime.fromtimestamp(cutoff_time).strftime('%Y-%m-%d %H:%M:%S')
-
-    c.execute("""UPDATE chat_history SET is_deleted = 1
-                 WHERE timestamp < ? AND is_deleted = 0""", (cutoff_datetime,))
-
+    c.execute("UPDATE chat_history SET is_deleted = 1 WHERE timestamp < ? AND is_deleted = 0", (cutoff_datetime,))
     deleted_count = c.rowcount
     conn.commit()
     conn.close()
-
     if deleted_count > 0:
         print(f"[CLEANUP] 🗑️  Marked {deleted_count} old messages as deleted")
 
 def auto_expire_old_reminders():
-    # Automatically expire reminders from previous days
-    # This ensures only today's reminders are shown while preserving history
-    # Reminders are marked inactive but not deleted from database
     conn = sqlite3.connect('reminders.db')
     c = conn.cursor()
-
     today = datetime.now().strftime('%Y-%m-%d')
-    current_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # Mark reminders created before today as inactive
-    c.execute("""
-        UPDATE reminders 
-        SET is_active = 0, updated_at = ?
-        WHERE DATE(created_at) < ? 
-        AND is_active = 1
-    """, (current_timestamp, today))
-
-    expired_count = c.rowcount
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    c.execute("UPDATE reminders SET is_active = 0, updated_at = ? WHERE DATE(created_at) < ? AND is_active = 1", (ts, today))
+    expired = c.rowcount
     conn.commit()
     conn.close()
+    if expired > 0:
+        print(f"[EXPIRE] 📅 Marked {expired} old reminders as inactive")
 
-    if expired_count > 0:
-        print(f"[EXPIRE] 📅 Marked {expired_count} old reminders as inactive")
-
-    return expired_count
-
-# =============================================================================
-# Background Tasks
-# =============================================================================
 def check_reminders():
-    # Background daemon thread that performs periodic maintenance:
-    # 1. Check and trigger active reminders at scheduled times
-    # 2. Auto-expire old reminders (hourly)
-    # 3. Cleanup old chat history (every 10 minutes)
     while True:
         conn = sqlite3.connect('reminders.db')
         c = conn.cursor()
-
         today = datetime.now().strftime('%Y-%m-%d')
         current_time = datetime.now().strftime('%H:%M')
-
-        # Only check today's active reminders for triggering
-        c.execute("""
-            SELECT u.email, r.label, r.reminder_time
-            FROM reminders r
-            JOIN users u ON r.user_id = u.id
-            WHERE r.is_active = 1 
-            AND DATE(r.created_at) = ?
-        """, (today,))
-
-        reminders = c.fetchall()
-
-        for email, label, reminder_time in reminders:
-            if reminder_time == current_time:
-                print(f"[REMINDER] ⏰ {email}: {label} at {reminder_time}")
-
+        c.execute("""SELECT u.email, r.label, r.reminder_time FROM reminders r
+                      JOIN users u ON r.user_id = u.id WHERE r.is_active = 1 AND DATE(r.created_at) = ?""", (today,))
+        for email, label, rtime in c.fetchall():
+            if rtime == current_time:
+                print(f"[REMINDER] ⏰ {email}: {label} at {rtime}")
         conn.close()
-
-        # Auto-expire old reminders every hour at minute 0
         if datetime.now().minute == 0:
             auto_expire_old_reminders()
-
-        # Cleanup old chat history every 10 minutes
         if datetime.now().minute % 10 == 0:
             cleanup_old_chat_history()
-
         threading.Event().wait(60)
 
-# Start background maintenance thread
 threading.Thread(target=check_reminders, daemon=True).start()
 
 # =============================================================================
-# Authentication
+# Session helpers
 # =============================================================================
-def login_required(f):
-    # Decorator to protect routes that require authentication
-    def wrap(*args, **kwargs):
-        if 'user_email' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    wrap.__name__ = f.__name__
-    return wrap
+def get_user(request: Request):
+    """Get current user id or None"""
+    return request.session.get('user_id')
 
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    form = RegisterForm()
-    lang = session.get('language', 'en')
-    if form.validate_on_submit():
-        conn = sqlite3.connect('reminders.db')
-        c = conn.cursor()
-        try:
-            c.execute("INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)",
-                     (form.email.data, form.password.data, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-            conn.commit()
-            flash(get_text('register_success', lang) if lang == 'zh-HK' else 'Registration successful! Please log in.', 'success')
-            return redirect(url_for('login'))
-        except sqlite3.IntegrityError:
-            flash(get_text('email_exists', lang) if lang == 'zh-HK' else 'Email already exists', 'danger')
-        finally:
-            conn.close()
-    return render_template('register.html', form=form, lang=lang, translations=get_all_translations(lang))
+def get_lang(request: Request):
+    return request.session.get('language', 'en')
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    form = LoginForm()
-    lang = session.get('language', 'en')
-    if form.validate_on_submit():
-        conn = sqlite3.connect('reminders.db')
-        c = conn.cursor()
-        c.execute("SELECT id, email FROM users WHERE email = ? AND password = ?",
-                 (form.email.data, form.password.data))
-        user = c.fetchone()
+def require_login(request: Request):
+    uid = get_user(request)
+    if uid is None:
+        raise HTTPException(status_code=303, headers={"Location": "/login"})
+    return uid
 
-        if user:
-            # Update last login timestamp
-            c.execute("UPDATE users SET last_login = ? WHERE id = ?",
-                     (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user[0]))
-            conn.commit()
+# =============================================================================
+# Template helpers — pass url_for to templates
+# =============================================================================
+def tpl_context(request: Request, **kwargs):
+    """Build template context with common variables."""
+    lang = get_lang(request)
+    ctx = {
+        "request": request,
+        "lang": lang,
+        "translations": get_all_translations(lang),
+    }
+    ctx.update(kwargs)
+    return ctx
 
-            session['user_email'] = user[1]
-            session['user_id'] = user[0]
-            
-            # Load user's saved language preference
-            c.execute("SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user[0],))
-            pref = c.fetchone()
-            if pref:
-                session['language'] = pref[0]
-            
-            flash('Login successful!' if lang == 'en' else '登入成功！', 'success')
-            conn.close()
-            return redirect(url_for('index'))
+# =============================================================================
+# Auth Routes
+# =============================================================================
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    lang = get_lang(request)
+    return templates.TemplateResponse("login.html", tpl_context(request))
 
+@app.post("/login", response_class=HTMLResponse)
+async def login_post(request: Request, email: str = Form(...), password: str = Form(...)):
+    lang = get_lang(request)
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT id, email FROM users WHERE email = ? AND password = ?", (email, password))
+    user = c.fetchone()
+    if user:
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        c.execute("UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
+        conn.commit()
+        request.session['user_email'] = user["email"]
+        request.session['user_id'] = user["id"]
+        # Load language preference
+        c.execute("SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
+        pref = c.fetchone()
+        if pref:
+            request.session['language'] = pref["pref_value"]
         conn.close()
-        flash('Invalid email or password' if lang == 'en' else '電郵或密碼錯誤', 'danger')
-    return render_template('login.html', form=form, lang=lang, translations=get_all_translations(lang))
+        return RedirectResponse(url="/", status_code=303)
+    conn.close()
+    return templates.TemplateResponse("login.html", tpl_context(request, error="Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"))
 
-@app.route('/forgot_password', methods=['GET', 'POST'])
-def forgot_password():
-    flash("Forgot password feature is coming soon!", "info")
-    return redirect(url_for('login'))
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    return templates.TemplateResponse("register.html", tpl_context(request))
 
-@app.route('/logout')
-def logout():
-    session.pop('user_email', None)
-    session.pop('user_id', None)
-    flash('You have been logged out.', 'info')
-    return redirect(url_for('login'))
+@app.post("/register", response_class=HTMLResponse)
+async def register_post(request: Request, email: str = Form(...), password: str = Form(...), confirm_password: str = Form(...)):
+    lang = get_lang(request)
+    if password != confirm_password:
+        return templates.TemplateResponse("register.html", tpl_context(request, error="Passwords do not match" if lang == 'en' else "密碼唔一致"))
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        c.execute("INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, password, ts))
+        conn.commit()
+        conn.close()
+        return RedirectResponse(url="/login", status_code=303)
+    except sqlite3.IntegrityError:
+        conn.close()
+        return templates.TemplateResponse("register.html", tpl_context(request, error="Email already exists" if lang == 'en' else "電郵已存在"))
 
-@app.route('/')
-@login_required
-def index():
-    # Get user language preference (default to 'en')
-    lang = session.get('language', 'en')
-    return render_template('chat.html', lang=lang, translations=get_all_translations(lang))
+@app.get("/forgot_password")
+async def forgot_password(request: Request):
+    return RedirectResponse(url="/login", status_code=303)
 
-@app.route('/set_language/<lang>')
-def set_language(lang):
-    """Set user's language preference (works for both logged-in and anonymous users)"""
-    if lang in ['en', 'zh-HK']:
-        session['language'] = lang
-        
-        # Save to database if user is logged in
-        if 'user_id' in session:
-            user_id = session['user_id']
-            conn = sqlite3.connect('reminders.db')
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)
+
+# =============================================================================
+# Main Pages
+# =============================================================================
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    uid = get_user(request)
+    if uid is None:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("chat.html", tpl_context(request))
+
+@app.get("/set_language/{lang}")
+async def set_language(request: Request, lang: str):
+    if lang in ('en', 'zh-HK'):
+        request.session['language'] = lang
+        uid = get_user(request)
+        if uid:
+            conn = get_db()
             c = conn.cursor()
-            c.execute(
-                "INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
-                (user_id, 'language', lang, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-            )
+            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            c.execute("INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
+                      (uid, 'language', lang, ts))
             conn.commit()
             conn.close()
-    
-    return redirect(request.referrer or url_for('login'))
+    referer = request.headers.get('referer', '/')
+    return RedirectResponse(url=referer, status_code=303)
 
-@app.route('/accessibility')
-@login_required
-def accessibility_mode():
-    """Accessibility mode with large buttons, high contrast, and voice-first interaction"""
-    lang = session.get('language', 'en')
-    return render_template('accessibility.html', lang=lang, translations=get_all_translations(lang))
-
-@app.route('/guidance')
-@login_required
-def guidance():
-    """Guidance page with examples and instructions"""
-    lang = session.get('language', 'en')
-    return render_template('guidance.html', lang=lang, translations=get_all_translations(lang))
+@app.get("/accessibility", response_class=HTMLResponse)
+async def accessibility_mode(request: Request):
+    uid = get_user(request)
+    if uid is None:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("accessibility.html", tpl_context(request))
 
 # =============================================================================
 # Chat Response
 # =============================================================================
-@app.route('/get_response', methods=['POST'])
-@login_required
-def get_response():
-    user_id = session['user_id']
+@app.post("/get_response")
+async def get_response(request: Request, msg: str = Form(...), use_search: str = Form("false")):
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"response": "Please log in."}, status_code=401)
 
-    # Preserve original input with proper capitalization for AI model
-    user_input_original = request.form['msg'].strip()
-
-    # Create lowercase version for command matching only
+    lang = get_lang(request)
+    user_input_original = msg.strip()
     user_input_lower = user_input_original.lower()
-
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    search_on = use_search == "true"
 
-    conn = sqlite3.connect('reminders.db')
+    conn = get_db()
     c = conn.cursor()
 
-    # Store original user message (preserving case for better AI context)
-    c.execute(
-        "INSERT INTO chat_history (user_id, timestamp, is_bot, message, is_deleted) VALUES (?, ?, 0, ?, 0)",
-        (user_id, timestamp, user_input_original)
-    )
+    # Store user message with language tag
+    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
+              (uid, lang, timestamp, user_input_original))
     conn.commit()
 
     response = ""
 
-    # --------------------- Reminder Commands ---------------------
-    # Support both English and Chinese commands
-    if user_input_lower.startswith("set reminder") or user_input_lower.startswith("設置提醒"):
+    # ---- Check for guide-helper trigger keywords ----
+    guide_triggers_zh = ['教', '點用', '唔明', '幫教']
+    guide_triggers_en = ['teach', 'how to use', 'help me', 'guide']
+    is_guide_trigger = False
+    if lang == 'zh-HK':
+        is_guide_trigger = any(t in user_input_original for t in guide_triggers_zh)
+    else:
+        is_guide_trigger = any(t in user_input_lower for t in guide_triggers_en)
+
+    if is_guide_trigger:
+        if lang == 'zh-HK':
+            response = ("📖 你可以撳右下角嘅「？」按鈕打開操作指引！入面有所有功能嘅使用方法。\n\n"
+                        "簡單指令：\n"
+                        "• 打字或者講嘢同我傾偈\n"
+                        "• 「設置提醒 食藥 09:00」設提醒\n"
+                        "• 「玩遊戲」開始問答遊戲\n"
+                        "• 撳🔍按鈕搜尋網頁\n"
+                        "• 撳📎按鈕上傳檔案")
+        else:
+            response = ("📖 Click the '?' button at the bottom-right to open the Operation Guide!\n\n"
+                        "Quick commands:\n"
+                        "• Type or speak to chat with me\n"
+                        "• 'set reminder take medicine 09:00' to set a reminder\n"
+                        "• 'play game' to start a quiz\n"
+                        "• Click 🔍 button for web search\n"
+                        "• Click 📎 button to upload files")
+
+    # ---- Reminder Commands ----
+    elif user_input_lower.startswith("set reminder") or user_input_lower.startswith("設置提醒"):
         if user_input_lower.startswith("設置提醒"):
             parts = user_input_original.split()
             if len(parts) >= 3 and ':' in parts[-1]:
@@ -522,10 +562,9 @@ def get_response():
                 label = ' '.join(parts[1:-1])
             else:
                 response = "格式：設置提醒 [活動] [HH:MM]"
-                c.execute("INSERT INTO chat_history (user_id, timestamp, is_bot, message, is_deleted) VALUES (?, ?, 1, ?, 0)", (user_id, timestamp, response))
-                conn.commit()
-                conn.close()
-                return jsonify({'response': response})
+                c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                conn.commit(); conn.close()
+                return JSONResponse({"response": response})
         else:
             parts = user_input_lower.split()
             if len(parts) >= 4 and len(parts[-1]) == 5 and parts[-1][2] == ':':
@@ -533,28 +572,21 @@ def get_response():
                 label = ' '.join(parts[2:-1])
             else:
                 response = "Usage: set reminder [activity] [HH:MM]"
-                c.execute("INSERT INTO chat_history (user_id, timestamp, is_bot, message, is_deleted) VALUES (?, ?, 1, ?, 0)", (user_id, timestamp, response))
-                conn.commit()
-                conn.close()
-                return jsonify({'response': response})
+                c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                conn.commit(); conn.close()
+                return JSONResponse({"response": response})
 
         try:
             h, m = map(int, time_str.split(':'))
             if 0 <= h <= 23 and 0 <= m <= 59:
-                c.execute(
-                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
-                    (user_id, label, time_str, timestamp)
-                )
+                c.execute("INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
+                          (uid, label, time_str, timestamp))
                 conn.commit()
-                lang = session.get('language', 'en')
-                if lang == 'zh-HK':
-                    response = f"提醒已設置：{label}，時間 {time_str}"
-                else:
-                    response = f"Reminder set: {label} at {time_str}"
+                response = f"提醒已設置：{label}，時間 {time_str}" if lang == 'zh-HK' else f"Reminder set: {label} at {time_str}"
             else:
-                response = "Invalid time. Use 24-hour format HH:MM" if session.get('language', 'en') == 'en' else "時間無效。請用24小時格式 HH:MM"
+                response = "時間無效。請用24小時格式 HH:MM" if lang == 'zh-HK' else "Invalid time. Use 24-hour format HH:MM"
         except:
-            response = "Invalid time format. Use HH:MM" if session.get('language', 'en') == 'en' else "時間格式錯誤。請用 HH:MM"
+            response = "時間格式錯誤。請用 HH:MM" if lang == 'zh-HK' else "Invalid time format. Use HH:MM"
 
     elif user_input_lower.startswith("delete reminder") or user_input_lower.startswith("刪除提醒"):
         if user_input_lower.startswith("刪除提醒"):
@@ -563,44 +595,35 @@ def get_response():
         else:
             parts = user_input_lower.split(maxsplit=2)
             label = parts[2] if len(parts) == 3 else None
-
         if label:
-            c.execute("DELETE FROM reminders WHERE user_id = ? AND label = ?", (user_id, label))
+            c.execute("DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
             if c.rowcount > 0:
-                response = f"已刪除提醒：{label}" if session.get('language', 'en') == 'zh-HK' else f"Deleted reminder: {label}"
+                response = f"已刪除提醒：{label}" if lang == 'zh-HK' else f"Deleted reminder: {label}"
             else:
-                response = "找不到該提醒。" if session.get('language', 'en') == 'zh-HK' else "No reminder found with that name."
+                response = "搵唔到呢個提醒。" if lang == 'zh-HK' else "No reminder found with that name."
             conn.commit()
         else:
-            response = "格式：刪除提醒 [活動]" if session.get('language', 'en') == 'zh-HK' else "Usage: delete reminder [activity]"
+            response = "格式：刪除提醒 [活動]" if lang == 'zh-HK' else "Usage: delete reminder [activity]"
 
-    # --------------------- Preferences ---------------------
+    # ---- Preference Commands ----
     elif user_input_lower.startswith("set preference"):
         parts = user_input_lower.split(maxsplit=4)
         if len(parts) >= 4:
             key, value = parts[2], parts[3]
-            c.execute(
-                "INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
-                (user_id, key, value, timestamp)
-            )
+            c.execute("INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
+                      (uid, key, value, timestamp))
             conn.commit()
             response = f"Preference updated: {key} = {value}"
         else:
             response = "Usage: set preference [key] [value]"
 
-    # --------------------- Quiz Game ---------------------
+    # ---- Quiz Game ----
     else:
-        lang = session.get('language', 'en')
         active_questions = questions_zh if lang == 'zh-HK' else questions
-        
-        game = user_game_states.setdefault(user_id, {
-            'is_game_mode': False,
-            'current_index': 0,
-            'current_question': None,
-            'correct_answer': None,
-            'score': 0
+        game = user_game_states.setdefault(uid, {
+            'is_game_mode': False, 'current_index': 0,
+            'current_question': None, 'correct_answer': None, 'score': 0
         })
-
         game_trigger = user_input_lower in ["play game", "玩遊戲", "玩游戏"]
         exit_trigger = user_input_lower in ["exit game", "退出遊戲", "退出游戏"]
 
@@ -624,16 +647,14 @@ def get_response():
                 response = f"Game stopped. You got {game['score']} out of {game['current_index']} correct so far!"
 
         elif game['is_game_mode']:
-            # Compare answers in lowercase for case-insensitive matching
             if user_input_lower.strip() == game['correct_answer']:
                 game['score'] += 1
-                response = f"正確！分數：{game['score']}" if lang == 'zh-HK' else f"Correct! Score: {game['score']}"
+                response = f"啱咗！分數：{game['score']}" if lang == 'zh-HK' else f"Correct! Score: {game['score']}"
             else:
                 if lang == 'zh-HK':
                     response = f"唔啱呀，答案係{game['correct_answer']}。分數：{game['score']}"
                 else:
                     response = f"Incorrect. The answer was {game['correct_answer']}. Score: {game['score']}"
-
             game['current_index'] += 1
             if game['current_index'] == len(active_questions):
                 if lang == 'zh-HK':
@@ -650,113 +671,128 @@ def get_response():
                 else:
                     response += f" Next question: {q['question']}"
 
-        # --------------------- Normal AI Chat ---------------------
+        # ---- Normal AI Chat ----
         else:
-            response = call_ai(user_input_original, user_id, lang)
+            response = await call_ai(user_input_original, uid, lang, use_search=search_on)
 
-    # Store bot response in database
-    c.execute(
-        "INSERT INTO chat_history (user_id, timestamp, is_bot, message, is_deleted) VALUES (?, ?, 1, ?, 0)",
-        (user_id, timestamp, response)
-    )
+    # Store bot response
+    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
+              (uid, lang, timestamp, response))
     conn.commit()
     conn.close()
 
-    return jsonify({'response': response})
+    return JSONResponse({"response": response})
+
+# =============================================================================
+# File Upload Endpoint
+# =============================================================================
+@app.post("/upload_file")
+async def upload_file(request: Request, file: UploadFile = File(...), msg: str = Form("")):
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"response": "Please log in."}, status_code=401)
+
+    lang = get_lang(request)
+    content_bytes = await file.read()
+
+    # Check file size (10 MB max)
+    if len(content_bytes) > 10 * 1024 * 1024:
+        err = get_text('file_too_large', lang)
+        return JSONResponse({"response": err})
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_db()
+    c = conn.cursor()
+
+    # Store user message
+    upload_msg = msg if msg else f"[Uploaded: {file.filename}]"
+    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
+              (uid, lang, timestamp, upload_msg))
+    conn.commit()
+
+    # Determine file type
+    fname = file.filename.lower() if file.filename else ""
+    is_image = any(fname.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
+
+    if is_image:
+        # Send image to Kimi vision
+        img_b64 = base64.b64encode(content_bytes).decode('utf-8')
+        response = await call_ai_with_image(msg, img_b64, uid, lang)
+    else:
+        # Try to read as text
+        try:
+            text_content = content_bytes.decode('utf-8')
+        except:
+            try:
+                text_content = content_bytes.decode('big5')
+            except:
+                text_content = content_bytes.decode('utf-8', errors='replace')
+        response = await call_ai_with_file(msg, text_content, file.filename, uid, lang)
+
+    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
+              (uid, lang, timestamp, response))
+    conn.commit()
+    conn.close()
+
+    return JSONResponse({"response": response})
 
 # =============================================================================
 # Reminder Management
 # =============================================================================
-@app.route('/deactivate_reminder', methods=['POST'])
-@login_required
-def deactivate_reminder():
-    # Manually deactivate a specific reminder
-    user_id = session['user_id']
-    label = request.form['label']
-
-    conn = sqlite3.connect('reminders.db')
+@app.post("/deactivate_reminder")
+async def deactivate_reminder(request: Request, label: str = Form(...)):
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"success": False}, status_code=401)
+    conn = get_db()
     c = conn.cursor()
-    c.execute(
-        "UPDATE reminders SET is_active = 0, updated_at = ? WHERE user_id = ? AND label = ?",
-        (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user_id, label)
-    )
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    c.execute("UPDATE reminders SET is_active = 0, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
     conn.commit()
     conn.close()
+    return JSONResponse({"success": True})
 
-    return jsonify({'success': True})
-
-# =============================================================================
-# API Endpoints
-# =============================================================================
-@app.route('/get_reminders', methods=['GET'])
-@login_required
-def get_reminders():
-    # Fetch reminders for current user
-    # Returns only today's reminders to keep UI clean
-    # Historical reminders remain in database but are not displayed
-    user_id = session['user_id']
-
-    conn = sqlite3.connect('reminders.db')
+@app.get("/get_reminders")
+async def get_reminders(request: Request):
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"reminders": []})
+    conn = get_db()
     c = conn.cursor()
-
-    # Get today's date for filtering
     today = datetime.now().strftime('%Y-%m-%d')
-
-    # Only fetch reminders created today
-    c.execute("""
-        SELECT label, reminder_time, is_active, created_at 
-        FROM reminders 
-        WHERE user_id = ? 
-        AND DATE(created_at) = ?
-        ORDER BY created_at DESC
-    """, (user_id, today))
-
-    reminders = [{
-        "label": r[0], 
-        "time": r[1], 
-        "active": bool(r[2])
-    } for r in c.fetchall()]
-
+    c.execute("SELECT label, reminder_time, is_active FROM reminders WHERE user_id = ? AND DATE(created_at) = ? ORDER BY created_at DESC",
+              (uid, today))
+    reminders = [{"label": r["label"], "time": r["reminder_time"], "active": bool(r["is_active"])} for r in c.fetchall()]
     conn.close()
+    return JSONResponse({"reminders": reminders})
 
-    return jsonify({'reminders': reminders})
-
-@app.route('/get_chat_history', methods=['GET'])
-@login_required
-def get_chat_history():
-    # Fetch chat history for current user (excluding deleted messages)
-    user_id = session['user_id']
-
-    conn = sqlite3.connect('reminders.db')
+@app.get("/get_chat_history")
+async def get_chat_history(request: Request):
+    """Get chat history for current user, filtered by current language."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"history": []})
+    lang = get_lang(request)
+    conn = get_db()
     c = conn.cursor()
-    c.execute("""
-        SELECT timestamp, is_bot, message 
-        FROM chat_history 
-        WHERE user_id = ? AND is_deleted = 0 
-        ORDER BY timestamp
-    """, (user_id,))
-
-    history = [{
-        "timestamp": r[0], 
-        "sender": "bot" if r[1] else "user",
-        "message": r[2]
-    } for r in c.fetchall()]
-
+    c.execute("SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = 0 ORDER BY timestamp",
+              (uid, lang))
+    history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
     conn.close()
-
-    return jsonify({'history': history})
+    return JSONResponse({"history": history})
 
 # =============================================================================
 # Run Server
 # =============================================================================
 if __name__ == '__main__':
+    import uvicorn
     print("=" * 70)
-    print("Elderly Companion Chatbot - Lightweight Cloud Edition")
+    print("The Listening Tree — Elderly Companion Chatbot")
     print("=" * 70)
-    print(f"[INFO] \u2705 AI Model: {AI_MODEL} (ZhipuAI API)")
-    print(f"[INFO] \u2705 Chat history retention: {CHAT_HISTORY_RETENTION_MINUTES} minutes")
-    print(f"[INFO] \u2705 Voice: Browser Web Speech API (EN + zh-HK)")
-    print(f"[INFO] \u2705 No heavy dependencies (PyTorch/Vosk removed)")
+    print(f"[INFO] ✅ AI Model: {AI_MODEL} (Kimi / Moonshot AI)")
+    print(f"[INFO] ✅ Chat history retention: {CHAT_HISTORY_RETENTION_MINUTES} min")
+    print(f"[INFO] ✅ Voice: Browser Web Speech API (EN + zh-HK)")
+    print(f"[INFO] ✅ Features: Web search, File upload, Image analysis")
     print("=" * 70)
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    uvicorn.run(app, host='0.0.0.0', port=port)
