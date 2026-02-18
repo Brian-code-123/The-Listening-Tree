@@ -72,8 +72,17 @@
                     <input type="file" id="fileInput" class="hidden-file-input" accept=".txt,.pdf,.csv,.json,.md,.py,.js,.html,.css,.doc,.docx">
                     <input type="file" id="imageInput" class="hidden-file-input" accept="image/*">
 
-                    <!-- Chat Messages Container -->
-                    <div id="messageFormeight" class="card-body msg_card_body"></div>
+                    <!-- Chat Messages Container with drag-drop zone -->
+                    <div id="chatDropZone" class="chat-drop-zone">
+                        <div id="messageFormeight" class="card-body msg_card_body"></div>
+                        <!-- Drag-and-drop overlay -->
+                        <div id="dragOverlay" class="drag-overlay">
+                            <div class="drag-overlay-inner">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <p>{{ translations.drop_file_here if translations else 'Drop file or image here' }}</p>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Message Input Area -->
                     <div class="card-footer">
@@ -168,7 +177,7 @@
             </div>
             <div class="guide-item">
                 <h4><i class="fas fa-paperclip"></i> {{ translations.guide_upload_title if translations else 'Upload Files' }}</h4>
-                <p>{{ translations.guide_upload_desc if translations else 'Click the upload button to share files.' }}</p>
+                <p>{{ translations.guide_upload_desc if translations else 'Click the upload buttons or drag & drop a file / image directly into the chat.' }}</p>
             </div>
             <div class="guide-item">
                 <h4><i class="fas fa-palette"></i> {{ translations.guide_theme_title if translations else 'Switch Theme' }}</h4>
@@ -221,19 +230,21 @@
             $(this).toggleClass('active', webSearchEnabled);
         });
 
-        // ========== File Upload ==========
-        $('#uploadBtn').on('click', function() { $('#fileInput').click(); });
-        $('#uploadImgBtn').on('click', function() { $('#imageInput').click(); });
-
-        $('#fileInput, #imageInput').on('change', function() {
-            const file = this.files[0];
-            if (!file) return;
+        // ========== File Upload (shared handler) ==========
+        function uploadFile(file) {
+            const isImage = file.type.startsWith('image/');
+            const maxMB = isImage ? 10 : 20;
+            if (file.size > maxMB * 1024 * 1024) {
+                const errMsg = '{{ translations.file_too_large if translations else "File is too large (max 20MB)" }}';
+                const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                appendMessage('bot', errMsg, t);
+                return;
+            }
             const formData = new FormData();
             formData.append('file', file);
             formData.append('msg', '');
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             appendMessage('user', '📎 ' + file.name, time);
-
             $.ajax({
                 type: 'POST',
                 url: '/upload_file',
@@ -249,8 +260,54 @@
                     appendMessage('bot', errMsg, time);
                 }
             });
+        }
+
+        $('#uploadBtn').on('click', function() { $('#fileInput').click(); });
+        $('#uploadImgBtn').on('click', function() { $('#imageInput').click(); });
+
+        $('#fileInput, #imageInput').on('change', function() {
+            if (this.files[0]) uploadFile(this.files[0]);
             this.value = '';
         });
+
+        // ========== Drag-and-Drop Upload ==========
+        const dropZone = document.getElementById('chatDropZone');
+        const dragOverlay = document.getElementById('dragOverlay');
+        let dragCounter = 0;
+
+        // Also allow dragging onto the whole card footer / input area
+        const chatCard = dropZone.closest('.card');
+
+        function onDragEnter(e) {
+            e.preventDefault();
+            dragCounter++;
+            dragOverlay.classList.add('active');
+        }
+        function onDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+        function onDragLeave(e) {
+            dragCounter--;
+            if (dragCounter <= 0) {
+                dragCounter = 0;
+                dragOverlay.classList.remove('active');
+            }
+        }
+        function onDrop(e) {
+            e.preventDefault();
+            dragCounter = 0;
+            dragOverlay.classList.remove('active');
+            const files = e.dataTransfer.files;
+            if (files && files.length > 0) {
+                uploadFile(files[0]);
+            }
+        }
+
+        chatCard.addEventListener('dragenter', onDragEnter);
+        chatCard.addEventListener('dragover', onDragOver);
+        chatCard.addEventListener('dragleave', onDragLeave);
+        chatCard.addEventListener('drop', onDrop);
 
         // ========== TTS (Text-to-Speech) ==========
         function speakText(text) {
@@ -359,54 +416,162 @@
         });
 
         // ========== Voice Recording (STT) ==========
-        $('#micBtn').on('click', function() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                alert('{{ translations.no_speech_support if translations else "Your browser does not support speech recognition." }}');
+        // State
+        let _recognition = null;
+        let _mediaRecorder = null;
+        let _audioChunks = [];
+        let _isRecording = false;
+
+        const PLACEHOLDER_IDLE     = '{{ translations.type_message if translations else "Type your message..." }}';
+        const PLACEHOLDER_LISTEN   = '{{ translations.recording if translations else "Listening... speak now" }}';
+        const PLACEHOLDER_PROCESS  = '{{ translations.processing if translations else "Processing..." }}';
+
+        function stopRecording() {
+            _isRecording = false;
+            $('#micBtn').removeClass('recording-active').find('i').removeClass('fa-stop').addClass('fa-microphone');
+            $('#stopBtn').addClass('d-none');
+            $('#text').attr('placeholder', PLACEHOLDER_IDLE);
+
+            if (_recognition) { try { _recognition.stop(); } catch(e){} _recognition = null; }
+            if (_mediaRecorder && _mediaRecorder.state !== 'inactive') { _mediaRecorder.stop(); }
+        }
+
+        // Encode Float32 PCM samples → 16-bit mono WAV Blob (pure JS, no library)
+        function encodePCMToWAV(samples, sampleRate) {
+            const numSamples = samples.length;
+            const buf = new ArrayBuffer(44 + numSamples * 2);
+            const view = new DataView(buf);
+            const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+            writeStr(0,  'RIFF');          view.setUint32(4,  36 + numSamples * 2, true);
+            writeStr(8,  'WAVE');          writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true);  view.setUint16(20, 1, true);   // PCM
+            view.setUint16(22, 1, true);                                   // mono
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);                      // byte rate
+            view.setUint16(32, 2, true);   view.setUint16(34, 16, true);  // block align, bits
+            writeStr(36, 'data');          view.setUint32(40, numSamples * 2, true);
+            let off = 44;
+            for (let i = 0; i < numSamples; i++) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                off += 2;
+            }
+            return new Blob([buf], { type: 'audio/wav' });
+        }
+
+        // Post WAV blob to Vosk /transcribe endpoint (English fallback)
+        async function voskTranscribe(wavBlob) {
+            const form = new FormData();
+            form.append('audio', wavBlob, 'audio.wav');
+            try {
+                const resp = await fetch('/transcribe', { method: 'POST', body: form });
+                const data = await resp.json();
+                return data.text || '';
+            } catch(e) {
+                console.error('[Vosk] Transcription failed:', e);
+                return '';
+            }
+        }
+
+        // Start recording — Web Speech API (all langs) with Vosk WAV fallback (en-US)
+        async function startRecording() {
+            // Request mic permission explicitly so the user sees a clear prompt
+            try {
+                await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch(e) {
+                alert('{{ translations.mic_denied if translations else "Microphone access denied. Please allow microphone access in your browser settings." }}');
                 return;
             }
-            const recognition = new SpeechRecognition();
-            recognition.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
-            recognition.interimResults = false;
-            recognition.continuous = false;
 
-            $('#micBtn').addClass('d-none');
-            $('#stopBtn').removeClass('d-none');
-            $('#text').attr('placeholder', '{{ translations.recording if translations else "Recording..." }}')
-                      .after('<span class="recording-dot ms-2"></span>');
+            _isRecording = true;
+            $('#micBtn').addClass('recording-active').find('i').removeClass('fa-microphone').addClass('fa-stop');
+            $('#stopBtn').addClass('d-none');  // mic btn IS the stop now
+            $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
 
-            recognition.start();
-            window._activeRecognition = recognition;
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                // ---- Web Speech API path ----
+                _recognition = new SpeechRecognition();
+                _recognition.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
+                _recognition.interimResults = true;   // ← live feedback while speaking
+                _recognition.continuous = false;
+                _recognition.maxAlternatives = 1;
 
-            recognition.addEventListener('result', function(event) {
-                const transcript = event.results[0][0].transcript;
-                if (transcript) {
-                    $('#text').val(transcript);
-                    $('#messageArea').submit();
-                }
-            });
+                _recognition.addEventListener('result', function(event) {
+                    let interim = '', final = '';
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const t = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) final += t;
+                        else interim += t;
+                    }
+                    // Show interim text live; finalise when speech ends
+                    $('#text').val(final || interim);
+                });
 
-            recognition.addEventListener('error', function(event) {
-                console.error('Speech recognition error:', event.error);
-                if (event.error === 'no-speech') {
-                    alert('{{ translations.no_speech_detected if translations else "No speech detected. Please try again." }}');
-                } else if (event.error === 'not-allowed') {
-                    alert('{{ translations.mic_denied if translations else "Microphone access denied." }}');
-                }
-            });
+                _recognition.addEventListener('error', function(event) {
+                    console.error('[STT] Web Speech error:', event.error);
+                    stopRecording();
+                    if (event.error === 'not-allowed') {
+                        alert('{{ translations.mic_denied if translations else "Microphone access denied." }}');
+                    } else if (event.error !== 'aborted') {
+                        alert('{{ translations.no_speech_detected if translations else "No speech detected. Please try again." }}');
+                    }
+                });
 
-            recognition.addEventListener('end', function() {
-                $('#stopBtn').addClass('d-none');
-                $('#micBtn').removeClass('d-none');
-                $('.recording-dot').remove();
-                $('#text').attr('placeholder', '{{ translations.type_message if translations else "Type your message..." }}');
-                window._activeRecognition = null;
-            });
+                _recognition.addEventListener('end', function() {
+                    stopRecording();
+                    const transcript = $('#text').val().trim();
+                    if (transcript) setTimeout(() => $('#messageArea').submit(), 150);
+                });
+
+                _recognition.start();
+
+            } else if (currentLang !== 'zh-HK') {
+                // ---- MediaRecorder → Vosk path (en-US only, no Web Speech) ----
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
+                _audioChunks = [];
+                _mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+
+                _mediaRecorder.addEventListener('dataavailable', e => { if (e.data.size) _audioChunks.push(e.data); });
+                _mediaRecorder.addEventListener('stop', async () => {
+                    $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
+                    stream.getTracks().forEach(t => t.stop());
+                    // Decode webm/opus → raw PCM via AudioContext, then encode as WAV
+                    const blob = new Blob(_audioChunks, { type: 'audio/webm' });
+                    const arrayBuf = await blob.arrayBuffer();
+                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                    const decoded = await audioCtx.decodeAudioData(arrayBuf);
+                    const pcm = decoded.getChannelData(0);
+                    const wavBlob = encodePCMToWAV(pcm, 16000);
+                    const text = await voskTranscribe(wavBlob);
+                    stopRecording();
+                    if (text) {
+                        $('#text').val(text);
+                        setTimeout(() => $('#messageArea').submit(), 150);
+                    } else {
+                        $('#text').attr('placeholder', PLACEHOLDER_IDLE);
+                    }
+                });
+
+                _mediaRecorder.start();
+            } else {
+                // zh-HK + no Web Speech API = unsupported
+                stopRecording();
+                alert('{{ translations.no_speech_support if translations else "Speech recognition is not supported in this browser." }}');
+            }
+        }
+
+        // Toggle mic: click once to start, click again to stop
+        $('#micBtn').on('click', function() {
+            if (_isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
         });
 
-        $('#stopBtn').on('click', function() {
-            if (window._activeRecognition) window._activeRecognition.stop();
-        });
+        // Keep stopBtn as secondary stop (shown only in legacy paths)
+        $('#stopBtn').on('click', function() { stopRecording(); });
 
         // ========== Reminder Management ==========
         function checkReminders() {

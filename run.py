@@ -20,6 +20,34 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # =============================================================================
+# Vosk STT — lazy-loaded on first use (English offline model)
+# =============================================================================
+_vosk_model = None
+_vosk_lock = threading.Lock()
+VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'voice_models', 'vosk-model-small-en-us-0.15')
+# On Vercel, Vosk binary isn't available — voice falls back to Web Speech API only
+ON_VERCEL = bool(os.environ.get('VERCEL'))
+
+def get_vosk_model():
+    global _vosk_model
+    if ON_VERCEL:
+        return None  # Vosk not available in Vercel serverless
+    if _vosk_model is not None:
+        return _vosk_model
+    with _vosk_lock:
+        if _vosk_model is None:
+            if os.path.isdir(VOSK_MODEL_PATH):
+                try:
+                    from vosk import Model
+                    _vosk_model = Model(VOSK_MODEL_PATH)
+                    print("[Vosk] ✅ English STT model loaded")
+                except Exception as e:
+                    print(f"[Vosk] ⚠ Failed to load model: {e}")
+            else:
+                print(f"[Vosk] ⚠ Model not found at {VOSK_MODEL_PATH}")
+    return _vosk_model
+
+# =============================================================================
 # Global State
 # =============================================================================
 user_game_states = {}
@@ -32,7 +60,7 @@ CHAT_HISTORY_RETENTION_MINUTES = 30
 # =============================================================================
 AI_API_KEY = os.environ.get('KIMI_API_KEY', 'sk-qoX1UHDwIuX52oMgxlNNSfuhYviY19latENX1TMgZCAfE0va')
 AI_BASE_URL = os.environ.get('KIMI_BASE_URL', 'https://api.moonshot.cn/v1')
-AI_MODEL = os.environ.get('KIMI_MODEL', 'kimi-k1.5-long-8k')
+AI_MODEL = os.environ.get('KIMI_MODEL', 'moonshot-v1-8k')
 
 if AI_API_KEY:
     print(f"✓ AI ({AI_MODEL}) API configured (Kimi / Moonshot)")
@@ -256,13 +284,17 @@ questions = [
 # =============================================================================
 # Database Setup
 # =============================================================================
+# On Vercel the project filesystem is read-only; /tmp is writable per instance.
+# For production persistence use an external DB (e.g. Turso / Neon / Supabase).
+_DB_PATH = os.environ.get('DATABASE_URL', '/tmp/reminders.db' if ON_VERCEL else 'reminders.db')
+
 def get_db():
-    conn = sqlite3.connect('reminders.db')
+    conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
-    conn = sqlite3.connect('reminders.db')
+    conn = sqlite3.connect(_DB_PATH)
     c = conn.cursor()
 
     c.execute("""CREATE TABLE IF NOT EXISTS users (
@@ -375,7 +407,11 @@ def check_reminders():
             cleanup_old_chat_history()
         threading.Event().wait(60)
 
-threading.Thread(target=check_reminders, daemon=True).start()
+# Background reminder thread — skip on Vercel (serverless has no persistent threads)
+if not ON_VERCEL:
+    threading.Thread(target=check_reminders, daemon=True).start()
+else:
+    print("[INFO] Vercel mode: background reminder thread disabled")
 
 # =============================================================================
 # Session helpers
@@ -735,6 +771,42 @@ async def upload_file(request: Request, file: UploadFile = File(...), msg: str =
     conn.close()
 
     return JSONResponse({"response": response})
+
+# =============================================================================
+# Voice Transcription (Vosk — English offline STT)
+# =============================================================================
+@app.post("/transcribe")
+async def transcribe_audio(request: Request, audio: UploadFile = File(...)):
+    """Receive raw 16 kHz mono PCM WAV from browser, return transcribed text."""
+    model = get_vosk_model()
+    if model is None:
+        return JSONResponse({"text": "", "error": "STT model not available"})
+
+    audio_bytes = await audio.read()
+    try:
+        from vosk import KaldiRecognizer
+        import wave, io
+
+        # Parse the WAV the browser sent
+        with wave.open(io.BytesIO(audio_bytes)) as wf:
+            if wf.getnchannels() != 1 or wf.getsampwidth() != 2:
+                return JSONResponse({"text": "", "error": "Expected mono 16-bit WAV"})
+            sample_rate = wf.getframerate()
+            frames = wf.readframes(wf.getnframes())
+
+        rec = KaldiRecognizer(model, sample_rate)
+        rec.SetWords(False)
+
+        CHUNK = 4000
+        for i in range(0, len(frames), CHUNK):
+            rec.AcceptWaveform(frames[i:i + CHUNK])
+
+        result = json.loads(rec.FinalResult())
+        text = result.get("text", "").strip()
+        return JSONResponse({"text": text})
+    except Exception as e:
+        print(f"[Vosk] Transcription error: {e}")
+        return JSONResponse({"text": "", "error": str(e)})
 
 # =============================================================================
 # Reminder Management
