@@ -10,9 +10,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="page-accessibility">
+<body class="page-accessibility" data-theme="light">
+
+    <!-- Theme Toggle -->
+    <button class="theme-toggle" id="themeToggle" title="{{ translations.theme_toggle if translations else 'Toggle Theme' }}">
+        <i class="fas fa-sun" id="themeIcon"></i>
+    </button>
 
     <!-- Skip to main content link -->
     <a href="#main-content" class="skip-link">{{ translations.skip_to_content if translations else 'Skip to main content' }}</a>
@@ -39,13 +44,13 @@
 
                 <!-- Language Switcher -->
                 <div class="lang-switch" role="group" aria-label="{{ translations.language_selector if translations else 'Language selector' }}">
-                    <a href="{{ url_for('set_language', lang='en') }}" 
+                    <a href="/set_language/en" 
                        class="lang-btn {{ 'active' if lang == 'en' else '' }}"
                        aria-label="English"
                        {{ 'aria-current=page' if lang == 'en' else '' }}>
                         EN
                     </a>
-                    <a href="{{ url_for('set_language', lang='zh-HK') }}" 
+                    <a href="/set_language/zh-HK" 
                        class="lang-btn {{ 'active' if lang == 'zh-HK' else '' }}"
                        aria-label="繁體中文"
                        {{ 'aria-current=page' if lang == 'zh-HK' else '' }}>
@@ -56,19 +61,13 @@
 
             <!-- Navigation Buttons -->
             <div class="nav-buttons">
-                <a href="{{ url_for('index') }}" 
+                <a href="/" 
                    class="btn-accessible btn-secondary-accessible"
                    aria-label="{{ translations.normal_mode if translations else 'Switch to normal mode' }}">
                     <span class="btn-icon" aria-hidden="true"><i class="fas fa-desktop"></i></span>
                     <span>{{ translations.normal_mode if translations else 'Normal Mode' }}</span>
                 </a>
-                <a href="{{ url_for('guidance') }}" 
-                   class="btn-accessible btn-warning-accessible"
-                   aria-label="{{ translations.guidance if translations else 'View guidance and help' }}">
-                    <span class="btn-icon" aria-hidden="true"><i class="fas fa-question-circle"></i></span>
-                    <span>{{ translations.guidance if translations else 'Help & Guidance' }}</span>
-                </a>
-                <a href="{{ url_for('logout') }}" 
+                <a href="/logout" 
                    class="btn-accessible btn-danger-accessible"
                    aria-label="{{ translations.logout if translations else 'Logout from application' }}">
                     <span class="btn-icon" aria-hidden="true"><i class="fas fa-sign-out-alt"></i></span>
@@ -96,7 +95,6 @@
                  role="log" 
                  aria-live="polite" 
                  aria-label="{{ translations.chat_messages if translations else 'Chat messages' }}">
-                <!-- Example messages - will be populated by JavaScript -->
                 <div class="message message-bot">
                     <div class="message-label">{{ translations.assistant if translations else 'Assistant' }}</div>
                     <div>{{ translations.welcome_message if translations else 'Hello! How can I help you today? You can type your message or use voice input.' }}</div>
@@ -157,11 +155,59 @@
         </main>
     </div>
 
+    <!-- Guide Helper FAB -->
+    <button class="guide-fab" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">?</button>
+    <div class="guide-panel" id="guidePanel">
+        <div class="guide-panel-header">
+            <h3><i class="fas fa-book-open"></i> {{ translations.guide_title if translations else 'Operation Guide' }}</h3>
+            <button class="guide-panel-close" id="guideClose"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="guide-panel-body">
+            <div class="guide-item">
+                <h4><i class="fas fa-comments"></i> {{ translations.guide_chat_title if translations else 'Chat with AI' }}</h4>
+                <p>{{ translations.guide_chat_desc if translations else 'Type a message or use voice input to talk with the AI assistant.' }}</p>
+            </div>
+            <div class="guide-item">
+                <h4><i class="fas fa-microphone"></i> {{ translations.guide_voice_title if translations else 'Voice Input' }}</h4>
+                <p>{{ translations.guide_voice_desc if translations else 'Press the Record button and speak. Your voice will be converted to text.' }}</p>
+            </div>
+            <div class="guide-item">
+                <h4><i class="fas fa-globe"></i> {{ translations.guide_lang_title if translations else 'Change Language' }}</h4>
+                <p>{{ translations.guide_lang_desc if translations else 'Click EN or 繁中 to switch language.' }}</p>
+            </div>
+            <div class="guide-item">
+                <h4><i class="fas fa-palette"></i> {{ translations.guide_theme_title if translations else 'Switch Theme' }}</h4>
+                <p>{{ translations.guide_theme_desc if translations else 'Click the sun/moon icon for dark/light mode.' }}</p>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const currentLang = '{{ lang if lang else "en" }}';
         let ttsEnabled = false;
+
+        // Theme toggle
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.body.setAttribute('data-theme', savedTheme);
+        document.getElementById('themeIcon').className = savedTheme === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
+
+        document.getElementById('themeToggle').addEventListener('click', function() {
+            const current = document.body.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            document.getElementById('themeIcon').className = next === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
+        });
+
+        // Guide helper
+        document.getElementById('guideFab').addEventListener('click', function() {
+            document.getElementById('guidePanel').classList.toggle('show');
+        });
+        document.getElementById('guideClose').addEventListener('click', function() {
+            document.getElementById('guidePanel').classList.remove('show');
+        });
 
         // Load chat history on page load
         window.addEventListener('load', function() {
@@ -280,9 +326,6 @@
         }
 
         function stopRecording() {
-            const recordBtn = document.getElementById('recordBtn');
-            const stopBtn = document.getElementById('stopBtn');
-
             if (window._activeRecognition) {
                 window._activeRecognition.stop();
             }
