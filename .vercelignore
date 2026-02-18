@@ -1,0 +1,22 @@
+# Exclude large model files — Vosk doesn't run in Vercel serverless
+voice_models/
+
+# Python local environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Local database (Vercel uses /tmp at runtime)
+reminders.db
+
+# macOS junk
+.DS_Store
+
+# Backup files
+*.bak
+
+# Development logs
+*.log
