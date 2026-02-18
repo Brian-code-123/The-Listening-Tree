@@ -4,73 +4,48 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ translations.app_name if translations else 'The Listening Tree' }}</title>
-    
-    <!-- Bootstrap 5 for responsive layout and styling -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    
-    <!-- Font Awesome for icons (microphone, send, etc.) -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    
-    <!-- CSS for recording indicator (blinking red dot) -->
-    <style>
-        .recording-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            background-color: red;
-            border-radius: 50%;
-            animation: blink 1s infinite;
-        }
-        @keyframes blink {
-            0% { opacity: 1; }
-            50% { opacity: 0; }
-        }
-        .language-switcher {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1000;
-            background: white;
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .language-switcher .btn {
-            margin: 0 5px;
-        }
-    </style>
 </head>
-<body>
-    <!-- Language Switcher -->
-    <div class="language-switcher">
-        <a href="{{ url_for('set_language', lang='en') }}" class="btn btn-sm {{ 'btn-primary' if lang == 'en' else 'btn-outline-primary' }}">EN</a>
-        <a href="{{ url_for('set_language', lang='zh-HK') }}" class="btn btn-sm {{ 'btn-primary' if lang == 'zh-HK' else 'btn-outline-primary' }}">繁中</a>
-        <a href="{{ url_for('accessibility_mode') }}" class="btn btn-sm btn-warning"><i class="fas fa-universal-access"></i></a>
-        <a href="{{ url_for('guidance') }}" class="btn btn-sm btn-info"><i class="fas fa-question-circle"></i></a>
-    </div>
+<body class="page-chat">
     <div class="container-fluid h-100">
         <div class="row justify-content-center h-100">
             
             <!-- Main Chat Area -->
-            <div class="col-md-10 col-xl-8 chat">
+            <div class="col-12 col-md-10 col-xl-8 chat">
                 <div class="card">
-                    <!-- Chat Header: Shows bot avatar, name, and logout button -->
+                    <!-- Chat Header -->
                     <div class="card-header msg_head">
-                        <div class="d-flex bd-highlight">
+                        <div class="d-flex bd-highlight align-items-center">
                             <img src="{{ url_for('static', filename='Chatbot.png') }}" class="rounded-circle user_img">
                             <div class="user_info ms-3">
                                 <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
                                 <p>{{ translations.tagline if translations else 'Your friendly companion' }}</p>
                             </div>
-                            <a href="{{ url_for('logout') }}" class="ms-auto btn btn-sm btn-danger">{{ translations.logout if translations else 'Logout' }}</a>
+                            <div class="ms-auto d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-light reminder-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#mobileReminders">
+                                    <i class="fas fa-bell"></i>
+                                </button>
+                                <a href="{{ url_for('logout') }}" class="btn btn-sm btn-danger">{{ translations.logout if translations else 'Logout' }}</a>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Chat Messages Container - Dynamically populated -->
+                    <!-- Navigation Bar: Language + Accessibility + Guidance + TTS toggle -->
+                    <div class="chat-nav-bar">
+                        <a href="{{ url_for('set_language', lang='en') }}" class="chat-nav-btn {{ 'active' if lang == 'en' }}">EN</a>
+                        <a href="{{ url_for('set_language', lang='zh-HK') }}" class="chat-nav-btn {{ 'active' if lang == 'zh-HK' }}">繁中</a>
+                        <a href="{{ url_for('accessibility_mode') }}" class="chat-nav-btn nav-icon" title="{{ translations.accessibility_mode if translations else 'Accessibility Mode' }}"><i class="fas fa-universal-access"></i></a>
+                        <a href="{{ url_for('guidance') }}" class="chat-nav-btn nav-icon" title="{{ translations.guidance if translations else 'Guidance' }}"><i class="fas fa-question-circle"></i></a>
+                        <button type="button" id="ttsToggle" class="chat-nav-btn nav-tts tts-on" title="{{ translations.toggle_speech if translations else 'Toggle text-to-speech' }}">
+                            <i class="fas fa-volume-up" id="ttsIcon"></i>
+                            <span id="ttsLabel">{{ translations.ai_voice_on if translations else '🔊 AI Voice: ON' }}</span>
+                        </button>
+                    </div>
+
+                    <!-- Chat Messages Container -->
                     <div id="messageFormeight" class="card-body msg_card_body">
-                        <!-- Chat history will be loaded here via AJAX on page load -->
                     </div>
 
                     <!-- Message Input Area -->
@@ -78,18 +53,12 @@
                         <form id="messageArea" class="d-flex">
                             <input type="text" id="text" name="msg" placeholder="{{ translations.type_message if translations else 'Type your message...' }}" 
                                    autocomplete="off" class="form-control type_msg" required>
-                            
-                            <!-- Microphone button - starts voice recording -->
                             <button type="button" id="micBtn" class="send_btn mic-btn" title="{{ translations.start_voice if translations else 'Start Voice' }}">
                                 <i class="fas fa-microphone"></i>
                             </button>
-                            
-                            <!-- Stop button - appears only during recording -->
                             <button type="button" id="stopBtn" class="send_btn stop-btn d-none" title="{{ translations.stop_voice if translations else 'Stop Voice' }}">
                                 <i class="fas fa-stop"></i>
                             </button>
-                            
-                            <!-- Send button - submits text message -->
                             <button type="submit" id="send" class="send_btn" title="{{ translations.send if translations else 'Send' }}">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
@@ -99,45 +68,99 @@
             </div>
 
             <!-- Sidebar: Reminder Panel -->
-            <div class="col-md-2">
-                <div class="card h-100" id="notificationPanel">
-                    <div class="card-header">Reminders</div>
+            <div class="col-12 col-md-2">
+                <div class="collapse d-md-none" id="mobileReminders">
+                    <div class="card mb-2">
+                        <div class="card-header">{{ translations.reminders if translations else 'Reminders' }}</div>
+                        <div class="card-body">
+                            <form id="reminderFormMobile">
+                                <div class="mb-2">
+                                    <input type="text" class="form-control form-control-sm" id="reminderLabelMobile"
+                                           placeholder="{{ translations.set_reminder if translations else 'e.g., take medicine' }}" required>
+                                </div>
+                                <div class="mb-2">
+                                    <input type="time" class="form-control form-control-sm" id="reminderTimeMobile" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary btn-sm w-100">{{ translations.set_reminder if translations else 'Set Reminder' }}</button>
+                            </form>
+                            <div id="reminderListMobile" class="mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card h-100 d-none d-md-block" id="notificationPanel">
+                    <div class="card-header">{{ translations.reminders if translations else 'Reminders' }}</div>
                     <div class="card-body">
-                        <!-- Form to create new reminders -->
                         <form id="reminderForm">
                             <div class="mb-3">
-                                <label for="reminderLabel" class="form-label">Reminder</label>
+                                <label for="reminderLabel" class="form-label">{{ translations.reminders if translations else 'Reminder' }}</label>
                                 <input type="text" class="form-control" id="reminderLabel" 
-                                       placeholder="e.g., take medicine" required>
+                                       placeholder="{{ translations.set_reminder if translations else 'e.g., take medicine' }}" required>
                             </div>
                             <div class="mb-3">
-                                <label for="reminderTime" class="form-label">Time (HH:MM)</label>
+                                <label for="reminderTime" class="form-label">{{ translations.reminder_format if translations else 'Time (HH:MM)' }}</label>
                                 <input type="time" class="form-control" id="reminderTime" required>
                             </div>
-                            <button type="submit" class="btn btn-primary w-100">Set Reminder</button>
+                            <button type="submit" class="btn btn-primary w-100">{{ translations.set_reminder if translations else 'Set Reminder' }}</button>
                         </form>
-
-                        <!-- List of active reminders -->
                         <div id="reminderList" class="mt-3"></div>
                     </div>
                 </div>
             </div>
-
         </div>
     </div>
 
-    <!-- Scripts -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     
     <script>
         $(document).ready(function() {
-            /**
-             * Appends a message bubble to the chat window
-             * @param {string} sender - "bot" or "user"
-             * @param {string} message - Text content
-             * @param {string} time - Formatted time (e.g., "14:35")
-             */
+            const currentLang = '{{ lang if lang else "en" }}';
+            let ttsEnabled = true;
+
+            // ========== TTS (Text-to-Speech) for AI responses ==========
+            function speakText(text) {
+                if (!ttsEnabled) return;
+                if (!('speechSynthesis' in window)) return;
+                window.speechSynthesis.cancel();
+                // Clean emojis for better TTS
+                const clean = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+                if (!clean) return;
+                const utterance = new SpeechSynthesisUtterance(clean);
+                utterance.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
+                utterance.rate = 0.85;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+                const voices = window.speechSynthesis.getVoices();
+                const langPrefix = currentLang === 'zh-HK' ? 'zh' : 'en';
+                const voice = voices.find(v => v.lang.startsWith(langPrefix));
+                if (voice) utterance.voice = voice;
+                window.speechSynthesis.speak(utterance);
+            }
+
+            // TTS Toggle
+            $('#ttsToggle').on('click', function() {
+                ttsEnabled = !ttsEnabled;
+                if (!ttsEnabled) window.speechSynthesis.cancel();
+                const onLabel = '{{ translations.ai_voice_on if translations else "🔊 AI Voice: ON" }}';
+                const offLabel = '{{ translations.ai_voice_off if translations else "🔊 AI Voice: OFF" }}';
+                if (ttsEnabled) {
+                    $('#ttsIcon').attr('class', 'fas fa-volume-up');
+                    $('#ttsLabel').text(onLabel);
+                    $('#ttsToggle').removeClass('tts-off').addClass('tts-on');
+                } else {
+                    $('#ttsIcon').attr('class', 'fas fa-volume-mute');
+                    $('#ttsLabel').text(offLabel);
+                    $('#ttsToggle').removeClass('tts-on').addClass('tts-off');
+                }
+            });
+
+            // Preload voices
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.getVoices();
+                window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+            }
+
+            // ========== Chat Messages ==========
             function appendMessage(sender, message, time) {
                 const botImg = "{{ url_for('static', filename='Chatbot.png') }}";
                 const userImg = "{{ url_for('static', filename='User.png') }}";
@@ -147,7 +170,7 @@
                 
                 const msgHTML = `
                     <div class="d-flex justify-content-${justify} mb-4">
-                        ${sender === 'bot' ? `<img src="${imgSrc}" class="rounded-circle user_img">` : ''}
+                        ${sender === 'bot' ? `<img src="${imgSrc}" class="rounded-circle user_img_msg">` : ''}
                         <div class="${msgClass}">
                             ${message}
                             <span class="msg_time">${time}</span>
@@ -155,208 +178,134 @@
                         ${sender === 'user' ? `<img src="${imgSrc}" class="rounded-circle user_img_msg">` : ''}
                     </div>
                 `;
-                
                 $('#messageFormeight').append(msgHTML);
                 $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
             }
 
-            // Load previous conversation when page loads
+            // Load chat history
             function loadChatHistory() {
                 $.get('/get_chat_history', function(data) {
-                    data.history.forEach(item => {
-                        const time = item.timestamp.split(' ')[1].substring(0, 5); // Extract HH:MM
-                        appendMessage(item.sender, item.message, time);
-                    });
+                    if (data.history && data.history.length > 0) {
+                        data.history.forEach(item => {
+                            const time = item.timestamp.split(' ')[1].substring(0, 5);
+                            appendMessage(item.sender, item.message, time);
+                        });
+                    } else {
+                        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const welcomeMsg = '{{ translations.welcome_chat if translations else "Hello! I am your friendly companion. How are you today? 😊" }}';
+                        appendMessage('bot', welcomeMsg, time);
+                    }
                 });
             }
             loadChatHistory();
 
-            // Handle text message submission
+            // Handle message submit
             $('#messageArea').on('submit', function(event) {
                 event.preventDefault();
                 const text = $('#text').val().trim();
                 if (!text) return;
-
                 const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 appendMessage('user', text, time);
-
+                $('#text').val('');
                 $.ajax({
                     type: 'POST',
                     url: '/get_response',
                     data: { msg: text },
                     success: function(data) {
                         appendMessage('bot', data.response, time);
-                        $('#text').val('');
-                        
-                        // Refresh reminder list if user modified reminders via chat
-                        if (text.toLowerCase().includes('reminder')) {
+                        speakText(data.response);
+                        if (text.toLowerCase().includes('reminder') || text.includes('提醒')) {
                             checkReminders();
                         }
                     },
                     error: function() {
-                        alert('Error sending message. Please try again.');
+                        const errMsg = '{{ translations.error_generic if translations else "Something went wrong. Please try again." }}';
+                        appendMessage('bot', errMsg, time);
                     }
                 });
             });
 
-            // ========== Voice Recording & Transcription ==========
-            // Current language from server template
-            const currentLang = '{{ lang if lang else "en" }}';
-            let mediaRecorder;
-            let audioChunks = [];
-
+            // ========== Voice Recording (STT) ==========
             $('#micBtn').on('click', function() {
-                if (currentLang === 'zh-HK') {
-                    // ---- Cantonese: Use browser Web Speech API (zero server deps) ----
-                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    if (!SpeechRecognition) {
-                        alert('你的瀏覽器不支援語音辨識，請使用 Chrome 或 Edge。');
-                        return;
-                    }
-                    const recognition = new SpeechRecognition();
-                    recognition.lang = 'zh-HK';        // Cantonese
-                    recognition.interimResults = false;  // Only final results
-                    recognition.continuous = false;      // Stop after one phrase
-
-                    $('#micBtn').addClass('d-none');
-                    $('#stopBtn').removeClass('d-none');
-                    $('#text').attr('placeholder', '錄音中...')
-                              .after('<span class="recording-dot ms-2"></span>');
-
-                    recognition.start();
-
-                    // Store recognition instance so stop button can abort it
-                    window._activeRecognition = recognition;
-
-                    recognition.addEventListener('result', function(event) {
-                        const text = event.results[0][0].transcript;
-                        if (text) {
-                            $('#text').val(text);
-                            $('#messageArea').submit();
-                        }
-                    });
-
-                    recognition.addEventListener('error', function(event) {
-                        console.error('Speech recognition error:', event.error);
-                        if (event.error === 'no-speech') {
-                            alert('未偵測到語音，請再試一次。');
-                        } else if (event.error === 'not-allowed') {
-                            alert('麥克風權限被拒絕，請檢查瀏覽器設定。');
-                        }
-                    });
-
-                    recognition.addEventListener('end', function() {
-                        $('#stopBtn').addClass('d-none');
-                        $('#micBtn').removeClass('d-none');
-                        $('.recording-dot').remove();
-                        $('#text').attr('placeholder', '{{ translations.type_message if translations else "輸入您的訊息..." }}');
-                        window._activeRecognition = null;
-                    });
-
-                } else {
-                    // ---- English: Use Vosk server-side (original, unchanged) ----
-                    navigator.mediaDevices.getUserMedia({ audio: true })
-                        .then(stream => {
-                            mediaRecorder = new MediaRecorder(stream);
-                            mediaRecorder.start();
-                            audioChunks = [];
-
-                            $('#micBtn').addClass('d-none');
-                            $('#stopBtn').removeClass('d-none');
-                            
-                            $('#text').attr('placeholder', 'Recording...')
-                                      .after('<span class="recording-dot ms-2"></span>');
-
-                            mediaRecorder.addEventListener('dataavailable', event => {
-                                audioChunks.push(event.data);
-                            });
-                        })
-                        .catch(err => {
-                            alert('Microphone access denied or unavailable: ' + err);
-                        });
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) {
+                    alert('{{ translations.no_speech_support if translations else "Your browser does not support speech recognition. Please use Chrome or Edge." }}');
+                    return;
                 }
+                const recognition = new SpeechRecognition();
+                recognition.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
+                recognition.interimResults = false;
+                recognition.continuous = false;
+
+                $('#micBtn').addClass('d-none');
+                $('#stopBtn').removeClass('d-none');
+                $('#text').attr('placeholder', '{{ translations.recording if translations else "Recording..." }}')
+                          .after('<span class="recording-dot ms-2"></span>');
+
+                recognition.start();
+                window._activeRecognition = recognition;
+
+                recognition.addEventListener('result', function(event) {
+                    const transcript = event.results[0][0].transcript;
+                    if (transcript) {
+                        $('#text').val(transcript);
+                        $('#messageArea').submit();
+                    }
+                });
+
+                recognition.addEventListener('error', function(event) {
+                    console.error('Speech recognition error:', event.error);
+                    if (event.error === 'no-speech') {
+                        alert('{{ translations.no_speech_detected if translations else "No speech detected. Please try again." }}');
+                    } else if (event.error === 'not-allowed') {
+                        alert('{{ translations.mic_denied if translations else "Microphone access denied. Please check browser settings." }}');
+                    }
+                });
+
+                recognition.addEventListener('end', function() {
+                    $('#stopBtn').addClass('d-none');
+                    $('#micBtn').removeClass('d-none');
+                    $('.recording-dot').remove();
+                    $('#text').attr('placeholder', '{{ translations.type_message if translations else "Type your message..." }}');
+                    window._activeRecognition = null;
+                });
             });
 
             $('#stopBtn').on('click', function() {
-                // Stop Cantonese Web Speech API recognition if active
                 if (window._activeRecognition) {
                     window._activeRecognition.stop();
-                    return;
-                }
-
-                // Stop English Vosk recording
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
-                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
-
-                    $('#stopBtn').addClass('d-none');
-                    $('#micBtn').removeClass('d-none');
-                    
-                    // Remove recording indicator and reset placeholder
-                    $('.recording-dot').remove();
-                    $('#text').attr('placeholder', '{{ translations.type_message if translations else "Type your message..." }}');
-
-                    mediaRecorder.addEventListener('stop', () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        const formData = new FormData();
-                        formData.append('audio', audioBlob, 'recording.webm');
-
-                        $.ajax({
-                            type: 'POST',
-                            url: '/transcribe',
-                            data: formData,
-                            processData: false,
-                            contentType: false,
-                            success: function(data) {
-                                if (data.text) {
-                                    $('#text').val(data.text);
-                                    $('#messageArea').submit(); // Auto-send transcribed text
-                                } else {
-                                    alert(data.error || 'No speech detected. Please try again.');
-                                }
-                            },
-                            error: function(xhr) {
-                                let errorMsg = 'Transcription failed. Please try again.';
-                                if (xhr.responseJSON && xhr.responseJSON.error) {
-                                    errorMsg = xhr.responseJSON.error;
-                                }
-                                alert(errorMsg);
-                            }
-                        });
-                    });
                 }
             });
 
             // ========== Reminder Management ==========
             function checkReminders() {
                 $.get('/get_reminders', function(data) {
-                    $('#reminderList').empty();
+                    $('#reminderList, #reminderListMobile').empty();
+                    if (!data.reminders || data.reminders.length === 0) {
+                        const noReminders = '{{ translations.no_reminders if translations else "No active reminders" }}';
+                        $('#reminderList, #reminderListMobile').append('<p class="text-muted small">' + noReminders + '</p>');
+                        return;
+                    }
                     data.reminders.forEach(reminder => {
-                        const item = `
-                            <div class="reminder-item mb-2 p-2 border rounded ${reminder.active ? '' : 'text-muted'}">
-                                ${reminder.label} at ${reminder.time}
-                                ${reminder.active ? '<button class="btn btn-danger btn-sm float-end delete-reminder" data-label="' + reminder.label + '">Delete</button>' : '(Done)'}
-                            </div>
-                        `;
-                        $('#reminderList').append(item);
+                        const deleteLabel = currentLang === 'zh-HK' ? '刪除' : 'Delete';
+                        const doneLabel = currentLang === 'zh-HK' ? '(已完成)' : '(Done)';
+                        const item = '<div class="reminder-item mb-2 p-2 border rounded ' + (reminder.active ? '' : 'text-muted') + '">'
+                            + reminder.label + ' - ' + reminder.time
+                            + (reminder.active ? ' <button class="btn btn-danger btn-sm float-end delete-reminder" data-label="' + reminder.label + '">' + deleteLabel + '</button>' : ' ' + doneLabel)
+                            + '</div>';
+                        $('#reminderList, #reminderListMobile').append(item);
                     });
-
-                    // Bind delete buttons
                     $('.delete-reminder').off('click').on('click', function() {
                         const label = $(this).data('label');
                         $.post('/get_response', { msg: 'delete reminder ' + label }, function(res) {
-                            if (res.response.includes('No')) {
-                                alert(res.response);
-                            }
                             checkReminders();
                         });
                     });
                 });
             }
             checkReminders();
-            setInterval(checkReminders, 60000); // Refresh list every minute
+            setInterval(checkReminders, 60000);
 
-            // Check for due reminders every minute and trigger alert + sound
             function scheduleReminderCheck() {
                 const now = new Date();
                 const delay = (60 - now.getSeconds()) * 1000;
@@ -372,15 +321,15 @@
                     data.reminders.forEach(reminder => {
                         if (reminder.time === currentTime && reminder.active) {
                             const audio = new Audio("{{ url_for('static', filename='notification.mp3') }}");
-                            audio.loop = true; // Loop the audio until OK is pressed
+                            audio.loop = true;
                             audio.play().catch(err => console.log('Audio play blocked:', err));
-
                             setTimeout(() => {
-                                alert('⏰ Reminder: ' + reminder.label + '!\n\nIt\'s time to ' + reminder.label.toLowerCase() + '!');
+                                const alertMsg = currentLang === 'zh-HK'
+                                    ? '⏰ 提醒：' + reminder.label + '！\n\n係時候' + reminder.label + '喇！'
+                                    : '⏰ Reminder: ' + reminder.label + '!\n\nIt\'s time to ' + reminder.label.toLowerCase() + '!';
+                                alert(alertMsg);
                                 audio.pause();
                                 audio.currentTime = 0;
-
-                                // Deactivate the reminder after confirmation
                                 $.post('/deactivate_reminder', { label: reminder.label }, function() {
                                     checkReminders();
                                 });
@@ -391,17 +340,19 @@
             }
             scheduleReminderCheck();
 
-            // Submit new reminder from sidebar form
-            $('#reminderForm').on('submit', function(e) {
+            $('#reminderForm, #reminderFormMobile').on('submit', function(e) {
                 e.preventDefault();
-                const label = $('#reminderLabel').val().trim();
-                const time = $('#reminderTime').val();
-
+                const isMobile = this.id === 'reminderFormMobile';
+                const label = $(isMobile ? '#reminderLabelMobile' : '#reminderLabel').val().trim();
+                const time = $(isMobile ? '#reminderTimeMobile' : '#reminderTime').val();
                 if (label && time) {
-                    $.post('/get_response', { msg: 'set reminder ' + label + ' ' + time }, function(data) {
+                    const cmd = currentLang === 'zh-HK'
+                        ? '設置提醒 ' + label + ' ' + time
+                        : 'set reminder ' + label + ' ' + time;
+                    $.post('/get_response', { msg: cmd }, function(data) {
                         alert(data.response);
-                        $('#reminderLabel').val('');
-                        $('#reminderTime').val('');
+                        $(isMobile ? '#reminderLabelMobile' : '#reminderLabel').val('');
+                        $(isMobile ? '#reminderTimeMobile' : '#reminderTime').val('');
                         checkReminders();
                     });
                 }

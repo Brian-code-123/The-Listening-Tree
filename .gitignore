@@ -1,10 +1,17 @@
+# Virtual environments
 venv/
+.venv/
+
+# Python cache
 __pycache__/
 *.pyc
-venv/
-__pycache__/
-*.pyc
-venv/
-__pycache__/
-*.pyc
+
+# Vosk voice models (no longer needed for deployment)
+voice_models/
+
+# Database
+reminders.db
+
+# Environment
+.env
 .DS_Store

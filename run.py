@@ -2,17 +2,14 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, BooleanField, SubmitField
 from wtforms.validators import DataRequired, Email, EqualTo, ValidationError
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
 import os
 import json
-import io
 import sqlite3
 from datetime import datetime
 import threading
 import secrets
-from vosk import Model, KaldiRecognizer
-from pydub import AudioSegment
+import random
+import urllib.request
 from translations import get_text, get_all_translations, TRANSLATIONS
 
 app = Flask(__name__)
@@ -46,26 +43,153 @@ class RegisterForm(FlaskForm):
 # =============================================================================
 # Global State
 # =============================================================================
-user_chat_histories = {}
 user_game_states = {}
+user_api_histories = {}  # (user_id, lang) -> conversation history list
 
-# =============================================================================
-# Model Loading
-# =============================================================================
-model_name = "microsoft/DialoGPT-medium"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
-tokenizer.pad_token = tokenizer.eos_token
-
-# English Vosk Model for speech recognition (English only)
-# Cantonese speech recognition is handled client-side via Web Speech API
-EN_MODEL_PATH = os.path.join('voice_models', 'vosk-model-small-en-us-0.15')
-vosk_model = Model(EN_MODEL_PATH)
-print(f"✓ English Vosk model loaded from {EN_MODEL_PATH}")
-print(f"✓ Cantonese speech recognition uses browser Web Speech API (zero server deps)")
-
-MAX_HISTORY_TOKENS = 1024
 CHAT_HISTORY_RETENTION_MINUTES = 30
+
+# =============================================================================
+# AI Configuration (ZhipuAI GLM-4-Flash API - FREE)
+# GLM-4-Flash: FREE model with conversational abilities, supports both
+# English and Chinese. Lightweight and fast, perfect for elderly companion chat.
+# Both English and Chinese chat use this API, keeping the project lightweight
+# for deployment on free hosting plans (Render, etc.)
+# Get your free API key at: https://open.bigmodel.cn
+# =============================================================================
+AI_API_KEY = os.environ.get('ZHIPUAI_API_KEY', '65268f3fb62b4d5c98f7f9d48003bad0.P1X9OHb6tLnNhdwj')
+AI_BASE_URL = os.environ.get('ZHIPUAI_BASE_URL', 'https://open.bigmodel.cn/api/paas/v4')
+AI_MODEL = os.environ.get('ZHIPUAI_MODEL', 'glm-4-flash')
+
+if AI_API_KEY:
+    print(f"✓ AI ({AI_MODEL}) API configured for both English and Chinese")
+else:
+    print("⚠ ZHIPUAI_API_KEY not set - chat will use warm fallback responses")
+    print("  Get your FREE key at: https://open.bigmodel.cn")
+
+print("✓ Speech recognition uses browser Web Speech API (zero server deps)")
+
+# Warm system prompt for Chinese (Cantonese-style elderly companion)
+WARM_SYSTEM_PROMPT_ZH = """你是一個非常溫暖、親切、有耐心的陪伴者，專門陪老人家聊天，稱呼對方為朋友。
+
+你的說話風格：
+- 語氣溫柔、充滿關懷，像孫仔女咁同老人家傾偈
+- 說話簡單易明，唔用複雜詞語
+- 經常表達關心："你今日點呀？" "食咗飯未？" "有冇瞓得好？"
+- 多用正面鼓勵嘅說話
+- 如果老人家講唔清楚或重複問題，要非常有耐心，唔好表現出不耐煩
+- 多用 "好呀"、"真係好"、"你真係叻" 等鼓勵說話
+- 偶爾分享溫馨小故事或回憶往事
+- 回覆保持簡短（2-4句），易讀易明
+
+IMPORTANT: 直接回答用戶的問題，不要顯示你的思考過程或分析步驟。
+
+記住：你的目標是讓老人家感到溫暖、被關心、唔孤單。"""
+
+# Warm system prompt for English elderly companion
+WARM_SYSTEM_PROMPT_EN = """You are a very warm, kind, and patient companion who chats with elderly people.
+
+Your speaking style:
+- Gentle and caring tone, like a grandchild talking with their grandparent
+- Use simple, easy-to-understand language
+- Frequently express concern: "How are you today?" "Have you eaten?" "Did you sleep well?"
+- Use positive encouragement and uplifting words
+- Be very patient if the user is unclear or repeats questions - never show impatience
+- Use phrases like "That's wonderful!", "I'm so glad to hear that!", "You're doing great!"
+- Occasionally share warm stories or reminisce about good times
+- Keep responses short (2-4 sentences), easy to read and understand
+
+IMPORTANT: Answer the user's questions directly without showing your reasoning process or analysis steps.
+
+Remember: Your goal is to make elderly people feel warm, cared for, and less lonely."""
+
+# Warm fallback responses (used when API key is not configured)
+WARM_FALLBACK_ZH = [
+    "你好呀！好開心見到你。你今日過得點呀？😊",
+    "唔好擔心，有咩事都可以同我講。我會一直陪住你㗎！",
+    "你講嘅嘢我都有聽到，我覺得你真係好叻呀！",
+    "好呀好呀，繼續同我傾偈啦！我最鍾意聽你講嘢。",
+    "你真係好叻！記得要照顧自己身體呀，食多啲好嘢。😊",
+    "多謝你同我分享，你嘅故事真係好有趣！繼續講啦！",
+    "我明白你嘅感受。記住，你唔係一個人，我會一直陪住你。",
+    "哈哈，你講嘅嘢真係好得意！你成日都咁開心就好喇。",
+    "今日天氣點呀？記得著多件衫，唔好凍親呀！",
+    "你有冇瞓得好呀？早啲瞓覺對身體好㗎。",
+]
+
+WARM_FALLBACK_EN = [
+    "That's really interesting! Tell me more about that, I'd love to hear. 😊",
+    "I understand what you mean. How does that make you feel?",
+    "Thank you for sharing that with me. I really enjoy our conversations.",
+    "That sounds lovely! What else have you been up to today?",
+    "I appreciate you telling me about that. Is there anything else on your mind?",
+    "It's always so nice chatting with you. What else would you like to talk about?",
+    "I hear you, and I think that's wonderful. Tell me more! 😊",
+]
+
+def call_ai(user_input, user_id, lang='en'):
+    """Call ZhipuAI GLM-4-Flash API for warm elderly conversation.
+    Supports both English and Chinese with appropriate system prompts.
+    Falls back to warm template responses if API is not configured."""
+    system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
+    fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
+
+    if not AI_API_KEY:
+        return random.choice(fallback)
+
+    # Get or create conversation history per user per language
+    history_key = (user_id, lang)
+    if history_key not in user_api_histories:
+        user_api_histories[history_key] = []
+    history = user_api_histories[history_key]
+
+    # Build messages with system prompt + recent history
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(history[-20:])  # Last 10 exchanges
+    messages.append({"role": "user", "content": user_input})
+
+    try:
+        url = f"{AI_BASE_URL}/chat/completions"
+        data = json.dumps({
+            "model": AI_MODEL,
+            "messages": messages,
+            "temperature": 0.8,
+            "top_p": 0.9,
+            "max_tokens": 256,
+            "reasoning": False  # Disable reasoning mode for direct responses
+        }).encode('utf-8')
+
+        req = urllib.request.Request(url, data=data, headers={
+            "Authorization": f"Bearer {AI_API_KEY}",
+            "Content-Type": "application/json"
+        })
+
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+            message = result["choices"][0]["message"]
+            # GLM-4.7-Flash may use reasoning_content for detailed responses
+            reply = message.get("content") or message.get("reasoning_content", "")
+
+        # Update conversation history
+        history.append({"role": "user", "content": user_input})
+        history.append({"role": "assistant", "content": reply})
+        if len(history) > 30:
+            user_api_histories[history_key] = history[-20:]
+
+        return reply
+
+    except Exception as e:
+        print(f"[AI] API error ({lang}): {e}")
+        return random.choice(fallback)
+
+# Chinese quiz questions
+questions_zh = [
+    {"question": "法國嘅首都係邊度？", "answer": "巴黎"},
+    {"question": "2 + 2 等於幾多？", "answer": "4"},
+    {"question": "晴天嘅天空係咩顏色？", "answer": "藍色"},
+    {"question": "有一種水果，外面紅色，入面白色，有好多黑色嘅籽。係咩嚟㗎？", "answer": "西瓜"},
+    {"question": "邊個月份有28日？", "answer": "每個月都有至少28日"},
+    {"question": "水嘅化學符號係咩？", "answer": "h2o"},
+]
 
 # =============================================================================
 # Quiz Questions
@@ -257,6 +381,7 @@ def login_required(f):
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     form = RegisterForm()
+    lang = session.get('language', 'en')
     if form.validate_on_submit():
         conn = sqlite3.connect('reminders.db')
         c = conn.cursor()
@@ -264,17 +389,18 @@ def register():
             c.execute("INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)",
                      (form.email.data, form.password.data, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             conn.commit()
-            flash('Registration successful! Please log in.', 'success')
+            flash(get_text('register_success', lang) if lang == 'zh-HK' else 'Registration successful! Please log in.', 'success')
             return redirect(url_for('login'))
         except sqlite3.IntegrityError:
-            flash('Email already exists', 'danger')
+            flash(get_text('email_exists', lang) if lang == 'zh-HK' else 'Email already exists', 'danger')
         finally:
             conn.close()
-    return render_template('register.html', form=form)
+    return render_template('register.html', form=form, lang=lang, translations=get_all_translations(lang))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
+    lang = session.get('language', 'en')
     if form.validate_on_submit():
         conn = sqlite3.connect('reminders.db')
         c = conn.cursor()
@@ -290,13 +416,20 @@ def login():
 
             session['user_email'] = user[1]
             session['user_id'] = user[0]
-            flash('Login successful!', 'success')
+            
+            # Load user's saved language preference
+            c.execute("SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user[0],))
+            pref = c.fetchone()
+            if pref:
+                session['language'] = pref[0]
+            
+            flash('Login successful!' if lang == 'en' else '登入成功！', 'success')
             conn.close()
             return redirect(url_for('index'))
 
         conn.close()
-        flash('Invalid email or password', 'danger')
-    return render_template('login.html', form=form)
+        flash('Invalid email or password' if lang == 'en' else '電郵或密碼錯誤', 'danger')
+    return render_template('login.html', form=form, lang=lang, translations=get_all_translations(lang))
 
 @app.route('/forgot_password', methods=['GET', 'POST'])
 def forgot_password():
@@ -318,26 +451,24 @@ def index():
     return render_template('chat.html', lang=lang, translations=get_all_translations(lang))
 
 @app.route('/set_language/<lang>')
-@login_required
 def set_language(lang):
-    """Set user's language preference"""
+    """Set user's language preference (works for both logged-in and anonymous users)"""
     if lang in ['en', 'zh-HK']:
         session['language'] = lang
-        user_id = session['user_id']
         
-        # Save to database
-        conn = sqlite3.connect('reminders.db')
-        c = conn.cursor()
-        c.execute(
-            "INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
-            (user_id, 'language', lang, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        )
-        conn.commit()
-        conn.close()
-        
-        flash(f"Language changed to {'English' if lang == 'en' else '繁體中文'}", 'success')
+        # Save to database if user is logged in
+        if 'user_id' in session:
+            user_id = session['user_id']
+            conn = sqlite3.connect('reminders.db')
+            c = conn.cursor()
+            c.execute(
+                "INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
+                (user_id, 'language', lang, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            )
+            conn.commit()
+            conn.close()
     
-    return redirect(request.referrer or url_for('index'))
+    return redirect(request.referrer or url_for('login'))
 
 @app.route('/accessibility')
 @login_required
@@ -382,39 +513,66 @@ def get_response():
     response = ""
 
     # --------------------- Reminder Commands ---------------------
-    if user_input_lower.startswith("set reminder"):
-        parts = user_input_lower.split()
-        if len(parts) >= 4 and len(parts[-1]) == 5 and parts[-1][2] == ':':
-            time_str = parts[-1]
-            label = ' '.join(parts[2:-1])
-            try:
-                h, m = map(int, time_str.split(':'))
-                if 0 <= h <= 23 and 0 <= m <= 59:
-                    c.execute(
-                        "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
-                        (user_id, label, time_str, timestamp)
-                    )
-                    conn.commit()
-                    response = f"Reminder set: {label} at {time_str}"
-                else:
-                    response = "Invalid time. Use 24-hour format HH:MM"
-            except:
-                response = "Invalid time format. Use HH:MM"
+    # Support both English and Chinese commands
+    if user_input_lower.startswith("set reminder") or user_input_lower.startswith("設置提醒"):
+        if user_input_lower.startswith("設置提醒"):
+            parts = user_input_original.split()
+            if len(parts) >= 3 and ':' in parts[-1]:
+                time_str = parts[-1]
+                label = ' '.join(parts[1:-1])
+            else:
+                response = "格式：設置提醒 [活動] [HH:MM]"
+                c.execute("INSERT INTO chat_history (user_id, timestamp, is_bot, message, is_deleted) VALUES (?, ?, 1, ?, 0)", (user_id, timestamp, response))
+                conn.commit()
+                conn.close()
+                return jsonify({'response': response})
         else:
-            response = "Usage: set reminder [activity] [HH:MM]"
+            parts = user_input_lower.split()
+            if len(parts) >= 4 and len(parts[-1]) == 5 and parts[-1][2] == ':':
+                time_str = parts[-1]
+                label = ' '.join(parts[2:-1])
+            else:
+                response = "Usage: set reminder [activity] [HH:MM]"
+                c.execute("INSERT INTO chat_history (user_id, timestamp, is_bot, message, is_deleted) VALUES (?, ?, 1, ?, 0)", (user_id, timestamp, response))
+                conn.commit()
+                conn.close()
+                return jsonify({'response': response})
 
-    elif user_input_lower.startswith("delete reminder"):
-        parts = user_input_lower.split(maxsplit=2)
-        if len(parts) == 3:
-            label = parts[2]
+        try:
+            h, m = map(int, time_str.split(':'))
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                c.execute(
+                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
+                    (user_id, label, time_str, timestamp)
+                )
+                conn.commit()
+                lang = session.get('language', 'en')
+                if lang == 'zh-HK':
+                    response = f"提醒已設置：{label}，時間 {time_str}"
+                else:
+                    response = f"Reminder set: {label} at {time_str}"
+            else:
+                response = "Invalid time. Use 24-hour format HH:MM" if session.get('language', 'en') == 'en' else "時間無效。請用24小時格式 HH:MM"
+        except:
+            response = "Invalid time format. Use HH:MM" if session.get('language', 'en') == 'en' else "時間格式錯誤。請用 HH:MM"
+
+    elif user_input_lower.startswith("delete reminder") or user_input_lower.startswith("刪除提醒"):
+        if user_input_lower.startswith("刪除提醒"):
+            parts = user_input_original.split(maxsplit=1)
+            label = parts[1] if len(parts) == 2 else None
+        else:
+            parts = user_input_lower.split(maxsplit=2)
+            label = parts[2] if len(parts) == 3 else None
+
+        if label:
             c.execute("DELETE FROM reminders WHERE user_id = ? AND label = ?", (user_id, label))
             if c.rowcount > 0:
-                response = f"Deleted reminder: {label}"
+                response = f"已刪除提醒：{label}" if session.get('language', 'en') == 'zh-HK' else f"Deleted reminder: {label}"
             else:
-                response = "No reminder found with that name."
+                response = "找不到該提醒。" if session.get('language', 'en') == 'zh-HK' else "No reminder found with that name."
             conn.commit()
         else:
-            response = "Usage: delete reminder [activity]"
+            response = "格式：刪除提醒 [活動]" if session.get('language', 'en') == 'zh-HK' else "Usage: delete reminder [activity]"
 
     # --------------------- Preferences ---------------------
     elif user_input_lower.startswith("set preference"):
@@ -432,6 +590,9 @@ def get_response():
 
     # --------------------- Quiz Game ---------------------
     else:
+        lang = session.get('language', 'en')
+        active_questions = questions_zh if lang == 'zh-HK' else questions
+        
         game = user_game_states.setdefault(user_id, {
             'is_game_mode': False,
             'current_index': 0,
@@ -440,89 +601,58 @@ def get_response():
             'score': 0
         })
 
-        if user_input_lower == "play game" and not game['is_game_mode']:
+        game_trigger = user_input_lower in ["play game", "玩遊戲", "玩游戏"]
+        exit_trigger = user_input_lower in ["exit game", "退出遊戲", "退出游戏"]
+
+        if game_trigger and not game['is_game_mode']:
             game['is_game_mode'] = True
             game['current_index'] = 0
             game['score'] = 0
-            q = questions[0]
+            q = active_questions[0]
             game['current_question'] = q["question"]
             game['correct_answer'] = q["answer"]
-            response = f"Let's play! You have {len(questions)} questions. Current score: 0. First question: {game['current_question']}"
+            if lang == 'zh-HK':
+                response = f"開始玩喇！一共有{len(active_questions)}條問題。分數：0。第一條問題：{game['current_question']}"
+            else:
+                response = f"Let's play! You have {len(active_questions)} questions. Current score: 0. First question: {game['current_question']}"
 
-        elif user_input_lower == "exit game" and game['is_game_mode']:
+        elif exit_trigger and game['is_game_mode']:
             game['is_game_mode'] = False
-            response = f"Game stopped. You got {game['score']} out of {game['current_index']} correct so far!"
+            if lang == 'zh-HK':
+                response = f"遊戲結束！你答啱咗{game['score']}條（總共{game['current_index']}條）。"
+            else:
+                response = f"Game stopped. You got {game['score']} out of {game['current_index']} correct so far!"
 
         elif game['is_game_mode']:
             # Compare answers in lowercase for case-insensitive matching
             if user_input_lower.strip() == game['correct_answer']:
                 game['score'] += 1
-                response = f"Correct! Score: {game['score']}"
+                response = f"正確！分數：{game['score']}" if lang == 'zh-HK' else f"Correct! Score: {game['score']}"
             else:
-                response = f"Incorrect. The answer was {game['correct_answer']}. Score: {game['score']}"
+                if lang == 'zh-HK':
+                    response = f"唔啱呀，答案係{game['correct_answer']}。分數：{game['score']}"
+                else:
+                    response = f"Incorrect. The answer was {game['correct_answer']}. Score: {game['score']}"
 
             game['current_index'] += 1
-            if game['current_index'] == len(questions):
-                response += f"\nGame over! You successfully answered {game['score']} out of {len(questions)} questions correctly."
+            if game['current_index'] == len(active_questions):
+                if lang == 'zh-HK':
+                    response += f"\n遊戲完成！你答啱咗{game['score']}條（總共{len(active_questions)}條）。叻叻！"
+                else:
+                    response += f"\nGame over! You successfully answered {game['score']} out of {len(active_questions)} questions correctly."
                 game['is_game_mode'] = False
             else:
-                q = questions[game['current_index']]
+                q = active_questions[game['current_index']]
                 game['current_question'] = q["question"]
                 game['correct_answer'] = q["answer"]
-                response += f" Next question: {q['question']}"
+                if lang == 'zh-HK':
+                    response += f" 下一條問題：{q['question']}"
+                else:
+                    response += f" Next question: {q['question']}"
 
         # --------------------- Normal AI Chat ---------------------
         else:
-            chat_history_ids = user_chat_histories.get(user_id)
-
-            # Encode original input to maintain proper context for DialoGPT
-            encoded = tokenizer.encode_plus(
-                user_input_original + tokenizer.eos_token,
-                return_tensors='pt',
-                return_attention_mask=True
-            )
-            input_ids = encoded['input_ids']
-            attention_mask = encoded['attention_mask']
-
-            # Truncate history to prevent OOM errors
-            if chat_history_ids is not None:
-                if chat_history_ids.shape[-1] > MAX_HISTORY_TOKENS:
-                    chat_history_ids = chat_history_ids[:, -MAX_HISTORY_TOKENS:]
-                    print(f"[MEMORY] 💾 User {user_id} history truncated to {chat_history_ids.shape[-1]} tokens")
-
-                # Concatenate history with new input
-                bot_input_ids = torch.cat([chat_history_ids, input_ids], dim=-1)
-                history_attention = torch.ones(chat_history_ids.shape, dtype=torch.long)
-                attention_mask = torch.cat([history_attention, attention_mask], dim=-1)
-            else:
-                bot_input_ids = input_ids
-
-            # Generate response with improved parameters
-            chat_history_ids = model.generate(
-                bot_input_ids,
-                attention_mask=attention_mask,
-                max_length=1000,
-                min_length=15,              # Force minimum response length
-                pad_token_id=tokenizer.eos_token_id,
-                do_sample=True,
-                top_p=0.92,                 # Nucleus sampling threshold
-                top_k=150,                  # Top-k sampling pool
-                temperature=0.90,           # Sampling temperature for creativity
-                repetition_penalty=1.2,     # Penalize repetitive responses
-                no_repeat_ngram_size=3      # Prevent repeating 3-gram phrases
-            )
-
-            # Decode only the new tokens (exclude input)
-            response = tokenizer.decode(
-                chat_history_ids[:, bot_input_ids.shape[-1]:][0],
-                skip_special_tokens=True
-            ).strip()
-
-            if not response:
-                response = "I'm not sure how to respond to that. Can you rephrase?"
-
-            # Update in-memory chat history
-            user_chat_histories[user_id] = chat_history_ids
+            response = call_ai(user_input_original, user_id, lang)
 
     # Store bot response in database
     c.execute(
@@ -554,45 +684,6 @@ def deactivate_reminder():
     conn.close()
 
     return jsonify({'success': True})
-
-# =============================================================================
-# Speech-to-Text
-# =============================================================================
-@app.route('/transcribe', methods=['POST'])
-@login_required
-def transcribe():
-    """Convert audio input to text using Vosk speech recognition (English only).
-    Cantonese speech recognition is handled client-side via browser Web Speech API.
-    """
-    if 'audio' not in request.files:
-        return jsonify({'error': 'No audio file'}), 400
-
-    audio_file = request.files['audio']
-    audio_bytes = audio_file.read()
-
-    try:
-        # Convert WebM audio to WAV format for Vosk
-        audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="webm")
-        wav_io = io.BytesIO()
-        audio.set_frame_rate(16000).set_channels(1).set_sample_width(2).export(wav_io, format="wav")
-        wav_data = wav_io.getvalue()
-
-        # Perform speech recognition with English Vosk model
-        recognizer = KaldiRecognizer(vosk_model, 16000)
-        if not recognizer.AcceptWaveform(wav_data):
-            print("Vosk: Partial result, proceeding to final.")
-
-        result = json.loads(recognizer.Result())
-        text = result.get("text", "").strip()
-
-        if text:
-            return jsonify({'text': text})
-        else:
-            return jsonify({'error': 'No speech detected'}), 400
-
-    except Exception as e:
-        print(f"Transcription error: {str(e)}")
-        return jsonify({'error': f'Transcription failed: {str(e)}'}), 500
 
 # =============================================================================
 # API Endpoints
@@ -660,9 +751,12 @@ def get_chat_history():
 # =============================================================================
 if __name__ == '__main__':
     print("=" * 70)
-    print("Elderly Companion Chatbot - Enhanced Version")
+    print("Elderly Companion Chatbot - Lightweight Cloud Edition")
     print("=" * 70)
-    print(f"[INFO] ✅ Chat history retention: {CHAT_HISTORY_RETENTION_MINUTES} minutes")
-    print(f"[INFO] ✅ Max history tokens: {MAX_HISTORY_TOKENS}")
+    print(f"[INFO] \u2705 AI Model: {AI_MODEL} (ZhipuAI API)")
+    print(f"[INFO] \u2705 Chat history retention: {CHAT_HISTORY_RETENTION_MINUTES} minutes")
+    print(f"[INFO] \u2705 Voice: Browser Web Speech API (EN + zh-HK)")
+    print(f"[INFO] \u2705 No heavy dependencies (PyTorch/Vosk removed)")
     print("=" * 70)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
