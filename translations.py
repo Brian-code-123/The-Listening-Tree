@@ -173,6 +173,34 @@ TRANSLATIONS = {
         'unsupported_file': 'Unsupported file type.',
         'search_enabled': 'Web search enabled for this message',
         'search_disabled': 'Web search disabled',
+
+        # Calendar & Sidebar
+        'calendar': 'Calendar',
+        'today': 'Today',
+        'public_holiday': 'Public Holiday',
+        'no_holidays_today': 'No holidays today',
+        'holidays_this_month': 'Holidays This Month',
+
+        # News Section
+        'news': 'Local News',
+        'hk_news': 'Hong Kong News',
+        'loading_news': 'Loading news...',
+        'no_news': 'No news available right now.',
+        'read_more': 'Read more',
+        'news_summary': 'AI Summary',
+        'refresh_news': 'Refresh',
+        'news_source': 'Source',
+
+        # Sidebar labels
+        'sidebar_calendar': 'Calendar',
+        'sidebar_reminders': 'Reminders',
+        'sidebar_news': 'News',
+        'todays_reminders': "Today's Reminders",
+        'upcoming': 'Upcoming',
+        'add_reminder': 'Add Reminder',
+        'reminder_label': 'What to remind',
+        'reminder_time_label': 'Time',
+        'voice_read': 'Read aloud',
     },
 
     'zh-HK': {
@@ -343,6 +371,34 @@ TRANSLATIONS = {
         'unsupported_file': '唔支援呢種檔案類型。',
         'search_enabled': '呢條訊息已啟用網頁搜尋',
         'search_disabled': '網頁搜尋已關閉',
+
+        # Calendar & Sidebar
+        'calendar': '日曆',
+        'today': '今日',
+        'public_holiday': '公眾假期',
+        'no_holidays_today': '今日冇假期',
+        'holidays_this_month': '本月假期',
+
+        # News Section
+        'news': '本地新聞',
+        'hk_news': '香港新聞',
+        'loading_news': '載入新聞中...',
+        'no_news': '暫時冇新聞。',
+        'read_more': '閱讀更多',
+        'news_summary': 'AI 摘要',
+        'refresh_news': '刷新',
+        'news_source': '來源',
+
+        # Sidebar labels
+        'sidebar_calendar': '日曆',
+        'sidebar_reminders': '提醒',
+        'sidebar_news': '新聞',
+        'todays_reminders': '今日提醒',
+        'upcoming': '即將到來',
+        'add_reminder': '新增提醒',
+        'reminder_label': '提醒內容',
+        'reminder_time_label': '時間',
+        'voice_read': '語音朗讀',
     }
 }
 

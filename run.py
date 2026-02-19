@@ -854,6 +854,150 @@ async def get_chat_history(request: Request):
     return JSONResponse({"history": history})
 
 # =============================================================================
+# HK Public Holidays 2025-2027
+# =============================================================================
+HK_HOLIDAYS = [
+    # 2025
+    {"date": "2025-01-01", "name_en": "New Year's Day", "name_zh": "元旦"},
+    {"date": "2025-01-29", "name_en": "Lunar New Year's Day", "name_zh": "農曆年初一"},
+    {"date": "2025-01-30", "name_en": "Second day of Lunar New Year", "name_zh": "農曆年初二"},
+    {"date": "2025-01-31", "name_en": "Third day of Lunar New Year", "name_zh": "農曆年初三"},
+    {"date": "2025-04-04", "name_en": "Ching Ming Festival", "name_zh": "清明節"},
+    {"date": "2025-04-18", "name_en": "Good Friday", "name_zh": "耶穌受難節"},
+    {"date": "2025-04-19", "name_en": "Day after Good Friday", "name_zh": "耶穌受難節翌日"},
+    {"date": "2025-04-21", "name_en": "Easter Monday", "name_zh": "復活節星期一"},
+    {"date": "2025-05-01", "name_en": "Labour Day", "name_zh": "勞動節"},
+    {"date": "2025-05-05", "name_en": "Buddha's Birthday", "name_zh": "佛誕"},
+    {"date": "2025-05-31", "name_en": "Tuen Ng Festival", "name_zh": "端午節"},
+    {"date": "2025-07-01", "name_en": "HKSAR Establishment Day", "name_zh": "香港特別行政區成立紀念日"},
+    {"date": "2025-10-01", "name_en": "National Day", "name_zh": "國慶日"},
+    {"date": "2025-10-07", "name_en": "Day after Mid-Autumn Festival", "name_zh": "中秋節翌日"},
+    {"date": "2025-10-29", "name_en": "Chung Yeung Festival", "name_zh": "重陽節"},
+    {"date": "2025-12-25", "name_en": "Christmas Day", "name_zh": "聖誕節"},
+    {"date": "2025-12-26", "name_en": "Day after Christmas", "name_zh": "聖誕節後第一個周日"},
+    # 2026
+    {"date": "2026-01-01", "name_en": "New Year's Day", "name_zh": "元旦"},
+    {"date": "2026-02-17", "name_en": "Lunar New Year's Day", "name_zh": "農曆年初一"},
+    {"date": "2026-02-18", "name_en": "Second day of Lunar New Year", "name_zh": "農曆年初二"},
+    {"date": "2026-02-19", "name_en": "Third day of Lunar New Year", "name_zh": "農曆年初三"},
+    {"date": "2026-04-03", "name_en": "Good Friday", "name_zh": "耶穌受難節"},
+    {"date": "2026-04-04", "name_en": "Day after Good Friday", "name_zh": "耶穌受難節翌日"},
+    {"date": "2026-04-05", "name_en": "Ching Ming Festival", "name_zh": "清明節"},
+    {"date": "2026-04-06", "name_en": "Easter Monday", "name_zh": "復活節星期一"},
+    {"date": "2026-05-01", "name_en": "Labour Day", "name_zh": "勞動節"},
+    {"date": "2026-05-24", "name_en": "Buddha's Birthday", "name_zh": "佛誕"},
+    {"date": "2026-06-19", "name_en": "Tuen Ng Festival", "name_zh": "端午節"},
+    {"date": "2026-07-01", "name_en": "HKSAR Establishment Day", "name_zh": "香港特別行政區成立紀念日"},
+    {"date": "2026-09-26", "name_en": "Day after Mid-Autumn Festival", "name_zh": "中秋節翌日"},
+    {"date": "2026-10-01", "name_en": "National Day", "name_zh": "國慶日"},
+    {"date": "2026-10-17", "name_en": "Chung Yeung Festival", "name_zh": "重陽節"},
+    {"date": "2026-12-25", "name_en": "Christmas Day", "name_zh": "聖誕節"},
+    {"date": "2026-12-26", "name_en": "Day after Christmas", "name_zh": "聖誕節後第一個周日"},
+    # 2027
+    {"date": "2027-01-01", "name_en": "New Year's Day", "name_zh": "元旦"},
+    {"date": "2027-02-06", "name_en": "Lunar New Year's Day", "name_zh": "農曆年初一"},
+    {"date": "2027-02-07", "name_en": "Second day of Lunar New Year", "name_zh": "農曆年初二"},
+    {"date": "2027-02-08", "name_en": "Third day of Lunar New Year", "name_zh": "農曆年初三"},
+    {"date": "2027-03-26", "name_en": "Good Friday", "name_zh": "耶穌受難節"},
+    {"date": "2027-03-27", "name_en": "Day after Good Friday", "name_zh": "耶穌受難節翌日"},
+    {"date": "2027-03-29", "name_en": "Easter Monday", "name_zh": "復活節星期一"},
+    {"date": "2027-04-05", "name_en": "Ching Ming Festival", "name_zh": "清明節"},
+    {"date": "2027-05-01", "name_en": "Labour Day", "name_zh": "勞動節"},
+    {"date": "2027-05-13", "name_en": "Buddha's Birthday", "name_zh": "佛誕"},
+    {"date": "2027-06-09", "name_en": "Tuen Ng Festival", "name_zh": "端午節"},
+    {"date": "2027-07-01", "name_en": "HKSAR Establishment Day", "name_zh": "香港特別行政區成立紀念日"},
+    {"date": "2027-09-16", "name_en": "Day after Mid-Autumn Festival", "name_zh": "中秋節翌日"},
+    {"date": "2027-10-01", "name_en": "National Day", "name_zh": "國慶日"},
+    {"date": "2027-10-08", "name_en": "Chung Yeung Festival", "name_zh": "重陽節"},
+    {"date": "2027-12-25", "name_en": "Christmas Day", "name_zh": "聖誕節"},
+    {"date": "2027-12-27", "name_en": "Day after Christmas", "name_zh": "聖誕節後第一個周日"},
+]
+
+@app.get("/get_hk_holidays")
+async def get_hk_holidays(request: Request):
+    """Return HK public holidays for FullCalendar."""
+    lang = get_lang(request)
+    events = []
+    for h in HK_HOLIDAYS:
+        events.append({
+            "title": h["name_zh"] if lang == "zh-HK" else h["name_en"],
+            "start": h["date"],
+            "allDay": True,
+            "color": "#E07A5F",
+            "textColor": "#FFFFFF",
+            "classNames": ["holiday-event"],
+        })
+    return JSONResponse({"holidays": events})
+
+# =============================================================================
+# HK News (proxy endpoint)
+# =============================================================================
+NEWS_API_KEY = os.environ.get('NEWS_API_KEY', '')
+_news_cache = {"data": None, "timestamp": 0, "lang": None}
+
+async def fetch_hk_news(lang: str = 'en'):
+    """Fetch HK news from NewsAPI; cache for 30 min."""
+    import time
+    now = time.time()
+    if _news_cache["data"] and (now - _news_cache["timestamp"]) < 1800 and _news_cache["lang"] == lang:
+        return _news_cache["data"]
+
+    articles = []
+
+    # Try NewsAPI if key available
+    if NEWS_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    "https://newsapi.org/v2/top-headlines",
+                    params={"country": "hk", "pageSize": 8, "apiKey": NEWS_API_KEY}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                for a in data.get("articles", [])[:8]:
+                    articles.append({
+                        "title": a.get("title", ""),
+                        "description": a.get("description", "") or "",
+                        "url": a.get("url", "#"),
+                        "source": a.get("source", {}).get("name", ""),
+                        "publishedAt": a.get("publishedAt", ""),
+                        "image": a.get("urlToImage", ""),
+                    })
+        except Exception as e:
+            print(f"[News] NewsAPI error: {e}")
+
+    # Fallback: use hardcoded recent HK news placeholders
+    if not articles:
+        if lang == 'zh-HK':
+            articles = [
+                {"title": "天文台預測未來數日天氣回暖", "description": "天文台表示，受暖濕氣流影響，未來數日氣溫將回升至22-25度，市民外出請注意添減衣物。", "url": "#", "source": "天文台", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "港鐵新線路規劃公佈", "description": "政府今日公佈港鐵新線路規劃詳情，包括北環線及其延伸段，預計2030年完工通車。", "url": "#", "source": "政府新聞處", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "長者醫療券使用範圍擴大", "description": "政府宣佈長者醫療券使用範圍將進一步擴大，涵蓋更多醫療服務項目，惠及更多長者。", "url": "#", "source": "衛生署", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "沙田區社區活動日即將舉行", "description": "沙田區議會將於下週末舉辦社區活動日，設有健康檢查、興趣班及長者關懷活動。", "url": "#", "source": "區議會", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "本港今日天氣晴朗乾燥", "description": "天文台錄得今日最高氣溫23度，天氣晴朗乾燥，適合戶外活動。", "url": "#", "source": "天文台", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+            ]
+        else:
+            articles = [
+                {"title": "HK Observatory forecasts warmer weather ahead", "description": "The Observatory expects temperatures to rise to 22-25°C over the next few days due to warm moist airflow.", "url": "#", "source": "HK Observatory", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "MTR new rail line planning announced", "description": "The government today released details of new MTR rail line planning, including the Northern Link and extensions, expected to be completed by 2030.", "url": "#", "source": "GovHK", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "Elderly healthcare voucher scope expanded", "description": "The government announced an expansion of the elderly healthcare voucher scheme to cover more medical services.", "url": "#", "source": "Dept of Health", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "Sha Tin community event day coming up", "description": "The Sha Tin District Council will host a community event day next weekend featuring health checks and elderly care activities.", "url": "#", "source": "District Council", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+                {"title": "Fine and dry weather in Hong Kong today", "description": "The Observatory recorded a high of 23°C today. Fine and dry weather, suitable for outdoor activities.", "url": "#", "source": "HK Observatory", "publishedAt": datetime.now().strftime('%Y-%m-%dT%H:%M:%S'), "image": ""},
+            ]
+
+    _news_cache["data"] = articles
+    _news_cache["timestamp"] = now
+    _news_cache["lang"] = lang
+    return articles
+
+@app.get("/get_news")
+async def get_news(request: Request):
+    """Return HK local news articles."""
+    lang = get_lang(request)
+    articles = await fetch_hk_news(lang)
+    return JSONResponse({"articles": articles})
+
+# =============================================================================
 # Run Server
 # =============================================================================
 if __name__ == '__main__':

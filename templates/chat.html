@@ -9,6 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+HK:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FullCalendar -->
+    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="page-chat" data-theme="light">
@@ -18,132 +20,148 @@
         <i class="fas fa-sun" id="themeIcon"></i>
     </button>
 
-    <div class="container-fluid h-100">
-        <div class="row justify-content-center h-100">
+    <!-- ============================================================
+         MAIN 3-COLUMN LAYOUT: Chat (left) + Sidebar (right)
+         ============================================================ -->
+    <div class="main-layout">
 
-            <!-- Main Chat Area -->
-            <div class="col-12 col-md-10 col-xl-8 chat">
-                <div class="card">
-                    <!-- Chat Header -->
-                    <div class="card-header msg_head">
-                        <div class="d-flex bd-highlight align-items-center">
-                            <img src="/static/Chatbot.png" class="rounded-circle user_img" alt="Bot">
-                            <div class="user_info ms-3">
-                                <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
-                                <p>{{ translations.tagline if translations else 'Your friendly companion' }}</p>
-                            </div>
-                            <div class="ms-auto d-flex gap-2">
-                                <button class="btn btn-sm btn-outline-light reminder-toggle" type="button" data-bs-toggle="collapse" data-bs-target="#mobileReminders">
-                                    <i class="fas fa-bell"></i>
-                                </button>
-                                <a href="/logout" class="btn btn-sm btn-danger">{{ translations.logout if translations else 'Logout' }}</a>
-                            </div>
+        <!-- ===== LEFT: Chat Column ===== -->
+        <div class="chat-column">
+            <div class="chat-card">
+                <!-- Chat Header -->
+                <div class="msg_head">
+                    <div class="d-flex align-items-center">
+                        <img src="/static/Chatbot.png" class="user_img" alt="Bot">
+                        <div class="user_info ms-3">
+                            <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
+                            <p>{{ translations.tagline if translations else 'Your friendly companion' }}</p>
+                        </div>
+                        <div class="ms-auto d-flex gap-2 align-items-center">
+                            <!-- Mobile sidebar toggle -->
+                            <button class="btn btn-sm btn-outline-light d-lg-none" id="sidebarToggleHeader" type="button">
+                                <i class="fas fa-columns"></i>
+                            </button>
+                            <a href="/logout" class="btn btn-sm btn-danger">{{ translations.logout if translations else 'Logout' }}</a>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Navigation Bar: Language + Accessibility + TTS toggle -->
-                    <div class="chat-nav-bar">
-                        <a href="/set_language/en" class="chat-nav-btn {{ 'active' if lang == 'en' }}">EN</a>
-                        <a href="/set_language/zh-HK" class="chat-nav-btn {{ 'active' if lang == 'zh-HK' }}">繁中</a>
-                        <a href="/accessibility" class="chat-nav-btn nav-icon" title="{{ translations.accessibility_mode if translations else 'Accessibility Mode' }}"><i class="fas fa-universal-access"></i></a>
-                        <button type="button" id="ttsToggle" class="chat-nav-btn nav-tts tts-on" title="{{ translations.toggle_speech if translations else 'Toggle text-to-speech' }}">
-                            <i class="fas fa-volume-up" id="ttsIcon"></i>
-                            <span id="ttsLabel">{{ translations.ai_voice_on if translations else '🔊 AI Voice: ON' }}</span>
-                        </button>
-                    </div>
+                <!-- Navigation Bar: Language + Accessibility + TTS -->
+                <div class="chat-nav-bar">
+                    <a href="/set_language/en" class="chat-nav-btn {{ 'active' if lang == 'en' }}">EN</a>
+                    <a href="/set_language/zh-HK" class="chat-nav-btn {{ 'active' if lang == 'zh-HK' }}">繁中</a>
+                    <a href="/accessibility" class="chat-nav-btn nav-icon" title="{{ translations.accessibility_mode if translations else 'Accessibility Mode' }}"><i class="fas fa-universal-access"></i></a>
+                    <button type="button" id="ttsToggle" class="chat-nav-btn nav-tts tts-on" title="{{ translations.toggle_speech if translations else 'Toggle text-to-speech' }}">
+                        <i class="fas fa-volume-up" id="ttsIcon"></i>
+                        <span id="ttsLabel">{{ translations.ai_voice_on if translations else '🔊 AI Voice: ON' }}</span>
+                    </button>
+                </div>
 
-                    <!-- Feature Buttons Bar: Web Search, File Upload -->
-                    <div class="chat-feature-bar">
-                        <button type="button" id="searchToggle" class="feature-btn" title="{{ translations.web_search if translations else 'Web Search' }}">
-                            <i class="fas fa-search"></i>
-                            <span>{{ translations.web_search if translations else 'Web Search' }}</span>
-                        </button>
-                        <button type="button" id="uploadBtn" class="feature-btn" title="{{ translations.file_upload if translations else 'Upload File' }}">
-                            <i class="fas fa-paperclip"></i>
-                            <span>{{ translations.file_upload if translations else 'Upload File' }}</span>
-                        </button>
-                        <button type="button" id="uploadImgBtn" class="feature-btn" title="{{ translations.upload_image if translations else 'Upload Image' }}">
-                            <i class="fas fa-image"></i>
-                            <span>{{ translations.upload_image if translations else 'Upload Image' }}</span>
-                        </button>
-                    </div>
+                <!-- Feature Buttons Bar -->
+                <div class="chat-feature-bar">
+                    <button type="button" id="searchToggle" class="feature-btn" title="{{ translations.web_search if translations else 'Web Search' }}">
+                        <i class="fas fa-search"></i>
+                        <span>{{ translations.web_search if translations else 'Web Search' }}</span>
+                    </button>
+                    <button type="button" id="uploadBtn" class="feature-btn" title="{{ translations.file_upload if translations else 'Upload File' }}">
+                        <i class="fas fa-paperclip"></i>
+                        <span>{{ translations.file_upload if translations else 'Upload File' }}</span>
+                    </button>
+                    <button type="button" id="uploadImgBtn" class="feature-btn" title="{{ translations.upload_image if translations else 'Upload Image' }}">
+                        <i class="fas fa-image"></i>
+                        <span>{{ translations.upload_image if translations else 'Upload Image' }}</span>
+                    </button>
+                </div>
 
-                    <!-- Hidden file inputs -->
-                    <input type="file" id="fileInput" class="hidden-file-input" accept=".txt,.pdf,.csv,.json,.md,.py,.js,.html,.css,.doc,.docx">
-                    <input type="file" id="imageInput" class="hidden-file-input" accept="image/*">
+                <!-- Hidden file inputs -->
+                <input type="file" id="fileInput" class="hidden-file-input" accept=".txt,.pdf,.csv,.json,.md,.py,.js,.html,.css,.doc,.docx">
+                <input type="file" id="imageInput" class="hidden-file-input" accept="image/*">
 
-                    <!-- Chat Messages Container with drag-drop zone -->
-                    <div id="chatDropZone" class="chat-drop-zone">
-                        <div id="messageFormeight" class="card-body msg_card_body"></div>
-                        <!-- Drag-and-drop overlay -->
-                        <div id="dragOverlay" class="drag-overlay">
-                            <div class="drag-overlay-inner">
-                                <i class="fas fa-cloud-upload-alt"></i>
-                                <p>{{ translations.drop_file_here if translations else 'Drop file or image here' }}</p>
-                            </div>
+                <!-- Chat Messages with drag-drop -->
+                <div id="chatDropZone" class="chat-drop-zone">
+                    <div id="messageFormeight" class="msg_card_body"></div>
+                    <div id="dragOverlay" class="drag-overlay">
+                        <div class="drag-overlay-inner">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <p>{{ translations.drop_file_here if translations else 'Drop file or image here' }}</p>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Message Input Area -->
-                    <div class="card-footer">
-                        <form id="messageArea" class="d-flex">
-                            <input type="text" id="text" name="msg" placeholder="{{ translations.type_message if translations else 'Type your message...' }}"
-                                   autocomplete="off" class="form-control type_msg" required>
-                            <button type="button" id="micBtn" class="send_btn mic-btn" title="{{ translations.start_voice if translations else 'Start Voice' }}">
-                                <i class="fas fa-microphone"></i>
-                            </button>
-                            <button type="button" id="stopBtn" class="send_btn stop-btn d-none" title="{{ translations.stop_voice if translations else 'Stop Voice' }}">
-                                <i class="fas fa-stop"></i>
-                            </button>
-                            <button type="submit" id="send" class="send_btn" title="{{ translations.send if translations else 'Send' }}">
-                                <i class="fas fa-paper-plane"></i>
-                            </button>
-                        </form>
-                    </div>
+                <!-- Message Input -->
+                <div class="chat-footer">
+                    <form id="messageArea" class="d-flex align-items-center">
+                        <input type="text" id="text" name="msg"
+                               placeholder="{{ translations.type_message if translations else 'Type your message...' }}"
+                               autocomplete="off" class="type_msg" required>
+                        <button type="button" id="micBtn" class="send_btn mic-btn" title="{{ translations.start_voice if translations else 'Start Voice' }}">
+                            <i class="fas fa-microphone"></i>
+                        </button>
+                        <button type="button" id="stopBtn" class="send_btn stop-btn d-none" title="{{ translations.stop_voice if translations else 'Stop Voice' }}">
+                            <i class="fas fa-stop"></i>
+                        </button>
+                        <button type="submit" id="send" class="send_btn" title="{{ translations.send if translations else 'Send' }}">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== RIGHT: Sidebar Column (Calendar + Reminders + News) ===== -->
+        <div class="sidebar-column" id="sidebarColumn">
+
+            <!-- 1) Calendar Card -->
+            <div class="sidebar-card calendar-card">
+                <div class="sidebar-card-header">
+                    <i class="fas fa-calendar-alt"></i>
+                    {{ translations.calendar if translations else 'Calendar' }}
+                </div>
+                <div class="sidebar-card-body" style="padding: 8px 12px;">
+                    <div id="miniCalendar"></div>
                 </div>
             </div>
 
-            <!-- Sidebar: Reminder Panel -->
-            <div class="col-12 col-md-2 reminder-panel">
-                <div class="collapse d-md-none" id="mobileReminders">
-                    <div class="card mb-2">
-                        <div class="card-header">{{ translations.reminders if translations else 'Reminders' }}</div>
-                        <div class="card-body">
-                            <form id="reminderFormMobile">
-                                <div class="mb-2">
-                                    <input type="text" class="form-control form-control-sm" id="reminderLabelMobile"
-                                           placeholder="{{ translations.set_reminder if translations else 'e.g., take medicine' }}" required>
-                                </div>
-                                <div class="mb-2">
-                                    <input type="time" class="form-control form-control-sm" id="reminderTimeMobile" required>
-                                </div>
-                                <button type="submit" class="btn btn-primary btn-sm w-100">{{ translations.set_reminder if translations else 'Set Reminder' }}</button>
-                            </form>
-                            <div id="reminderListMobile" class="mt-2"></div>
-                        </div>
-                    </div>
+            <!-- 2) Reminders Card -->
+            <div class="sidebar-card reminder-card">
+                <div class="sidebar-card-header">
+                    <i class="fas fa-bell"></i>
+                    {{ translations.todays_reminders if translations else "Today's Reminders" }}
                 </div>
-                <div class="card h-100 d-none d-md-block" id="notificationPanel">
-                    <div class="card-header">{{ translations.reminders if translations else 'Reminders' }}</div>
-                    <div class="card-body">
-                        <form id="reminderForm">
-                            <div class="mb-3">
-                                <label for="reminderLabel" class="form-label">{{ translations.reminders if translations else 'Reminder' }}</label>
-                                <input type="text" class="form-control" id="reminderLabel"
-                                       placeholder="{{ translations.set_reminder if translations else 'e.g., take medicine' }}" required>
-                            </div>
-                            <div class="mb-3">
-                                <label for="reminderTime" class="form-label">{{ translations.reminder_format if translations else 'Time (HH:MM)' }}</label>
-                                <input type="time" class="form-control" id="reminderTime" required>
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100">{{ translations.set_reminder if translations else 'Set Reminder' }}</button>
-                        </form>
-                        <div id="reminderList" class="mt-3"></div>
+                <div class="sidebar-card-body">
+                    <div id="reminderList"></div>
+                    <form id="reminderForm" class="add-reminder-form">
+                        <input type="text" id="reminderLabel"
+                               placeholder="{{ translations.reminder_label if translations else 'What to remind' }}" required>
+                        <input type="time" id="reminderTime" required>
+                        <button type="submit"><i class="fas fa-plus"></i></button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 3) News Card -->
+            <div class="sidebar-card news-card">
+                <div class="sidebar-card-header">
+                    <i class="fas fa-newspaper"></i>
+                    {{ translations.hk_news if translations else 'Hong Kong News' }}
+                    <button id="refreshNews" style="margin-left:auto;background:none;border:none;color:var(--primary);cursor:pointer;font-size:0.85rem;" title="{{ translations.refresh_news if translations else 'Refresh' }}">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <div class="sidebar-card-body" id="newsContainer">
+                    <div class="news-loading">
+                        <i class="fas fa-spinner"></i>
+                        {{ translations.loading_news if translations else 'Loading news...' }}
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Mobile sidebar toggle FAB -->
+    <button class="sidebar-toggle-btn" id="sidebarToggleFab" title="Toggle sidebar">
+        <i class="fas fa-calendar-alt"></i>
+    </button>
 
     <!-- Guide Helper FAB -->
     <button class="guide-fab" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">?</button>
@@ -155,43 +173,21 @@
             <button class="guide-panel-close" id="guideClose"><i class="fas fa-times"></i></button>
         </div>
         <div class="guide-panel-body">
-            <div class="guide-item">
-                <h4><i class="fas fa-comments"></i> {{ translations.guide_chat_title if translations else 'Chat' }}</h4>
-                <p>{{ translations.guide_chat_desc if translations else 'Type a message or press the microphone button to talk.' }}</p>
-            </div>
-            <div class="guide-item">
-                <h4><i class="fas fa-microphone"></i> {{ translations.guide_voice_title if translations else 'Voice Input' }}</h4>
-                <p>{{ translations.guide_voice_desc if translations else 'Press the mic button, speak clearly.' }}</p>
-            </div>
-            <div class="guide-item">
-                <h4><i class="fas fa-bell"></i> {{ translations.guide_reminder_title if translations else 'Set Reminders' }}</h4>
-                <p>{{ translations.guide_reminder_desc if translations else 'Type "set reminder take medicine 09:00".' }}</p>
-            </div>
-            <div class="guide-item">
-                <h4><i class="fas fa-gamepad"></i> {{ translations.guide_game_title if translations else 'Play Games' }}</h4>
-                <p>{{ translations.guide_game_desc if translations else 'Type "play game" to start a quiz.' }}</p>
-            </div>
-            <div class="guide-item">
-                <h4><i class="fas fa-search"></i> {{ translations.guide_search_title if translations else 'Web Search' }}</h4>
-                <p>{{ translations.guide_search_desc if translations else 'Click the search button for AI web search.' }}</p>
-            </div>
-            <div class="guide-item">
-                <h4><i class="fas fa-paperclip"></i> {{ translations.guide_upload_title if translations else 'Upload Files' }}</h4>
-                <p>{{ translations.guide_upload_desc if translations else 'Click the upload buttons or drag & drop a file / image directly into the chat.' }}</p>
-            </div>
-            <div class="guide-item">
-                <h4><i class="fas fa-palette"></i> {{ translations.guide_theme_title if translations else 'Switch Theme' }}</h4>
-                <p>{{ translations.guide_theme_desc if translations else 'Click the sun/moon icon for dark/light mode.' }}</p>
-            </div>
-            <div class="guide-item">
-                <h4><i class="fas fa-globe"></i> {{ translations.guide_lang_title if translations else 'Change Language' }}</h4>
-                <p>{{ translations.guide_lang_desc if translations else 'Click EN or 繁中 to switch language.' }}</p>
-            </div>
+            <div class="guide-item"><h4><i class="fas fa-comments"></i> {{ translations.guide_chat_title if translations else 'Chat' }}</h4><p>{{ translations.guide_chat_desc if translations else 'Type a message or press the microphone button to talk.' }}</p></div>
+            <div class="guide-item"><h4><i class="fas fa-microphone"></i> {{ translations.guide_voice_title if translations else 'Voice Input' }}</h4><p>{{ translations.guide_voice_desc if translations else 'Press the mic button, speak clearly.' }}</p></div>
+            <div class="guide-item"><h4><i class="fas fa-bell"></i> {{ translations.guide_reminder_title if translations else 'Set Reminders' }}</h4><p>{{ translations.guide_reminder_desc if translations else 'Type "set reminder take medicine 09:00".' }}</p></div>
+            <div class="guide-item"><h4><i class="fas fa-gamepad"></i> {{ translations.guide_game_title if translations else 'Play Games' }}</h4><p>{{ translations.guide_game_desc if translations else 'Type "play game" to start a quiz.' }}</p></div>
+            <div class="guide-item"><h4><i class="fas fa-search"></i> {{ translations.guide_search_title if translations else 'Web Search' }}</h4><p>{{ translations.guide_search_desc if translations else 'Click the search button for AI web search.' }}</p></div>
+            <div class="guide-item"><h4><i class="fas fa-paperclip"></i> {{ translations.guide_upload_title if translations else 'Upload Files' }}</h4><p>{{ translations.guide_upload_desc if translations else 'Click the upload buttons or drag & drop.' }}</p></div>
+            <div class="guide-item"><h4><i class="fas fa-palette"></i> {{ translations.guide_theme_title if translations else 'Switch Theme' }}</h4><p>{{ translations.guide_theme_desc if translations else 'Click the sun/moon icon.' }}</p></div>
+            <div class="guide-item"><h4><i class="fas fa-globe"></i> {{ translations.guide_lang_title if translations else 'Change Language' }}</h4><p>{{ translations.guide_lang_desc if translations else 'Click EN or 繁中.' }}</p></div>
         </div>
     </div>
 
+    <!-- Scripts -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
 
     <script>
     $(document).ready(function() {
@@ -216,13 +212,14 @@
             $('#themeIcon').attr('class', theme === 'dark' ? 'fas fa-moon' : 'fas fa-sun');
         }
 
+        // ========== Mobile Sidebar Toggle ==========
+        $('#sidebarToggleFab, #sidebarToggleHeader').on('click', function() {
+            $('#sidebarColumn').toggleClass('hidden-mobile');
+        });
+
         // ========== Guide Helper ==========
-        $('#guideFab').on('click', function() {
-            $('#guidePanel').toggleClass('show');
-        });
-        $('#guideClose').on('click', function() {
-            $('#guidePanel').removeClass('show');
-        });
+        $('#guideFab').on('click', function() { $('#guidePanel').toggleClass('show'); });
+        $('#guideClose').on('click', function() { $('#guidePanel').removeClass('show'); });
 
         // ========== Web Search Toggle ==========
         $('#searchToggle').on('click', function() {
@@ -230,7 +227,7 @@
             $(this).toggleClass('active', webSearchEnabled);
         });
 
-        // ========== File Upload (shared handler) ==========
+        // ========== File Upload ==========
         function uploadFile(file) {
             const isImage = file.type.startsWith('image/');
             const maxMB = isImage ? 10 : 20;
@@ -246,81 +243,42 @@
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             appendMessage('user', '📎 ' + file.name, time);
             $.ajax({
-                type: 'POST',
-                url: '/upload_file',
-                data: formData,
-                processData: false,
-                contentType: false,
-                success: function(data) {
-                    appendMessage('bot', data.response, time);
-                    speakText(data.response);
-                },
+                type: 'POST', url: '/upload_file', data: formData,
+                processData: false, contentType: false,
+                success: function(data) { appendMessage('bot', data.response, time); speakText(data.response); },
                 error: function() {
-                    const errMsg = '{{ translations.error_generic if translations else "Something went wrong. Please try again." }}';
-                    appendMessage('bot', errMsg, time);
+                    appendMessage('bot', '{{ translations.error_generic if translations else "Something went wrong." }}', time);
                 }
             });
         }
 
         $('#uploadBtn').on('click', function() { $('#fileInput').click(); });
         $('#uploadImgBtn').on('click', function() { $('#imageInput').click(); });
+        $('#fileInput, #imageInput').on('change', function() { if (this.files[0]) uploadFile(this.files[0]); this.value = ''; });
 
-        $('#fileInput, #imageInput').on('change', function() {
-            if (this.files[0]) uploadFile(this.files[0]);
-            this.value = '';
-        });
-
-        // ========== Drag-and-Drop Upload ==========
+        // Drag-and-drop
         const dropZone = document.getElementById('chatDropZone');
         const dragOverlay = document.getElementById('dragOverlay');
         let dragCounter = 0;
+        const chatCard = dropZone.closest('.chat-card');
 
-        // Also allow dragging onto the whole card footer / input area
-        const chatCard = dropZone.closest('.card');
+        chatCard.addEventListener('dragenter', e => { e.preventDefault(); dragCounter++; dragOverlay.classList.add('active'); });
+        chatCard.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+        chatCard.addEventListener('dragleave', () => { dragCounter--; if (dragCounter <= 0) { dragCounter = 0; dragOverlay.classList.remove('active'); } });
+        chatCard.addEventListener('drop', e => {
+            e.preventDefault(); dragCounter = 0; dragOverlay.classList.remove('active');
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) uploadFile(e.dataTransfer.files[0]);
+        });
 
-        function onDragEnter(e) {
-            e.preventDefault();
-            dragCounter++;
-            dragOverlay.classList.add('active');
-        }
-        function onDragOver(e) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
-        }
-        function onDragLeave(e) {
-            dragCounter--;
-            if (dragCounter <= 0) {
-                dragCounter = 0;
-                dragOverlay.classList.remove('active');
-            }
-        }
-        function onDrop(e) {
-            e.preventDefault();
-            dragCounter = 0;
-            dragOverlay.classList.remove('active');
-            const files = e.dataTransfer.files;
-            if (files && files.length > 0) {
-                uploadFile(files[0]);
-            }
-        }
-
-        chatCard.addEventListener('dragenter', onDragEnter);
-        chatCard.addEventListener('dragover', onDragOver);
-        chatCard.addEventListener('dragleave', onDragLeave);
-        chatCard.addEventListener('drop', onDrop);
-
-        // ========== TTS (Text-to-Speech) ==========
+        // ========== TTS ==========
         function speakText(text) {
-            if (!ttsEnabled) return;
-            if (!('speechSynthesis' in window)) return;
+            if (!ttsEnabled || !('speechSynthesis' in window)) return;
             window.speechSynthesis.cancel();
             const clean = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
             if (!clean) return;
             const utterance = new SpeechSynthesisUtterance(clean);
             utterance.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
-            utterance.rate = 0.85;
-            utterance.pitch = 1.0;
-            utterance.volume = 1.0;
+            utterance.rate = 0.85; utterance.pitch = 1.0; utterance.volume = 1.0;
             const voices = window.speechSynthesis.getVoices();
             const langPrefix = currentLang === 'zh-HK' ? 'zh' : 'en';
             const voice = voices.find(v => v.lang.startsWith(langPrefix));
@@ -328,7 +286,6 @@
             window.speechSynthesis.speak(utterance);
         }
 
-        // TTS Toggle
         $('#ttsToggle').on('click', function() {
             ttsEnabled = !ttsEnabled;
             if (!ttsEnabled) window.speechSynthesis.cancel();
@@ -357,17 +314,12 @@
             const imgSrc = sender === 'bot' ? botImg : userImg;
             const justify = sender === 'bot' ? 'start' : 'end';
             const msgClass = sender === 'bot' ? 'msg_cotainer' : 'msg_cotainer_send';
-
             const msgHTML = `
-                <div class="d-flex justify-content-${justify} mb-4">
-                    ${sender === 'bot' ? `<img src="${imgSrc}" class="rounded-circle user_img_msg" alt="Bot">` : ''}
-                    <div class="${msgClass}">
-                        ${message}
-                        <span class="msg_time">${time}</span>
-                    </div>
-                    ${sender === 'user' ? `<img src="${imgSrc}" class="rounded-circle user_img_msg" alt="You">` : ''}
-                </div>
-            `;
+                <div class="d-flex justify-content-${justify} mb-4 fade-in">
+                    ${sender === 'bot' ? `<img src="${imgSrc}" class="user_img_msg" alt="Bot">` : ''}
+                    <div class="${msgClass}">${message}<span class="msg_time">${time}</span></div>
+                    ${sender === 'user' ? `<img src="${imgSrc}" class="user_img_msg" alt="You">` : ''}
+                </div>`;
             $('#messageFormeight').append(msgHTML);
             $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
         }
@@ -398,68 +350,54 @@
             appendMessage('user', text, time);
             $('#text').val('');
             $.ajax({
-                type: 'POST',
-                url: '/get_response',
+                type: 'POST', url: '/get_response',
                 data: { msg: text, use_search: webSearchEnabled ? 'true' : 'false' },
                 success: function(data) {
                     appendMessage('bot', data.response, time);
                     speakText(data.response);
-                    if (text.toLowerCase().includes('reminder') || text.includes('提醒')) {
-                        checkReminders();
-                    }
+                    if (text.toLowerCase().includes('reminder') || text.includes('提醒')) checkReminders();
                 },
                 error: function() {
-                    const errMsg = '{{ translations.error_generic if translations else "Something went wrong. Please try again." }}';
-                    appendMessage('bot', errMsg, time);
+                    appendMessage('bot', '{{ translations.error_generic if translations else "Something went wrong." }}', time);
                 }
             });
         });
 
         // ========== Voice Recording (STT) ==========
-        // State
-        let _recognition = null;
-        let _mediaRecorder = null;
-        let _audioChunks = [];
-        let _isRecording = false;
-
-        const PLACEHOLDER_IDLE     = '{{ translations.type_message if translations else "Type your message..." }}';
-        const PLACEHOLDER_LISTEN   = '{{ translations.recording if translations else "Listening... speak now" }}';
-        const PLACEHOLDER_PROCESS  = '{{ translations.processing if translations else "Processing..." }}';
+        let _recognition = null, _mediaRecorder = null, _audioChunks = [], _isRecording = false;
+        const PLACEHOLDER_IDLE = '{{ translations.type_message if translations else "Type your message..." }}';
+        const PLACEHOLDER_LISTEN = '{{ translations.recording if translations else "Listening... speak now" }}';
+        const PLACEHOLDER_PROCESS = '{{ translations.processing if translations else "Processing..." }}';
 
         function stopRecording() {
             _isRecording = false;
             $('#micBtn').removeClass('recording-active').find('i').removeClass('fa-stop').addClass('fa-microphone');
             $('#stopBtn').addClass('d-none');
             $('#text').attr('placeholder', PLACEHOLDER_IDLE);
-
             if (_recognition) { try { _recognition.stop(); } catch(e){} _recognition = null; }
-            if (_mediaRecorder && _mediaRecorder.state !== 'inactive') { _mediaRecorder.stop(); }
+            if (_mediaRecorder && _mediaRecorder.state !== 'inactive') _mediaRecorder.stop();
         }
 
-        // Encode Float32 PCM samples → 16-bit mono WAV Blob (pure JS, no library)
         function encodePCMToWAV(samples, sampleRate) {
             const numSamples = samples.length;
             const buf = new ArrayBuffer(44 + numSamples * 2);
             const view = new DataView(buf);
             const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
-            writeStr(0,  'RIFF');          view.setUint32(4,  36 + numSamples * 2, true);
-            writeStr(8,  'WAVE');          writeStr(12, 'fmt ');
-            view.setUint32(16, 16, true);  view.setUint16(20, 1, true);   // PCM
-            view.setUint16(22, 1, true);                                   // mono
-            view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true);                      // byte rate
-            view.setUint16(32, 2, true);   view.setUint16(34, 16, true);  // block align, bits
-            writeStr(36, 'data');          view.setUint32(40, numSamples * 2, true);
+            writeStr(0, 'RIFF'); view.setUint32(4, 36 + numSamples * 2, true);
+            writeStr(8, 'WAVE'); writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true); writeStr(36, 'data');
+            view.setUint32(40, numSamples * 2, true);
             let off = 44;
             for (let i = 0; i < numSamples; i++) {
                 const s = Math.max(-1, Math.min(1, samples[i]));
-                view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-                off += 2;
+                view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2;
             }
             return new Blob([buf], { type: 'audio/wav' });
         }
 
-        // Post WAV blob to Vosk /transcribe endpoint (English fallback)
         async function voskTranscribe(wavBlob) {
             const form = new FormData();
             form.append('audio', wavBlob, 'audio.wav');
@@ -467,76 +405,49 @@
                 const resp = await fetch('/transcribe', { method: 'POST', body: form });
                 const data = await resp.json();
                 return data.text || '';
-            } catch(e) {
-                console.error('[Vosk] Transcription failed:', e);
-                return '';
-            }
+            } catch(e) { console.error('[Vosk]', e); return ''; }
         }
 
-        // Start recording — Web Speech API (all langs) with Vosk WAV fallback (en-US)
         async function startRecording() {
-            // Request mic permission explicitly so the user sees a clear prompt
-            try {
-                await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch(e) {
-                alert('{{ translations.mic_denied if translations else "Microphone access denied. Please allow microphone access in your browser settings." }}');
-                return;
+            try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch(e) {
+                alert('{{ translations.mic_denied if translations else "Microphone access denied." }}'); return;
             }
-
             _isRecording = true;
             $('#micBtn').addClass('recording-active').find('i').removeClass('fa-microphone').addClass('fa-stop');
-            $('#stopBtn').addClass('d-none');  // mic btn IS the stop now
             $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
-                // ---- Web Speech API path ----
                 _recognition = new SpeechRecognition();
                 _recognition.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
-                _recognition.interimResults = true;   // ← live feedback while speaking
-                _recognition.continuous = false;
-                _recognition.maxAlternatives = 1;
-
+                _recognition.interimResults = true; _recognition.continuous = false; _recognition.maxAlternatives = 1;
                 _recognition.addEventListener('result', function(event) {
                     let interim = '', final = '';
                     for (let i = event.resultIndex; i < event.results.length; i++) {
                         const t = event.results[i][0].transcript;
-                        if (event.results[i].isFinal) final += t;
-                        else interim += t;
+                        if (event.results[i].isFinal) final += t; else interim += t;
                     }
-                    // Show interim text live; finalise when speech ends
                     $('#text').val(final || interim);
                 });
-
                 _recognition.addEventListener('error', function(event) {
-                    console.error('[STT] Web Speech error:', event.error);
-                    stopRecording();
-                    if (event.error === 'not-allowed') {
-                        alert('{{ translations.mic_denied if translations else "Microphone access denied." }}');
-                    } else if (event.error !== 'aborted') {
-                        alert('{{ translations.no_speech_detected if translations else "No speech detected. Please try again." }}');
-                    }
+                    console.error('[STT]', event.error); stopRecording();
+                    if (event.error === 'not-allowed') alert('{{ translations.mic_denied if translations else "Microphone access denied." }}');
+                    else if (event.error !== 'aborted') alert('{{ translations.no_speech_detected if translations else "No speech detected." }}');
                 });
-
                 _recognition.addEventListener('end', function() {
                     stopRecording();
                     const transcript = $('#text').val().trim();
                     if (transcript) setTimeout(() => $('#messageArea').submit(), 150);
                 });
-
                 _recognition.start();
-
             } else if (currentLang !== 'zh-HK') {
-                // ---- MediaRecorder → Vosk path (en-US only, no Web Speech) ----
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
                 _audioChunks = [];
                 _mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-
                 _mediaRecorder.addEventListener('dataavailable', e => { if (e.data.size) _audioChunks.push(e.data); });
                 _mediaRecorder.addEventListener('stop', async () => {
                     $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
                     stream.getTracks().forEach(t => t.stop());
-                    // Decode webm/opus → raw PCM via AudioContext, then encode as WAV
                     const blob = new Blob(_audioChunks, { type: 'audio/webm' });
                     const arrayBuf = await blob.arrayBuffer();
                     const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
@@ -545,51 +456,39 @@
                     const wavBlob = encodePCMToWAV(pcm, 16000);
                     const text = await voskTranscribe(wavBlob);
                     stopRecording();
-                    if (text) {
-                        $('#text').val(text);
-                        setTimeout(() => $('#messageArea').submit(), 150);
-                    } else {
-                        $('#text').attr('placeholder', PLACEHOLDER_IDLE);
-                    }
+                    if (text) { $('#text').val(text); setTimeout(() => $('#messageArea').submit(), 150); }
+                    else { $('#text').attr('placeholder', PLACEHOLDER_IDLE); }
                 });
-
                 _mediaRecorder.start();
             } else {
-                // zh-HK + no Web Speech API = unsupported
                 stopRecording();
-                alert('{{ translations.no_speech_support if translations else "Speech recognition is not supported in this browser." }}');
+                alert('{{ translations.no_speech_support if translations else "Speech recognition not supported." }}');
             }
         }
 
-        // Toggle mic: click once to start, click again to stop
-        $('#micBtn').on('click', function() {
-            if (_isRecording) {
-                stopRecording();
-            } else {
-                startRecording();
-            }
-        });
-
-        // Keep stopBtn as secondary stop (shown only in legacy paths)
+        $('#micBtn').on('click', function() { if (_isRecording) stopRecording(); else startRecording(); });
         $('#stopBtn').on('click', function() { stopRecording(); });
 
         // ========== Reminder Management ==========
         function checkReminders() {
             $.get('/get_reminders', function(data) {
-                $('#reminderList, #reminderListMobile').empty();
+                $('#reminderList').empty();
                 if (!data.reminders || data.reminders.length === 0) {
                     const noReminders = '{{ translations.no_reminders if translations else "No active reminders" }}';
-                    $('#reminderList, #reminderListMobile').append('<p class="text-muted small">' + noReminders + '</p>');
+                    $('#reminderList').append('<p style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:8px 0;">' + noReminders + '</p>');
                     return;
                 }
-                data.reminders.forEach(reminder => {
+                data.reminders.forEach(r => {
                     const deleteLabel = currentLang === 'zh-HK' ? '刪除' : 'Delete';
-                    const doneLabel = currentLang === 'zh-HK' ? '(已完成)' : '(Done)';
-                    const item = '<div class="reminder-item mb-2 p-2 border rounded ' + (reminder.active ? '' : 'text-muted') + '">'
-                        + reminder.label + ' - ' + reminder.time
-                        + (reminder.active ? ' <button class="btn btn-danger btn-sm float-end delete-reminder" data-label="' + reminder.label + '">' + deleteLabel + '</button>' : ' ' + doneLabel)
-                        + '</div>';
-                    $('#reminderList, #reminderListMobile').append(item);
+                    const html = `<div class="reminder-item ${r.active ? '' : 'inactive'} fade-in">
+                        <div class="reminder-icon"><i class="fas fa-bell"></i></div>
+                        <div class="reminder-info">
+                            <div class="reminder-label">${r.label}</div>
+                            <div class="reminder-time-badge"><i class="fas fa-clock"></i> ${r.time}</div>
+                        </div>
+                        ${r.active ? `<button class="reminder-delete delete-reminder" data-label="${r.label}" title="${deleteLabel}"><i class="fas fa-times"></i></button>` : ''}
+                    </div>`;
+                    $('#reminderList').append(html);
                 });
                 $('.delete-reminder').off('click').on('click', function() {
                     const label = $(this).data('label');
@@ -600,55 +499,116 @@
         checkReminders();
         setInterval(checkReminders, 60000);
 
-        function scheduleReminderCheck() {
-            const now = new Date();
-            const delay = (60 - now.getSeconds()) * 1000;
-            setTimeout(() => {
-                checkForRemindersNow();
-                setInterval(checkForRemindersNow, 60000);
-            }, delay);
-        }
-
+        // Reminder alarm check
         function checkForRemindersNow() {
             $.get('/get_reminders', function(data) {
-                const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                data.reminders.forEach(reminder => {
-                    if (reminder.time === currentTime && reminder.active) {
+                const currentTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                data.reminders.forEach(r => {
+                    if (r.time === currentTime && r.active) {
                         const audio = new Audio("/static/notification.mp3");
                         audio.loop = true;
-                        audio.play().catch(err => console.log('Audio play blocked:', err));
+                        audio.play().catch(() => {});
                         setTimeout(() => {
                             const alertMsg = currentLang === 'zh-HK'
-                                ? '⏰ 提醒：' + reminder.label + '！\n\n係時候' + reminder.label + '喇！'
-                                : '⏰ Reminder: ' + reminder.label + '!\n\nIt\'s time to ' + reminder.label.toLowerCase() + '!';
+                                ? '⏰ 提醒：' + r.label + '！\n\n係時候' + r.label + '喇！'
+                                : '⏰ Reminder: ' + r.label + '!\n\nIt\'s time to ' + r.label.toLowerCase() + '!';
                             alert(alertMsg);
-                            audio.pause();
-                            audio.currentTime = 0;
-                            $.post('/deactivate_reminder', { label: reminder.label }, function() { checkReminders(); });
+                            audio.pause(); audio.currentTime = 0;
+                            $.post('/deactivate_reminder', { label: r.label }, function() { checkReminders(); });
                         }, 300);
                     }
                 });
             });
         }
-        scheduleReminderCheck();
+        const now = new Date();
+        setTimeout(() => { checkForRemindersNow(); setInterval(checkForRemindersNow, 60000); }, (60 - now.getSeconds()) * 1000);
 
-        $('#reminderForm, #reminderFormMobile').on('submit', function(e) {
+        // Add reminder form
+        $('#reminderForm').on('submit', function(e) {
             e.preventDefault();
-            const isMobile = this.id === 'reminderFormMobile';
-            const label = $(isMobile ? '#reminderLabelMobile' : '#reminderLabel').val().trim();
-            const time = $(isMobile ? '#reminderTimeMobile' : '#reminderTime').val();
+            const label = $('#reminderLabel').val().trim();
+            const time = $('#reminderTime').val();
             if (label && time) {
-                const cmd = currentLang === 'zh-HK'
-                    ? '設置提醒 ' + label + ' ' + time
-                    : 'set reminder ' + label + ' ' + time;
+                const cmd = currentLang === 'zh-HK' ? '設置提醒 ' + label + ' ' + time : 'set reminder ' + label + ' ' + time;
                 $.post('/get_response', { msg: cmd }, function(data) {
-                    alert(data.response);
-                    $(isMobile ? '#reminderLabelMobile' : '#reminderLabel').val('');
-                    $(isMobile ? '#reminderTimeMobile' : '#reminderTime').val('');
+                    // Show confirmation in chat
+                    const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    appendMessage('bot', data.response, t);
+                    speakText(data.response);
+                    $('#reminderLabel').val(''); $('#reminderTime').val('');
                     checkReminders();
                 });
             }
         });
+
+        // ========== FullCalendar with HK Holidays ==========
+        const calendarEl = document.getElementById('miniCalendar');
+        const calendar = new FullCalendar.Calendar(calendarEl, {
+            initialView: 'dayGridMonth',
+            locale: currentLang === 'zh-HK' ? 'zh-hk' : 'en',
+            headerToolbar: {
+                left: 'prev',
+                center: 'title',
+                right: 'next'
+            },
+            height: 'auto',
+            fixedWeekCount: false,
+            dayMaxEvents: 1,
+            events: function(fetchInfo, successCallback, failureCallback) {
+                $.get('/get_hk_holidays', function(data) {
+                    successCallback(data.holidays || []);
+                }).fail(function() { successCallback([]); });
+            },
+            eventClick: function(info) {
+                // Read holiday name aloud
+                speakText(info.event.title);
+            },
+            dateClick: function(info) {
+                // Announce the date
+                const d = new Date(info.dateStr);
+                const dateText = currentLang === 'zh-HK'
+                    ? `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`
+                    : d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                speakText(dateText);
+            }
+        });
+        calendar.render();
+
+        // ========== HK News ==========
+        function loadNews() {
+            $('#newsContainer').html('<div class="news-loading"><i class="fas fa-spinner"></i> {{ translations.loading_news if translations else "Loading news..." }}</div>');
+            $.get('/get_news', function(data) {
+                $('#newsContainer').empty();
+                if (!data.articles || data.articles.length === 0) {
+                    $('#newsContainer').html('<p style="text-align:center;color:var(--text-muted);padding:20px;font-size:0.9rem;">{{ translations.no_news if translations else "No news available." }}</p>');
+                    return;
+                }
+                data.articles.forEach(article => {
+                    const html = `<div class="news-item fade-in" onclick="window.open('${article.url}', '_blank')">
+                        <div class="news-title">${article.title}</div>
+                        <div class="news-desc">${article.description || ''}</div>
+                        <div class="news-meta">
+                            <span class="news-source">${article.source}</span>
+                            <button class="news-voice-btn" onclick="event.stopPropagation(); speakNewsItem('${article.title.replace(/'/g, "\\'")}', '${(article.description || '').replace(/'/g, "\\'")}')" title="{{ translations.voice_read if translations else 'Read aloud' }}">
+                                <i class="fas fa-volume-up"></i>
+                            </button>
+                        </div>
+                    </div>`;
+                    $('#newsContainer').append(html);
+                });
+            }).fail(function() {
+                $('#newsContainer').html('<p style="text-align:center;color:var(--text-muted);padding:20px;font-size:0.9rem;">{{ translations.no_news if translations else "No news available." }}</p>');
+            });
+        }
+
+        // Global function for news voice button
+        window.speakNewsItem = function(title, desc) {
+            speakText(title + '. ' + desc);
+        };
+
+        loadNews();
+        $('#refreshNews').on('click', loadNews);
+
     });
     </script>
 </body>
