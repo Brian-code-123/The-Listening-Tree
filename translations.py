@@ -1,13 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-Language translations for the Elderly Companion Chatbot
-Supports: English (en), Traditional Chinese / Cantonese (zh-HK)
+translations.py — Internationalisation (i18n) strings for The Listening Tree.
+
+Supported locales:
+    en    — English (default)
+    zh-HK — Traditional Chinese / Cantonese
+
+Usage:
+    from translations import get_text, get_all_translations
+    label = get_text('app_name', 'zh-HK')   # → '聆聽樹'
+    all_  = get_all_translations('en')       # full dict for templates
 """
 
-TRANSLATIONS = {
-    'en': {
+# ---------------------------------------------------------------------------
+# Master translation dictionary
+#
+# Each top-level key is a locale code.  Keys inside every locale dict
+# correspond to UI labels, error messages, accessibility strings, etc.
+# When a key is missing for a requested locale the English fallback is
+# returned automatically by get_text().
+# ---------------------------------------------------------------------------
+
+TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
         # Navigation & Layout
-        'app_name': 'The Listening Tree',
+        "app_name": "The Listening Tree",
         'tagline': 'Your friendly companion',
         'logout': 'Logout',
         'language': 'Language',
@@ -399,13 +416,20 @@ TRANSLATIONS = {
         'reminder_label': '提醒內容',
         'reminder_time_label': '時間',
         'voice_read': '語音朗讀',
-    }
+    },
 }
 
-def get_text(key, lang='en'):
-    """Get translated text for a given key and language"""
-    return TRANSLATIONS.get(lang, TRANSLATIONS['en']).get(key, key)
 
-def get_all_translations(lang='en'):
-    """Get all translations for a specific language"""
-    return TRANSLATIONS.get(lang, TRANSLATIONS['en'])
+def get_text(key: str, lang: str = "en") -> str:
+    """Return the translated string for *key* in the given *lang*.
+
+    Falls back to English when the key is missing for the requested
+    locale. If the key is absent in both locales the raw key string
+    is returned as-is.
+    """
+    return TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key, key)
+
+
+def get_all_translations(lang: str = "en") -> dict[str, str]:
+    """Return the entire translation dict for *lang* (or English)."""
+    return TRANSLATIONS.get(lang, TRANSLATIONS["en"])

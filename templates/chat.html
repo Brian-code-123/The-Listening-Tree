@@ -363,41 +363,83 @@
             });
         });
 
-        // ========== Voice Recording (STT) ==========
-        let _recognition = null, _mediaRecorder = null, _audioChunks = [], _isRecording = false;
-        const PLACEHOLDER_IDLE = '{{ translations.type_message if translations else "Type your message..." }}';
-        const PLACEHOLDER_LISTEN = '{{ translations.recording if translations else "Listening... speak now" }}';
-        const PLACEHOLDER_PROCESS = '{{ translations.processing if translations else "Processing..." }}';
+        // ================================================================
+        // Voice Recording (STT) — Unified Bilingual Engine
+        //
+        // Primary:  Browser Web Speech API  (EN + zh-HK)
+        // Fallback: Server-side Vosk        (EN only, offline)
+        //
+        // Flow:  mic button → recognise → inject text into #text
+        //        → auto-submit form → same response pipeline as typing
+        // ================================================================
 
+        let _recognition = null;
+        let _mediaRecorder = null;
+        let _audioChunks = [];
+        let _isRecording = false;
+
+        // Localised placeholder strings (set by Jinja)
+        const PLACEHOLDER_IDLE    = '{{ translations.type_message   | default("Type your message...") }}';
+        const PLACEHOLDER_LISTEN  = '{{ translations.recording      | default("Listening... speak now") }}';
+        const PLACEHOLDER_PROCESS = '{{ translations.processing     | default("Processing...") }}';
+
+        /**
+         * Gracefully stop any active recording session.
+         * Resets the mic button state and placeholder text.
+         */
         function stopRecording() {
             _isRecording = false;
-            $('#micBtn').removeClass('recording-active').find('i').removeClass('fa-stop').addClass('fa-microphone');
-            $('#stopBtn').addClass('d-none');
+            $('#micBtn')
+                .removeClass('recording-active pulse-recording')
+                .find('i').removeClass('fa-stop').addClass('fa-microphone');
             $('#text').attr('placeholder', PLACEHOLDER_IDLE);
-            if (_recognition) { try { _recognition.stop(); } catch(e){} _recognition = null; }
-            if (_mediaRecorder && _mediaRecorder.state !== 'inactive') _mediaRecorder.stop();
+
+            if (_recognition) {
+                try { _recognition.stop(); } catch (e) { /* already stopped */ }
+                _recognition = null;
+            }
+            if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+                _mediaRecorder.stop();
+            }
         }
 
+        /**
+         * Encode raw PCM Float32 samples → 16-bit mono WAV Blob.
+         * Used when falling back to server-side Vosk transcription.
+         */
         function encodePCMToWAV(samples, sampleRate) {
             const numSamples = samples.length;
             const buf = new ArrayBuffer(44 + numSamples * 2);
             const view = new DataView(buf);
-            const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
-            writeStr(0, 'RIFF'); view.setUint32(4, 36 + numSamples * 2, true);
-            writeStr(8, 'WAVE'); writeStr(12, 'fmt ');
-            view.setUint32(16, 16, true); view.setUint16(20, 1, true);
-            view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true);
-            view.setUint16(34, 16, true); writeStr(36, 'data');
+            const writeStr = (off, s) => {
+                for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+            };
+            writeStr(0, 'RIFF');
+            view.setUint32(4, 36 + numSamples * 2, true);
+            writeStr(8, 'WAVE');
+            writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeStr(36, 'data');
             view.setUint32(40, numSamples * 2, true);
             let off = 44;
             for (let i = 0; i < numSamples; i++) {
                 const s = Math.max(-1, Math.min(1, samples[i]));
-                view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2;
+                view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                off += 2;
             }
             return new Blob([buf], { type: 'audio/wav' });
         }
 
+        /**
+         * Send a WAV blob to the /transcribe endpoint (Vosk offline STT).
+         * Returns the transcribed text or an empty string on failure.
+         */
         async function voskTranscribe(wavBlob) {
             const form = new FormData();
             form.append('audio', wavBlob, 'audio.wav');
@@ -405,69 +447,158 @@
                 const resp = await fetch('/transcribe', { method: 'POST', body: form });
                 const data = await resp.json();
                 return data.text || '';
-            } catch(e) { console.error('[Vosk]', e); return ''; }
+            } catch (e) {
+                console.error('[Vosk]', e);
+                return '';
+            }
         }
 
+        /**
+         * Show a friendly, non-blocking toast instead of a browser alert().
+         * Auto-dismisses after 4 seconds.
+         */
+        function showVoiceToast(message) {
+            // Remove any existing toast
+            $('.voice-toast').remove();
+            const toast = $('<div class="voice-toast">' + message + '</div>');
+            $('body').append(toast);
+            setTimeout(() => toast.addClass('show'), 10);
+            setTimeout(() => { toast.removeClass('show'); setTimeout(() => toast.remove(), 300); }, 4000);
+        }
+
+        /**
+         * Start recording.  The strategy:
+         *
+         * 1. If Web Speech API exists (Chrome / Edge / Safari) → use it
+         *    for BOTH English and Cantonese (set lang accordingly).
+         * 2. Else if English selected → fall back to Vosk (server-side).
+         * 3. Else → show a friendly "not supported" message.
+         */
         async function startRecording() {
-            try { await navigator.mediaDevices.getUserMedia({ audio: true }); } catch(e) {
-                alert('{{ translations.mic_denied if translations else "Microphone access denied." }}'); return;
+            // Request mic permission first
+            try {
+                await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (e) {
+                showVoiceToast(currentLang === 'zh-HK'
+                    ? '❌ 咪高峰權限被拒絕，請檢查瀏覽器設定。'
+                    : '❌ Microphone access denied. Please check browser settings.');
+                return;
             }
+
             _isRecording = true;
-            $('#micBtn').addClass('recording-active').find('i').removeClass('fa-microphone').addClass('fa-stop');
+            $('#micBtn')
+                .addClass('recording-active pulse-recording')
+                .find('i').removeClass('fa-microphone').addClass('fa-stop');
             $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
 
+            // --- Strategy 1: Web Speech API (supports EN + zh-HK) ---
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 _recognition = new SpeechRecognition();
-                _recognition.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
-                _recognition.interimResults = true; _recognition.continuous = false; _recognition.maxAlternatives = 1;
-                _recognition.addEventListener('result', function(event) {
+                _recognition.lang = (currentLang === 'zh-HK') ? 'zh-HK' : 'en-US';
+                _recognition.interimResults = true;
+                _recognition.continuous = false;
+                _recognition.maxAlternatives = 1;
+
+                _recognition.addEventListener('result', function (event) {
                     let interim = '', final = '';
                     for (let i = event.resultIndex; i < event.results.length; i++) {
                         const t = event.results[i][0].transcript;
-                        if (event.results[i].isFinal) final += t; else interim += t;
+                        if (event.results[i].isFinal) final += t;
+                        else interim += t;
                     }
+                    // Show interim results live in the text field
                     $('#text').val(final || interim);
                 });
-                _recognition.addEventListener('error', function(event) {
-                    console.error('[STT]', event.error); stopRecording();
-                    if (event.error === 'not-allowed') alert('{{ translations.mic_denied if translations else "Microphone access denied." }}');
-                    else if (event.error !== 'aborted') alert('{{ translations.no_speech_detected if translations else "No speech detected." }}');
+
+                _recognition.addEventListener('error', function (event) {
+                    console.warn('[STT] error:', event.error);
+                    stopRecording();
+                    if (event.error === 'not-allowed') {
+                        showVoiceToast(currentLang === 'zh-HK'
+                            ? '❌ 咪高峰權限被拒絕，請喺瀏覽器設定允許。'
+                            : '❌ Microphone access denied. Please allow in browser settings.');
+                    } else if (event.error === 'no-speech') {
+                        showVoiceToast(currentLang === 'zh-HK'
+                            ? '🎤 聽唔到語音，請再試一次。'
+                            : '🎤 No speech detected. Please try again.');
+                    } else if (event.error !== 'aborted') {
+                        showVoiceToast(currentLang === 'zh-HK'
+                            ? '⚠️ 語音辨識出錯，請再試吓。'
+                            : '⚠️ Voice recognition error. Please try again.');
+                    }
                 });
-                _recognition.addEventListener('end', function() {
+
+                _recognition.addEventListener('end', function () {
                     stopRecording();
                     const transcript = $('#text').val().trim();
-                    if (transcript) setTimeout(() => $('#messageArea').submit(), 150);
+                    // Auto-submit if we got text
+                    if (transcript) {
+                        setTimeout(() => $('#messageArea').submit(), 150);
+                    }
                 });
+
                 _recognition.start();
-            } else if (currentLang !== 'zh-HK') {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
-                _audioChunks = [];
-                _mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-                _mediaRecorder.addEventListener('dataavailable', e => { if (e.data.size) _audioChunks.push(e.data); });
-                _mediaRecorder.addEventListener('stop', async () => {
-                    $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
-                    stream.getTracks().forEach(t => t.stop());
-                    const blob = new Blob(_audioChunks, { type: 'audio/webm' });
-                    const arrayBuf = await blob.arrayBuffer();
-                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-                    const decoded = await audioCtx.decodeAudioData(arrayBuf);
-                    const pcm = decoded.getChannelData(0);
-                    const wavBlob = encodePCMToWAV(pcm, 16000);
-                    const text = await voskTranscribe(wavBlob);
-                    stopRecording();
-                    if (text) { $('#text').val(text); setTimeout(() => $('#messageArea').submit(), 150); }
-                    else { $('#text').attr('placeholder', PLACEHOLDER_IDLE); }
-                });
-                _mediaRecorder.start();
-            } else {
-                stopRecording();
-                alert('{{ translations.no_speech_support if translations else "Speech recognition not supported." }}');
+                return;  // done — Web Speech API handles everything
             }
+
+            // --- Strategy 2: Vosk fallback (English only, server-side) ---
+            if (currentLang !== 'zh-HK') {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
+                    });
+                    _audioChunks = [];
+                    _mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+
+                    _mediaRecorder.addEventListener('dataavailable', (e) => {
+                        if (e.data.size) _audioChunks.push(e.data);
+                    });
+
+                    _mediaRecorder.addEventListener('stop', async () => {
+                        $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
+                        stream.getTracks().forEach(t => t.stop());
+
+                        const blob = new Blob(_audioChunks, { type: 'audio/webm' });
+                        const arrayBuf = await blob.arrayBuffer();
+                        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                        const decoded = await audioCtx.decodeAudioData(arrayBuf);
+                        const pcm = decoded.getChannelData(0);
+                        const wavBlob = encodePCMToWAV(pcm, 16000);
+                        const text = await voskTranscribe(wavBlob);
+
+                        stopRecording();
+                        if (text) {
+                            $('#text').val(text);
+                            setTimeout(() => $('#messageArea').submit(), 150);
+                        } else {
+                            showVoiceToast('🎤 No speech detected. Please try again.');
+                            $('#text').attr('placeholder', PLACEHOLDER_IDLE);
+                        }
+                    });
+
+                    _mediaRecorder.start();
+                } catch (e) {
+                    stopRecording();
+                    showVoiceToast('⚠️ Voice recording failed. Please try again.');
+                }
+                return;
+            }
+
+            // --- Strategy 3: Nothing available for zh-HK without Web Speech API ---
+            stopRecording();
+            showVoiceToast(currentLang === 'zh-HK'
+                ? '你嘅瀏覽器唔支援語音辨識，請用 Chrome 或 Edge。'
+                : 'Speech recognition not supported. Please use Chrome or Edge.');
         }
 
-        $('#micBtn').on('click', function() { if (_isRecording) stopRecording(); else startRecording(); });
-        $('#stopBtn').on('click', function() { stopRecording(); });
+        // Mic button: toggle recording on/off
+        $('#micBtn').on('click', function () {
+            if (_isRecording) stopRecording();
+            else startRecording();
+        });
 
         // ========== Reminder Management ==========
         function checkReminders() {
