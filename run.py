@@ -1,37 +1,91 @@
+"""
+run.py — Main application server for The Listening Tree.
+
+An elderly-focused AI companion chatbot built with FastAPI.
+Provides bilingual chat (EN / zh-HK), voice interaction,
+reminder management, memory games, calendar with HK public
+holidays, and a local news feed.
+
+Stack:
+    - FastAPI 0.128+  (async ASGI web framework)
+    - Uvicorn 0.35+   (high-performance ASGI server)
+    - Kimi / Moonshot  (LLM chat API, moonshot-v1-8k)
+    - SQLite3          (lightweight embedded database)
+    - Vosk 0.3.45      (offline English STT, optional)
+    - Web Speech API   (browser-side STT/TTS for EN + zh-HK)
+
+Author:  The Listening Tree Team
+License: Academic — Educational & Research Use
+"""
+
+# ---------------------------------------------------------------------------
+# Standard library imports
+# ---------------------------------------------------------------------------
+import os
+import io
+import json
+import wave
+import base64
+import secrets
+import random
+import threading
+from datetime import datetime
+
+# ---------------------------------------------------------------------------
+# Third-party imports
+# ---------------------------------------------------------------------------
 from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
-import os
-import json
-import sqlite3
-from datetime import datetime
-import threading
-import secrets
-import random
 import httpx
-import base64
+import sqlite3
+
+# ---------------------------------------------------------------------------
+# Local imports
+# ---------------------------------------------------------------------------
 from translations import get_text, get_all_translations, TRANSLATIONS
 
-app = FastAPI()
+# ---------------------------------------------------------------------------
+# Application initialisation
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title="The Listening Tree",
+    description="Bilingual AI companion chatbot for elderly wellness",
+    version="2.0.0",
+)
 app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(16))
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Vosk STT — lazy-loaded on first use (English offline model)
-# =============================================================================
+#
+# Vosk provides fully offline speech-to-text for English.
+# On Vercel (serverless), the native binary is unavailable so voice
+# recognition falls back to the browser's Web Speech API exclusively.
+# ---------------------------------------------------------------------------
 _vosk_model = None
 _vosk_lock = threading.Lock()
-VOSK_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'voice_models', 'vosk-model-small-en-us-0.15')
-# On Vercel, Vosk binary isn't available — voice falls back to Web Speech API only
-ON_VERCEL = bool(os.environ.get('VERCEL'))
+VOSK_MODEL_PATH = os.path.join(
+    os.path.dirname(__file__), "voice_models", "vosk-model-small-en-us-0.15"
+)
+
+# Detect Vercel environment (serverless — no persistent filesystem)
+ON_VERCEL = bool(os.environ.get("VERCEL"))
+
 
 def get_vosk_model():
+    """Return the cached Vosk Model instance (thread-safe, singleton).
+
+    Returns None when running on Vercel or if the model directory is
+    missing.  The first call that finds a valid model directory will
+    load the model and cache it for all subsequent requests.
+    """
     global _vosk_model
     if ON_VERCEL:
-        return None  # Vosk not available in Vercel serverless
+        return None
     if _vosk_model is not None:
         return _vosk_model
     with _vosk_lock:
@@ -47,29 +101,37 @@ def get_vosk_model():
                 print(f"[Vosk] ⚠ Model not found at {VOSK_MODEL_PATH}")
     return _vosk_model
 
-# =============================================================================
-# Global State
-# =============================================================================
-user_game_states = {}
-user_api_histories = {}  # (user_id, lang) -> conversation history list
+# ---------------------------------------------------------------------------
+# In-memory state  (lost on server restart — by design)
+# ---------------------------------------------------------------------------
+# Per-user quiz progress: { user_id: { is_game_mode, current_index, ... } }
+user_game_states: dict = {}
 
+# Per-(user, lang) conversation context sent to the LLM
+user_api_histories: dict = {}
+
+# Messages older than this are soft-deleted from chat_history
 CHAT_HISTORY_RETENTION_MINUTES = 30
 
-# =============================================================================
-# AI Configuration — Kimi 2.5 (Moonshot AI, OpenAI-compatible)
-# =============================================================================
-AI_API_KEY = os.environ.get('KIMI_API_KEY', 'sk-qoX1UHDwIuX52oMgxlNNSfuhYviY19latENX1TMgZCAfE0va')
-AI_BASE_URL = os.environ.get('KIMI_BASE_URL', 'https://api.moonshot.cn/v1')
-AI_MODEL = os.environ.get('KIMI_MODEL', 'moonshot-v1-8k')
+# ---------------------------------------------------------------------------
+# AI configuration — Kimi 2.5 (Moonshot AI, OpenAI-compatible API)
+# ---------------------------------------------------------------------------
+AI_API_KEY = os.environ.get(
+    "KIMI_API_KEY",
+    "sk-qoX1UHDwIuX52oMgxlNNSfuhYviY19latENX1TMgZCAfE0va",
+)
+AI_BASE_URL = os.environ.get("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
+AI_MODEL = os.environ.get("KIMI_MODEL", "moonshot-v1-8k")
 
 if AI_API_KEY:
-    print(f"✓ AI ({AI_MODEL}) API configured (Kimi / Moonshot)")
+    print(f"[AI] ✅ {AI_MODEL} configured (Kimi / Moonshot)")
 else:
-    print("⚠ KIMI_API_KEY not set — chat will use warm fallback responses")
+    print("[AI] ⚠ KIMI_API_KEY not set — using warm fallback responses")
 
-print("✓ Speech recognition uses browser Web Speech API (zero server deps)")
+print("[STT] ✅ Browser Web Speech API ready (EN + zh-HK, zero server deps)")
 
-# System prompt — Cantonese elderly companion (Chinese) 
+# System prompt — Cantonese elderly companion (Chinese)
+# Guides the LLM to reply in warm, patient Cantonese with simple vocabulary.
 WARM_SYSTEM_PROMPT_ZH = """你係一個非常溫暖、親切、有耐心嘅陪伴者，專門陪老人家傾偈，稱呼對方做朋友。
 
 你嘅講嘢風格：
@@ -89,6 +151,7 @@ WARM_SYSTEM_PROMPT_ZH = """你係一個非常溫暖、親切、有耐心嘅陪�
 記住：你嘅目標係令老人家覺得溫暖、被關心、唔孤單。"""
 
 # System prompt — English elderly companion
+# Guides the LLM to reply in warm, patient English with simple vocabulary.
 WARM_SYSTEM_PROMPT_EN = """You are a very warm, kind, and patient companion who chats with elderly people.
 
 Your speaking style:
@@ -105,7 +168,8 @@ IMPORTANT: Answer the user's questions directly without showing your reasoning p
 
 Remember: Your goal is to make elderly people feel warm, cared for, and less lonely."""
 
-# Warm fallback responses (used when API key is not configured)
+# Warm fallback responses — returned when the LLM API key is missing or
+# the API call fails.  Keeps the UX friendly even under degraded mode.
 WARM_FALLBACK_ZH = [
     "你好呀！好開心見到你。你今日過得點呀？😊",
     "唔好擔心，有咩事都可以同我講。我會一直陪住你㗎！",
@@ -261,7 +325,14 @@ async def call_ai_with_file(user_input: str, file_content: str, filename: str, u
         print(f"[AI] File API error: {e}")
         return random.choice(fallback)
 
-# Chinese quiz questions
+# ---------------------------------------------------------------------------
+# Quiz / Memory-game questions  (cognitive engagement feature)
+#
+# Answers are compared case-insensitively.  Keep answers as lowercase
+# strings so the comparison in the game loop stays simple.
+# ---------------------------------------------------------------------------
+
+# Cantonese quiz questions
 questions_zh = [
     {"question": "法國嘅首都係邊度？", "answer": "巴黎"},
     {"question": "2 + 2 等於幾多？", "answer": "4"},
@@ -281,17 +352,24 @@ questions = [
     {"question": "What is the chemical symbol for water?", "answer": "h2o"}
 ]
 
-# =============================================================================
-# Database Setup
-# =============================================================================
-# On Vercel the project filesystem is read-only; /tmp is writable per instance.
-# For production persistence use an external DB (e.g. Turso / Neon / Supabase).
-_DB_PATH = os.environ.get('DATABASE_URL', '/tmp/reminders.db' if ON_VERCEL else 'reminders.db')
+# ---------------------------------------------------------------------------
+# Database Setup — SQLite3
+#
+# On Vercel the project filesystem is read-only so we write to /tmp.
+# For production persistence swap to an external DB (Turso / Neon / Supabase).
+# ---------------------------------------------------------------------------
+_DB_PATH = os.environ.get(
+    "DATABASE_URL",
+    "/tmp/reminders.db" if ON_VERCEL else "reminders.db",
+)
 
-def get_db():
+
+def get_db() -> sqlite3.Connection:
+    """Open a new SQLite connection with Row factory enabled."""
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_db():
     conn = sqlite3.connect(_DB_PATH)
@@ -360,80 +438,128 @@ def init_db():
     conn.close()
     print("[DB] ✅ Database initialized")
 
+
+# Run once at import time to ensure tables exist
 init_db()
 
-# =============================================================================
-# Helpers
-# =============================================================================
-def cleanup_old_chat_history():
-    conn = sqlite3.connect('reminders.db')
+
+# ---------------------------------------------------------------------------
+# Background helpers — housekeeping tasks
+# ---------------------------------------------------------------------------
+
+def cleanup_old_chat_history() -> None:
+    """Soft-delete chat messages older than *CHAT_HISTORY_RETENTION_MINUTES*.
+
+    Sets ``is_deleted = 1`` instead of physically removing rows so that
+    analytics or audit queries can still access the data if needed.
+    """
+    conn = sqlite3.connect(_DB_PATH)
     c = conn.cursor()
     cutoff_time = datetime.now().timestamp() - (CHAT_HISTORY_RETENTION_MINUTES * 60)
-    cutoff_datetime = datetime.fromtimestamp(cutoff_time).strftime('%Y-%m-%d %H:%M:%S')
-    c.execute("UPDATE chat_history SET is_deleted = 1 WHERE timestamp < ? AND is_deleted = 0", (cutoff_datetime,))
+    cutoff_datetime = datetime.fromtimestamp(cutoff_time).strftime("%Y-%m-%d %H:%M:%S")
+    c.execute(
+        "UPDATE chat_history SET is_deleted = 1 WHERE timestamp < ? AND is_deleted = 0",
+        (cutoff_datetime,),
+    )
     deleted_count = c.rowcount
     conn.commit()
     conn.close()
     if deleted_count > 0:
         print(f"[CLEANUP] 🗑️  Marked {deleted_count} old messages as deleted")
 
-def auto_expire_old_reminders():
-    conn = sqlite3.connect('reminders.db')
+
+def auto_expire_old_reminders() -> None:
+    """Deactivate reminders created before today.
+
+    Runs once per hour (top of the hour) from the background thread.
+    """
+    conn = sqlite3.connect(_DB_PATH)
     c = conn.cursor()
-    today = datetime.now().strftime('%Y-%m-%d')
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    c.execute("UPDATE reminders SET is_active = 0, updated_at = ? WHERE DATE(created_at) < ? AND is_active = 1", (ts, today))
+    today = datetime.now().strftime("%Y-%m-%d")
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute(
+        "UPDATE reminders SET is_active = 0, updated_at = ? "
+        "WHERE DATE(created_at) < ? AND is_active = 1",
+        (ts, today),
+    )
     expired = c.rowcount
     conn.commit()
     conn.close()
     if expired > 0:
         print(f"[EXPIRE] 📅 Marked {expired} old reminders as inactive")
 
-def check_reminders():
+
+def check_reminders() -> None:
+    """Background loop (daemon thread): check reminders every 60 s.
+
+    Also triggers periodic housekeeping:
+      - auto_expire_old_reminders   every hour (minute == 0)
+      - cleanup_old_chat_history    every 10 minutes
+    """
     while True:
-        conn = sqlite3.connect('reminders.db')
+        conn = sqlite3.connect(_DB_PATH)
         c = conn.cursor()
-        today = datetime.now().strftime('%Y-%m-%d')
-        current_time = datetime.now().strftime('%H:%M')
-        c.execute("""SELECT u.email, r.label, r.reminder_time FROM reminders r
-                      JOIN users u ON r.user_id = u.id WHERE r.is_active = 1 AND DATE(r.created_at) = ?""", (today,))
+        today = datetime.now().strftime("%Y-%m-%d")
+        current_time = datetime.now().strftime("%H:%M")
+        c.execute(
+            "SELECT u.email, r.label, r.reminder_time FROM reminders r "
+            "JOIN users u ON r.user_id = u.id "
+            "WHERE r.is_active = 1 AND DATE(r.created_at) = ?",
+            (today,),
+        )
         for email, label, rtime in c.fetchall():
             if rtime == current_time:
                 print(f"[REMINDER] ⏰ {email}: {label} at {rtime}")
         conn.close()
+
+        # Periodic housekeeping
         if datetime.now().minute == 0:
             auto_expire_old_reminders()
         if datetime.now().minute % 10 == 0:
             cleanup_old_chat_history()
+
         threading.Event().wait(60)
 
-# Background reminder thread — skip on Vercel (serverless has no persistent threads)
+
+# Start background reminder thread (skip on Vercel — serverless has no
+# persistent threads)
 if not ON_VERCEL:
     threading.Thread(target=check_reminders, daemon=True).start()
 else:
-    print("[INFO] Vercel mode: background reminder thread disabled")
+    print("[INFO] Vercel mode — background reminder thread disabled")
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Session helpers
-# =============================================================================
-def get_user(request: Request):
-    """Get current user id or None"""
-    return request.session.get('user_id')
+# ---------------------------------------------------------------------------
 
-def get_lang(request: Request):
-    return request.session.get('language', 'en')
+def get_user(request: Request) -> int | None:
+    """Return the logged-in user's DB id, or *None* if unauthenticated."""
+    return request.session.get("user_id")
 
-def require_login(request: Request):
+
+def get_lang(request: Request) -> str:
+    """Return the current UI language code ('en' or 'zh-HK')."""
+    return request.session.get("language", "en")
+
+
+def require_login(request: Request) -> int:
+    """Return user id or redirect to /login via 303 See Other."""
     uid = get_user(request)
     if uid is None:
         raise HTTPException(status_code=303, headers={"Location": "/login"})
     return uid
 
-# =============================================================================
-# Template helpers — pass url_for to templates
-# =============================================================================
-def tpl_context(request: Request, **kwargs):
-    """Build template context with common variables."""
+
+# ---------------------------------------------------------------------------
+# Template context builder
+# ---------------------------------------------------------------------------
+
+def tpl_context(request: Request, **kwargs) -> dict:
+    """Build a Jinja2 template context with common variables.
+
+    Every template receives *request*, *lang*, and *translations* automatically.
+    Extra keyword arguments are merged in.
+    """
     lang = get_lang(request)
     ctx = {
         "request": request,
@@ -443,9 +569,9 @@ def tpl_context(request: Request, **kwargs):
     ctx.update(kwargs)
     return ctx
 
-# =============================================================================
-# Auth Routes
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Auth Routes — login / register / logout
+# ---------------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     lang = get_lang(request)
@@ -504,9 +630,9 @@ async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # Main Pages
-# =============================================================================
+# ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     uid = get_user(request)
@@ -537,9 +663,13 @@ async def accessibility_mode(request: Request):
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("accessibility.html", tpl_context(request))
 
-# =============================================================================
-# Chat Response
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Chat Response — the core message handler
+#
+# Accepts free-text input from the user, checks for special command
+# prefixes (reminders, games, preferences), and falls through to the
+# Kimi LLM for general conversation.
+# ---------------------------------------------------------------------------
 @app.post("/get_response")
 async def get_response(request: Request, msg: str = Form(...), use_search: str = Form("false")):
     uid = get_user(request)
@@ -719,9 +849,9 @@ async def get_response(request: Request, msg: str = Form(...), use_search: str =
 
     return JSONResponse({"response": response})
 
-# =============================================================================
-# File Upload Endpoint
-# =============================================================================
+# ---------------------------------------------------------------------------
+# File Upload — image analysis / document reading via Kimi vision
+# ---------------------------------------------------------------------------
 @app.post("/upload_file")
 async def upload_file(request: Request, file: UploadFile = File(...), msg: str = Form("")):
     uid = get_user(request)
@@ -772,9 +902,12 @@ async def upload_file(request: Request, file: UploadFile = File(...), msg: str =
 
     return JSONResponse({"response": response})
 
-# =============================================================================
-# Voice Transcription (Vosk — English offline STT)
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Voice Transcription — Vosk offline English STT
+#
+# The browser captures a mono 16 kHz PCM WAV blob and POSTs it here.
+# For Cantonese the client-side Web Speech API is used exclusively.
+# ---------------------------------------------------------------------------
 @app.post("/transcribe")
 async def transcribe_audio(request: Request, audio: UploadFile = File(...)):
     """Receive raw 16 kHz mono PCM WAV from browser, return transcribed text."""
@@ -808,9 +941,9 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...)):
         print(f"[Vosk] Transcription error: {e}")
         return JSONResponse({"text": "", "error": str(e)})
 
-# =============================================================================
-# Reminder Management
-# =============================================================================
+# ---------------------------------------------------------------------------
+# Reminder Management endpoints (AJAX)
+# ---------------------------------------------------------------------------
 @app.post("/deactivate_reminder")
 async def deactivate_reminder(request: Request, label: str = Form(...)):
     uid = get_user(request)
@@ -853,9 +986,11 @@ async def get_chat_history(request: Request):
     conn.close()
     return JSONResponse({"history": history})
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 # HK Public Holidays 2025-2027
-# =============================================================================
+#
+# Static dataset consumed by FullCalendar on the client side.
+# ---------------------------------------------------------------------------
 HK_HOLIDAYS = [
     # 2025
     {"date": "2025-01-01", "name_en": "New Year's Day", "name_zh": "元旦"},
@@ -929,9 +1064,12 @@ async def get_hk_holidays(request: Request):
         })
     return JSONResponse({"holidays": events})
 
-# =============================================================================
-# HK News (proxy endpoint)
-# =============================================================================
+# ---------------------------------------------------------------------------
+# HK News — proxy endpoint (NewsAPI with in-memory cache)
+#
+# Falls back to hardcoded placeholder articles when no API key is set.
+# Cache TTL: 30 minutes.
+# ---------------------------------------------------------------------------
 NEWS_API_KEY = os.environ.get('NEWS_API_KEY', '')
 _news_cache = {"data": None, "timestamp": 0, "lang": None}
 
@@ -997,18 +1135,20 @@ async def get_news(request: Request):
     articles = await fetch_hk_news(lang)
     return JSONResponse({"articles": articles})
 
-# =============================================================================
-# Run Server
-# =============================================================================
-if __name__ == '__main__':
+# ---------------------------------------------------------------------------
+# Development server entry-point
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
     import uvicorn
+
     print("=" * 70)
-    print("The Listening Tree — Elderly Companion Chatbot")
+    print("  The Listening Tree — Elderly Companion Chatbot")
     print("=" * 70)
-    print(f"[INFO] ✅ AI Model: {AI_MODEL} (Kimi / Moonshot AI)")
-    print(f"[INFO] ✅ Chat history retention: {CHAT_HISTORY_RETENTION_MINUTES} min")
-    print(f"[INFO] ✅ Voice: Browser Web Speech API (EN + zh-HK)")
-    print(f"[INFO] ✅ Features: Web search, File upload, Image analysis")
+    print(f"  AI Model       : {AI_MODEL} (Kimi / Moonshot AI)")
+    print(f"  Chat retention  : {CHAT_HISTORY_RETENTION_MINUTES} min")
+    print(f"  Voice (EN+zh-HK): Browser Web Speech API")
+    print(f"  Features        : Web search · File upload · Image analysis")
     print("=" * 70)
-    port = int(os.environ.get('PORT', 5000))
-    uvicorn.run(app, host='0.0.0.0', port=port)
+
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

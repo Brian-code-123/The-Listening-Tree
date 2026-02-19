@@ -1,491 +1,267 @@
 # The Listening Tree 🌳
 
-> **Compassionate AI Companion for Elderly Wellness**  
+> **Compassionate AI Companion for Elderly Wellness**
 > Bilingual chatbot with glassmorphism UI, voice interaction, and intelligent reminders
 
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![FastAPI 0.115](https://img.shields.io/badge/fastapi-0.115.12-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Uvicorn 0.34](https://img.shields.io/badge/uvicorn-0.34.2-4051B5)](https://www.uvicorn.org)
+[![Gunicorn 23](https://img.shields.io/badge/gunicorn-23.0.0-499848?logo=gunicorn&logoColor=white)](https://gunicorn.org)
 [![License](https://img.shields.io/badge/license-Academic-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12%2B-green)](https://www.python.org)
-[![FastAPI](https://img.shields.io/badge/fastapi-0.100%2B-blue)](https://fastapi.tiangolo.com)
 [![Status](https://img.shields.io/badge/status-production-brightgreen)](#deployment)
 
-## ✨ Key Features
+---
+
+## Overview
+
+The Listening Tree is a **bilingual AI companion chatbot** (English + Traditional Chinese / Cantonese) designed to reduce loneliness in elderly populations. It provides warm, patient conversation, medication reminders, cognitive games, local news, and a Hong Kong public holidays calendar — all wrapped in an accessible glassmorphism interface.
+
+**Core technology:** FastAPI backend → Kimi / Moonshot AI (LLM) → SQLite persistence → Bootstrap 5 + FullCalendar.js frontend.
+
+---
+
+## Features
 
 | Feature | Description |
 |---------|-------------|
-| **🤖 AI-Powered Chat** | Kimi/Moonshot AI API with 8K context window for contextual conversations |
-| **🎙️ Voice I/O** | Web Speech API (EN/繁中) + Vosk offline STT; TTS with emotion-aware pacing |
-| **📅 Smart Calendar** | FullCalendar.js integration with HK public holidays (2025-2027); voice-readable |
-| **⏰ Intelligent Reminders** | Persistent SQLite-backed reminders with system notifications & alarm sound |
-| **📰 Local News Feed** | NewsAPI.org integration + hardcoded HK news fallback; 30-min cache |
-| **🎮 Memory Games** | Interactive quizzes & trivia for cognitive engagement (expandable) |
-| **🎨 Glassmorphism UI** | Apple Liquid Glass design with `backdrop-filter: blur(16px)`; dark/light modes |
-| **♿ Accessibility** | WCAG AA contrast (>4.5:1), large touch targets (48px), keyboard navigation |
-| **🌍 Bilingual** | Full EN + 繁體中文 (Hong Kong) with live language switching |
-| **📱 Responsive** | Mobile-first 3-column layout: chat (left) + sidebar (calendar/reminders/news, right)
+| **AI Chat** | Kimi / Moonshot API (`moonshot-v1-8k`) with 8K context window and warm conversational tone |
+| **Voice I/O** | Web Speech API for both English and Cantonese (browser-native, zero server deps); Vosk offline fallback for English |
+| **Smart Calendar** | FullCalendar.js 6.1 with HK public holidays (2025–2027), voice-readable dates |
+| **Reminders** | SQLite-backed reminders with background checker, browser notifications, alarm sound |
+| **News Feed** | NewsAPI.org integration with 30-min cache; hardcoded HK news fallback |
+| **Memory Games** | Bilingual trivia quizzes for cognitive engagement |
+| **Glassmorphism UI** | Apple Liquid Glass design (`backdrop-filter: blur(16px)`); dark / light modes |
+| **Accessibility** | WCAG AA (contrast ≥ 4.5:1), 48px touch targets, keyboard navigation, dedicated a11y page |
+| **Bilingual** | Full EN + zh-HK with live language switching; per-language chat history |
+| **Responsive** | 3-column desktop → stacked mobile layout with sidebar toggle |
 
-## 🚀 Quick Start
+---
+
+## Quick Start
 
 ### Prerequisites
-- Python 3.12+ or Docker
-- Free [Moonshot AI API key](https://platform.moonshot.cn) (100K free tokens/month)
-- Modern browser with Web Speech API (Chrome, Edge, Safari 14.1+)
 
-### Local Development  
+- **Python 3.12+** (or Docker)
+- A free [Moonshot AI API key](https://platform.moonshot.cn) (100K tokens/month included)
+- Modern browser with Web Speech API (Chrome, Edge, or Safari 14.1+)
+
+### Local Development
 
 ```bash
-# Clone & setup
+# Clone
 git clone https://github.com/yourusername/The-Listening-Tree.git
 cd The-Listening-Tree
 
 # Virtual environment
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt          # Production packages
+# pip install -r requirements-local.txt  # + Vosk offline STT (optional)
 
-# Configure environment
-cat > .env << EOF
-MOONSHOT_API_KEY=your_key_here
-NEWS_API_KEY=your_newsapi_key    # Optional
-VERCEL=false
-EOF
+# Set environment variables (or create .env)
+export KIMI_API_KEY="sk-your-moonshot-key"
+export NEWS_API_KEY="your-newsapi-key"       # Optional
 
-# Run development server
+# Run
 python run.py
 ```
 
-🌐 **Open browser**: [http://localhost:5000](http://localhost:5000)
+Open **http://localhost:5000** in your browser.
 
-### Docker Deployment
+### Docker
 
 ```bash
-# Build image (~200MB)
 docker build -t the-listening-tree .
-
-# Run locally
-docker run -p 5000:5000 \
-  -e MOONSHOT_API_KEY=your_key \
-  -v elderly_data:/app \
-  the-listening-tree
-
-# Vosk offline model auto-downloaded in builder stage
+docker run -p 5000:5000 -e KIMI_API_KEY=sk-... the-listening-tree
 ```
 
-### Cloud Deployment (Render)
+### Render
 
-1. **Push to GitHub**
-   ```bash
-   git push origin main
-   ```
-
-2. **Connect to [Render](https://render.com)**
-   - New → Web Service
-   - Connect GitHub repo
-   - Select `The-Listening-Tree`
-   - Secret: `MOONSHOT_API_KEY`
-   - Environment: `Python 3.12`
-
-3. **Auto-deployed** from `render.yaml` (gunicorn + 512MB RAM)
+Push to GitHub, then connect to [Render](https://render.com) as a Web Service. The included `render.yaml` auto-configures Gunicorn with `gunicorn==23.0.0`.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Client (Browser)                         │
-│  HTML5 + Bootstrap 5 + FullCalendar.js + Font Awesome      │
-│  Web Speech API (STT) + Window.speechSynthesis (TTS)        │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ JSON REST API
-┌──────────────────────┴──────────────────────────────────────┐
-│                Fast API (Python)                            │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │ Core Routes:                                            ││
-│  │  POST /get_response     → Kimi AI chat                  ││
-│  │  GET  /get_chat_history → SQLite query                 ││
-│  │  POST /set_reminder     → Command parsing               ││
-│  │  GET  /get_reminders    → Active reminders             ││
-│  │  GET  /get_hk_holidays  → FullCalendar events (JSON)   ││
-│  │  GET  /get_news         → NewsAPI + cache (30min)      ││
-│  │  POST /transcribe       → Vosk STT (offline)           ││
-│  └─────────────────────────────────────────────────────────┘│
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-     SQLite         Kimi API      NewsAPI.org
-     (Local)   (Moonshot.cn)     (Optional)
-   reminders.db
+┌────────────────────────────────────────────────────────┐
+│                  Client (Browser)                      │
+│  Bootstrap 5.3 · FullCalendar 6.1 · Font Awesome 6.4  │
+│  Web Speech API (STT/TTS, EN + zh-HK)                 │
+└────────────────┬───────────────────────────────────────┘
+                 │  AJAX / JSON
+┌────────────────┴───────────────────────────────────────┐
+│               FastAPI 0.115.12 (Python)                │
+│                                                        │
+│  POST /get_response   → command parse OR Kimi LLM      │
+│  POST /upload_file    → Kimi vision (image) / text     │
+│  POST /transcribe     → Vosk offline STT (EN only)     │
+│  GET  /get_reminders  → today's active reminders       │
+│  GET  /get_hk_holidays→ static holiday dataset → JSON  │
+│  GET  /get_news       → NewsAPI + in-memory cache      │
+│  GET  /get_chat_history→ per-user, per-language msgs   │
+│  POST /login /register→ session-based auth (SQLite)    │
+└────────┬──────────┬──────────┬─────────────────────────┘
+         │          │          │
+      SQLite     Kimi API   NewsAPI.org
+    reminders.db (Moonshot)  (optional)
 ```
 
 ---
 
-## 📊 Technology Stack
+## Technology Stack
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| **Runtime** | FastAPI 0.100+ | Async, auto-docs, middleware support |
-| **AI/LLM** | Moonshot Kimi API | 8K context, `moonshot-v1-8k` model |
-| **Database** | SQLite3 | users, reminders, chat_history, preferences tables |
-| **Frontend** | Bootstrap 5.3 | Grid layout, glassmorphism utilities |
-| **Calendar** | FullCalendar.js 6.1 | Interactive dayGridMonth + holiday events |
-| **Speech** | Web Speech API + Vosk | Browser STT (no server dependency) |
-| **News** | NewsAPI.org | RSS fallback to hardcoded 5 articles |
-| **Styling** | CSS 3 Grid | 3-column glassmorphism theme (light/dark) |
-| **Deployment** | Gunicorn + Render | 512MB RAM, auto-scaling |
-
-**Total Package Size**: ~4.8 MB (excluding dependencies)
+| Layer | Package | Version | Purpose |
+|-------|---------|---------|---------|
+| **Framework** | FastAPI | 0.115.12 | Async ASGI web framework |
+| **Server** | Uvicorn | 0.34.2 | Production ASGI server |
+| **Production** | Gunicorn | 23.0.0 | Process manager (Render / Docker) |
+| **AI / LLM** | Kimi (Moonshot) | v1-8k | Chat + image analysis + web search |
+| **Database** | SQLite3 | built-in | Users, reminders, chat history, preferences |
+| **Templates** | Jinja2 | 3.1.6 | Server-side HTML rendering |
+| **HTTP** | httpx | 0.28.1 | Async HTTP client (AI + News API calls) |
+| **Auth** | itsdangerous | 2.2.0 | Session signing |
+| **Validation** | email-validator | 2.2.0 | Email format checking |
+| **Multipart** | python-multipart | 0.0.20 | File upload handling |
+| **JWT** | python-jose | 3.4.0 | Token utilities |
+| **Voice** | Vosk | 0.3.45 | English STT — local dev only |
+| **Frontend** | Bootstrap | 5.3.2 | Responsive layout |
+| **Calendar** | FullCalendar.js | 6.1.11 | Interactive month calendar |
+| **Icons** | Font Awesome | 6.4.0 | UI iconography |
+| **DOM** | jQuery | 3.7.1 | DOM manipulation + AJAX |
 
 ---
 
-## 🗂️ Project Structure
+## Project Structure
 
 ```
 The-Listening-Tree/
-├── run.py                       # FastAPI application (1014 lines)
-│   ├── /get_response           # Chat endpoint with web search
-│   ├── /get_chat_history       # Load previous messages
-│   ├── /get_reminders          # Fetch active reminders (today)
-│   ├── /get_hk_holidays        # HK public holidays for calendar
-│   ├── /get_news               # HK news feed (NewsAPI + fallback)
-│   ├── /transcribe             # Vosk offline STT
-│   ├── /upload_file            # File upload + MIME processing
-│   └── [auth routes]           # /register, /login, /logout
-│
-├── translations.py             # i18n strings (EN + zh-HK)
-│   ├── TRANSLATIONS dict       # 200+ UI strings
-│   └── get_text(key, lang)     # Dynamic lookup
-│
+├── run.py                  # FastAPI app — routes, AI, DB, reminders, holidays, news
+├── translations.py         # i18n strings (EN + zh-HK, 200+ keys each)
 ├── templates/
-│   ├── chat.html               # Main 3-column layout (35KB)
-│   │   ├── chat-column         # Message area + input
-│   │   └── sidebar-column      # Calendar + reminders + news
-│   ├── login.html              # Auth form + glassmorphism
-│   ├── register.html           # User registration
-│   └── accessibility.html      # WCAG AAA mode (large UI)
-│
+│   ├── chat.html           # Main 3-column glassmorphism interface
+│   ├── login.html          # Auth — login form
+│   ├── register.html       # Auth — registration form
+│   └── accessibility.html  # WCAG AAA large-text mode
 ├── static/
-│   ├── style.css               # Glassmorphism theme (773 lines)
-│   │   ├── :root variables     # Light/dark colors + blur effects
-│   │   ├── .page-chat          # Main layout grid
-│   │   ├── .chat-card          # Message container
-│   │   ├── .sidebar-card       # Calendar/reminders/news cards
-│   │   └── @media              # Responsive (992px, 576px)
-│   ├── Chatbot.png             # Bot avatar
-│   ├── User.png                # Human avatar
-│   └── notification.mp3        # Reminder alarm
-│
+│   └── style.css           # Glassmorphism theme (light/dark, ~800 lines)
+├── api/
+│   └── index.py            # Vercel serverless entry point
 ├── voice_models/
-│   └── vosk-model-small-en-us-0.15/
-│       ├── model.conf          # Speech model (100MB)
-│       └── ivector/             # Feature extraction
-│
-├── Dockerfile                  # Multi-stage: builder + runtime
-├── render.yaml                 # Render auto-deploy config
-├── requirements.txt            # pip dependencies
-├── requirements-local.txt      # Dev dependencies (Vosk)
-├── .env.example               # Environment template
-└── README.md                  # This file
-
+│   └── vosk-model-small-en-us-0.15/  # Offline English STT (~100 MB)
+├── requirements.txt        # Production dependencies
+├── requirements-local.txt  # Dev dependencies (+ Vosk)
+├── Dockerfile              # Single-stage python:3.12-slim
+├── render.yaml             # Render PaaS deploy config
+├── runtime.txt             # Python 3.12
+├── vercel.json             # Vercel routing config
+└── README.md
 ```
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Environment Variables
 
-```bash
-# Required
-MOONSHOT_API_KEY=sk-...                          # Get from https://platform.moonshot.cn
-FLASK_SECRET_KEY=$(openssl rand -hex 16)         # Session encryption key
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `KIMI_API_KEY` | Yes | — | Moonshot AI API key |
+| `KIMI_BASE_URL` | No | `https://api.moonshot.cn/v1` | AI API base URL |
+| `KIMI_MODEL` | No | `moonshot-v1-8k` | LLM model name |
+| `NEWS_API_KEY` | No | — | NewsAPI.org key (falls back to hardcoded articles) |
+| `DATABASE_URL` | No | `./reminders.db` | SQLite path (`/tmp/...` on Vercel) |
+| `PORT` | No | `5000` | Server port |
+| `VERCEL` | No | — | Set automatically; disables background threads |
 
-# Optional
-NEWS_API_KEY=...                                  # NewsAPI.org (fallback is hardcoded)
-VERCEL=false                                      # Set to 'true' on Vercel serverless
-DATABASE_URL=/tmp/reminders.db                    # Default: ./reminders.db
+### Database
+
+Four tables: **users**, **reminders**, **chat_history**, **preferences** — all with indexes for fast per-user queries. Auto-created by `init_db()` on first run.
+
+---
+
+## Voice Architecture
+
 ```
+  ┌─ Web Speech API ──────────────────────────────┐
+  │  Primary path for BOTH English and Cantonese   │
+  │  → SpeechRecognition (lang: en-US / zh-HK)    │
+  │  → interim results shown live in text field    │
+  │  → final transcript auto-submits to chat       │
+  └────────────────────────────────────────────────┘
+           │ fallback (browser lacks Web Speech API)
+  ┌─ Vosk Server-Side STT ────────────────────────┐
+  │  English only · 16 kHz mono WAV via /transcribe│
+  │  Offline model (~100 MB) · No cloud dependency │
+  └────────────────────────────────────────────────┘
 
-### Database Schema
-
-```sql
--- Auto-created by init_db() on first run
-CREATE TABLE users (
-    id INTEGER PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE reminders (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    label TEXT NOT NULL,
-    time TEXT NOT NULL,          -- HH:MM format
-    active BOOLEAN DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-);
-
-CREATE TABLE chat_history (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    role TEXT,                    -- 'user' or 'assistant'
-    content TEXT NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-);
-
-CREATE TABLE preferences (
-    user_id INTEGER PRIMARY KEY,
-    language TEXT DEFAULT 'en',
-    theme TEXT DEFAULT 'light',
-    tts_enabled BOOLEAN DEFAULT 1,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-);
+UX flow:
+  • Tap mic → pulse animation + "Listening..." placeholder
+  • Speak → live interim text appears in input field
+  • Stop speaking → auto-submit (same pipeline as typing)
+  • Error → friendly toast notification (not alert())
 ```
 
 ---
 
-## 🎨 UI Highlights
-
-### Glassmorphism Design System
-
-```css
-/* Core effect */
-backdrop-filter: blur(16px);
-background: rgba(255, 255, 255, 0.45);
-border: 1px solid rgba(255, 255, 255, 0.5);
-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-border-radius: 20px;
-
-/* Color palette (elderly-friendly) */
---primary: #5B9A7D (sage green)       /* Actions, focus states */
---accent: #E07A5F (warm coral)         /* Alerts, secondary actions */
---warm: #F2CC8F (golden)               /* Reminders, highlights */
---text-primary: #1D2939 (dark blue)    /* Body text */
---text-secondary: #475467 (gray)       /* Secondary text */
---text-muted: #98A2B3 (light gray)     /* Disabled, hints */
-```
-
-### Layout Structure
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ Theme Toggle | App Name | Nav Bar (EN/繁中/Guide) | TTS │
-├─────────────────────────────────────────────────────────┤
-│                                                           │
-│  ┌────────────────────┐      ┌──────────────────────┐   │
-│  │   CHAT COLUMN      │      │  SIDEBAR COLUMN      │   │
-│  │  (2/3 width, flex) │      │ (1/3, sticky scroll) │   │
-│  │                    │      │                      │   │
-│  │  Messages Area     │      │ ┌──────────────────┐ │   │
-│  │  (flex-grow)       │      │ │ Calendar (FC.js) │ │   │
-│  │                    │      │ └──────────────────┘ │   │
-│  │  ┌──────────────┐  │      │ ┌──────────────────┐ │   │
-│  │  │ Input + Send │  │      │ │ Reminders (DB)   │ │   │
-│  │  │ Mic + Voice  │  │      │ │ + Add form       │ │   │
-│  │  └──────────────┘  │      │ └──────────────────┘ │   │
-│  │                    │      │ ┌──────────────────┐ │   │
-│  └────────────────────┘      │ │ News (API)       │ │   │
-│                              │ │ Voice buttons    │ │   │
-│                              │ └──────────────────┘ │   │
-│                              └──────────────────────┘   │
-│                                                           │
-└─────────────────────────────────────────────────────────┘
-  Mobile: Sidebar toggles below chat (FAB button)
-```
-
----
-
-## 🔄 User Workflows
-
-### Chat & Reminders
-
-```
-User speaks → Browser STT (Web Speech API)
-        ↓
-Text sent → POST /get_response
-        ↓
-Parse command: "set reminder take medicine 09:00"
-        ↓
-INSERT reminders table
-        ↓
-Background thread checks @ 09:00 → Alert + Sound
-```
-
-### Calendar & Holidays
-
-```
-Page loads → GET /get_hk_holidays
-        ↓
-FullCalendar renders {title, start, color}
-        ↓
-User clicks/taps date → Voice readout via speechSynthesis
-```
-
-### News Feed
-
-```
-Sidebar loads → GET /get_news (lang=en or zh-HK)
-        ↓
-Try NewsAPI.org, else fallback to hardcoded
-        ↓
-Cache for 30 minutes
-        ↓
-User clicks voice button → speakText(title + description)
-```
-
----
-
-## 🧪 Development
-
-### Setup PYTHONPATH
+## Development
 
 ```bash
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+# Verify imports
+python -c "from run import app; print('OK')"
+
+# Run with auto-reload
+uvicorn run:app --reload --port 5000
 ```
 
-### Run Tests
+### Commit Convention
 
-```bash
-# Syntax check
-python -m py_compile run.py templates/ static/ translations.py
-
-# Import test
-python -c "import run, translations; print('✓ All imports OK')"
-
-# Database test
-python -c "from run import init_db; init_db(); print('✓ DB initialized')"
 ```
-
-### Code Style
-
-- **Format**: [Black](https://black.readthedocs.io/) (88 char line length)
-- **Linting**: [Flake8](https://flake8.pycqa.org/) (max 100 chars)
-- **Type hints**: Optional, but recommended for new code
-
-```bash
-# Format code
-black run.py templates/ static/ translations.py
-
-# Lint
-flake8 run.py --max-line-length=100 --ignore=W503,E203
+feat:     new feature
+fix:      bug fix
+refactor: code restructure (no feature change)
+docs:     documentation only
+style:    formatting / whitespace
+perf:     performance improvement
 ```
 
 ---
 
-## 🚀 Performance & Optimization
+## Contributing
 
-| Metric | Target | Status |
-|--------|--------|--------|
-| **Package Size** | <10MB | ✅ 4.8MB |
-| **Page Load (3G)** | <2s | ✅ 1.2s (static assets cached) |
-| **Chat Response** | <1s | ✅ ~800ms (Moonshot API) |
-| **Memory (idle)** | <100MB | ✅ ~87MB (Python + FastAPI) |
-| **Concurrent Users** | 100+ | ✅ Gunicorn workers |
-| **Accessibility (WCAG)** | AA | ✅ AA (contrast >4.5:1) |
+1. Fork & clone
+2. Create a feature branch: `git checkout -b feat/your-feature`
+3. Add translations for both EN and zh-HK in `translations.py`
+4. Test locally with `python run.py`
+5. Commit with conventional prefix and open a PR
 
-**Caching Strategy**:
-- News: 30 min in-memory cache
-- Chat history: 5-message session window (reduce token usage)
-- Static assets: Browser cache headers (1 year)
+### Ideas
 
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow this workflow:
-
-### 1. Fork & Clone
-```bash
-git clone https://github.com/yourusername/The-Listening-Tree.git
-cd The-Listening-Tree
-git checkout -b feature/your-feature
-```
-
-### 2. Make Changes
-- Update code in `run.py`, templates, or styles
-- Add translations to `translations.py` (both EN & zh-HK)
-- Update docs if needed
-
-### 3. Test Locally
-```bash
-python run.py
-# Visit http://localhost:5000
-```
-
-### 4. Commit & Push
-```bash
-git add .
-git commit -m "feat: add feature description"
-git push origin feature/your-feature
-```
-
-### 5. Create Pull Request
-- Title: `[type] Concise description`
-- Types: `feat`, `fix`, `docs`, `test`, `refactor`, `perf`
-- Example: `feat: add Mandarin language support`
-
-### Contribution Ideas
-- [ ] Additional language packs (Mandarin, Vietnamese, Filipino)
-- [ ] More memory games (jigsaw puzzles, music recognition)
-- [ ] Health tracking integration (heart rate, steps via APIs)
-- [ ] Meditation guide with ambient sounds
-- [ ] Family group chat (share updates with relatives)
-- [ ] Advanced reminder scheduling (recurring, snooze)
-- [ ] Dark mode enhancements (high-contrast variant)
+- Additional language packs (Mandarin, Vietnamese)
+- More memory games (jigsaw, music recognition)
+- Health tracking integration (Apple Health / Google Fit)
+- Recurring reminders with snooze
+- Family group chat
 
 ---
 
-## 📈 Roadmap
+## License
 
-### Q2 2026
-- [ ] Multi-language support (Mandarin, Vietnamese)
-- [ ] Recurring reminders (daily, weekly)
-- [ ] Photo gallery with voice narration
-- [ ] Weather widget in sidebar
+**Academic License** — Educational & Research Use.
 
-### Q3 2026
-- [ ] Family group chat
-- [ ] Health metrics dashboard (integration w/ Apple Health / Google Fit)
-- [ ] Community user profiles & buddy matching
-
-### Q4 2026
-- [ ] Mobile app (React Native wrapper)
-- [ ] Offline-first sync
-- [ ] Advanced analytics dashboard
+For commercial use or third-party integration, please contact the developers.
 
 ---
 
-## ⚖️ License
+## Credits
 
-**Academic License for Educational Use**
-
-This project is intended for educational, research, and elderly wellness purposes. All code is provided as-is without warranty.
-
-For commercial use or integration into third-party products, please contact the developers.
-
----
-
-## 🙏 Credits
-
-- **Moonshot AI (北京智谱华章科技有限公司)** — Free Kimi LLM API
-- **FullCalendar.js** — Calendar widget library
-- **Bootstrap Team** — Responsive UI framework
-- **Web Speech API** — Browser-native voice capabilities
+- **Moonshot AI** — Kimi LLM API
+- **FullCalendar** — Calendar widget
+- **Bootstrap** — Responsive framework
+- **Vosk** — Offline STT engine
 - **Font Awesome** — Icon library
 
 ---
 
-## 📬 Support & Contact
-
-- 📧 **Email**: [your-email@example.com]
-- 🐛 **Issues**: [GitHub Issues](https://github.com/yourusername/The-Listening-Tree/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/yourusername/The-Listening-Tree/discussions)
-
----
-
-**Built with ❤️ for elderly wellness • FYP 2026 • Python + FastAPI + ❌ No Models (API-first)**
+**Built with ❤️ for elderly wellness · FYP 2026 · Python + FastAPI**

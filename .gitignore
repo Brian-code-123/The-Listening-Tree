@@ -1,17 +1,33 @@
-# Virtual environments
+# ──────────────────────────────────────────────────
+# The Listening Tree — .gitignore
+# ──────────────────────────────────────────────────
+
+# Python virtual environments
 venv/
 .venv/
 
-# Python cache
+# Python bytecode & caches
 __pycache__/
 *.pyc
+*.pyo
 
-# Vosk voice models (no longer needed for deployment)
+# Vosk voice models (large binary — local dev only)
 voice_models/
 
-# Database
-reminders.db
+# SQLite database (auto-created at runtime)
+*.db
 
-# Environment
+# Environment secrets
 .env
+
+# macOS metadata
 .DS_Store
+**/.DS_Store
+
+# Editor backup files
+*.bak
+*.bak2
+
+# IDE settings (uncomment if not shared)
+# .vscode/
+# .idea/
