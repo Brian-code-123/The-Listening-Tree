@@ -1,19 +1,27 @@
 # The Listening Tree 🌳
-### Bilingual AI Companion Chatbot for Elderly Wellness
 
-A Flask-based elderly companion chatbot designed to reduce loneliness through natural conversations, memory games, and wellness reminders in both **English** and **Cantonese (繁體中文)**.
+> **Compassionate AI Companion for Elderly Wellness**  
+> Bilingual chatbot with glassmorphism UI, voice interaction, and intelligent reminders
 
----
+[![License](https://img.shields.io/badge/license-Academic-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12%2B-green)](https://www.python.org)
+[![FastAPI](https://img.shields.io/badge/fastapi-0.100%2B-blue)](https://fastapi.tiangolo.com)
+[![Status](https://img.shields.io/badge/status-production-brightgreen)](#deployment)
 
-## 🎯 Features
+## ✨ Key Features
 
-- **🤖 AI-Powered Chat**: Uses **GLM-4.7-Flash** (ZhipuAI) for intelligent, context-aware conversations
-- **🎙️ Voice Interaction**: Browser-based Web Speech API for zero-dependency voice recognition (English & Cantonese)
-- **🎮 Memory Games**: Interactive trivia and word-recall games to promote cognitive engagement
-- **⏰ Smart Reminders**: Personalized medication, exercise, and social activity alerts
-- **♿ Accessibility Mode**: WCAG AAA-compliant interface with large text, high contrast, and screen reader support
-- **🌐 Bilingual**: Full English and Traditional Chinese (Hong Kong) interface
-- **📱 Responsive Design**: Optimized for desktop, tablet, and mobile devices
+| Feature | Description |
+|---------|-------------|
+| **🤖 AI-Powered Chat** | Kimi/Moonshot AI API with 8K context window for contextual conversations |
+| **🎙️ Voice I/O** | Web Speech API (EN/繁中) + Vosk offline STT; TTS with emotion-aware pacing |
+| **📅 Smart Calendar** | FullCalendar.js integration with HK public holidays (2025-2027); voice-readable |
+| **⏰ Intelligent Reminders** | Persistent SQLite-backed reminders with system notifications & alarm sound |
+| **📰 Local News Feed** | NewsAPI.org integration + hardcoded HK news fallback; 30-min cache |
+| **🎮 Memory Games** | Interactive quizzes & trivia for cognitive engagement (expandable) |
+| **🎨 Glassmorphism UI** | Apple Liquid Glass design with `backdrop-filter: blur(16px)`; dark/light modes |
+| **♿ Accessibility** | WCAG AA contrast (>4.5:1), large touch targets (48px), keyboard navigation |
+| **🌍 Bilingual** | Full EN + 繁體中文 (Hong Kong) with live language switching |
+| **📱 Responsive** | Mobile-first 3-column layout: chat (left) + sidebar (calendar/reminders/news, right)
 
 ---
 
