@@ -12,6 +12,20 @@
     <!-- FullCalendar -->
     <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+        {% if GA_MEASUREMENT_ID %}
+        <!-- Google Analytics (GA4) -->
+        <script async src="https://www.googletagmanager.com/gtag/js?id={{ GA_MEASUREMENT_ID }}"></script>
+        <script>
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);} 
+            gtag('js', new Date());
+            gtag('config', '{{ GA_MEASUREMENT_ID }}', { 'anonymize_ip': true });
+        </script>
+        {% else %}
+        <!-- Google Analytics not configured. Set `GA_MEASUREMENT_ID` when rendering templates. -->
+        <!-- Example: render_template('chat.html', GA_MEASUREMENT_ID='G-XXXXXXXXXX') -->
+        {% endif %}
+
 </head>
 <body class="page-chat" data-theme="light">
 
