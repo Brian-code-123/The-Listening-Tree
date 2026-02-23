@@ -516,11 +516,47 @@ body {
 .page-chat .reminder-item .reminder-delete:hover { background: var(--accent); color: white; }
 .page-chat .reminder-item.inactive { opacity: 0.5; }
 
-.page-chat .add-reminder-form { display: flex; gap: 6px; margin-top: 8px; }
+.page-chat /* Reminder form layout: use grid for better mobile alignment */
+.add-reminder-form {
+    display: grid;
+    grid-template-columns: 1fr auto;   /* text input fills, button fixed */
+    grid-template-rows: auto auto;
+    gap: 8px;
+    padding: 10px;
+}
+
+/* Reminder label input spans full row */
+.page-chat .add-reminder-form #reminderLabel {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+/* Time input on the second row, left */
+.page-chat .add-reminder-form #reminderTime {
+    grid-column: 1;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+/* Submit button on the second row, right */
+.page-chat .add-reminder-form button[type="submit"] {
+    grid-column: 2;
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Inputs styling (kept) */
 .page-chat .add-reminder-form input {
-    flex: 1; padding: 8px 12px; border-radius: var(--radius-xs);
+    padding: 8px 12px; border-radius: var(--radius-xs);
     border: 1px solid var(--border); background: var(--bg-input);
-    color: var(--text-primary); font-size: 0.85rem;
+    color: var(--text-primary); font-size: 0.85rem; width: 100%;
 }
 .page-chat .add-reminder-form input:focus { border-color: var(--primary); outline: none; }
 .page-chat .add-reminder-form input[type="time"] { max-width: 100px; }
