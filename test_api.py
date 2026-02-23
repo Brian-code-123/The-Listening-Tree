@@ -1,14 +1,23 @@
 import httpx
 import asyncio
+import os
+
+from dotenv import load_dotenv
+load_dotenv()
 
 async def test_api():
-    api_key = 'sk-3Z0dKq6LvBjatHBfj1soXSgRxhvjqQHuDS6sIxwwI6t3xiel'
+    api_key = os.environ.get('HUNYUAN_API_KEY') or os.environ.get('KIMI_API_KEY')
+    if not api_key:
+        print('❌ No API key found. Set HUNYUAN_API_KEY in your .env file.')
+        return
+    base_url = os.environ.get('HUNYUAN_BASE_URL', 'https://api.hunyuan.cloud.tencent.com/v1')
+    model = os.environ.get('HUNYUAN_MODEL', 'hunyuan-turbo')
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.post(
-                'https://api.moonshot.cn/v1/chat/completions',
+                f'{base_url}/chat/completions',
                 json={
-                    'model': 'moonshot-v1-8k',
+                    'model': model,
                     'messages': [{'role': 'user', 'content': 'Hi'}],
                     'max_tokens': 10
                 },

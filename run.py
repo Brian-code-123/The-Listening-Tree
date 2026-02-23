@@ -7,12 +7,12 @@ reminder management, memory games, calendar with HK public
 holidays, and a local news feed.
 
 Stack:
-    - FastAPI 0.128+  (async ASGI web framework)
-    - Uvicorn 0.35+   (high-performance ASGI server)
-    - Kimi / Moonshot  (LLM chat API, moonshot-v1-8k)
-    - SQLite3          (lightweight embedded database)
-    - Vosk 0.3.45      (offline English STT, optional)
-    - Web Speech API   (browser-side STT/TTS for EN + zh-HK)
+    - FastAPI 0.128+         (async ASGI web framework)
+    - Uvicorn 0.35+          (high-performance ASGI server)
+    - Tencent Hunyuan AI     (LLM chat API, OpenAI-compatible)
+    - SQLite3                (lightweight embedded database)
+    - Vosk 0.3.45            (offline English STT, optional)
+    - Web Speech API         (browser-side STT/TTS for EN + zh-HK)
 
 Author:  The Listening Tree Team
 License: Academic — Educational & Research Use
@@ -120,16 +120,20 @@ user_api_histories: dict = {}
 CHAT_HISTORY_RETENTION_MINUTES = 30
 
 # ---------------------------------------------------------------------------
-# AI configuration — Kimi 2.5 (Moonshot AI, OpenAI-compatible API)
+# AI configuration — Tencent Hunyuan (OpenAI-compatible API)
+#
+# Set HUNYUAN_API_KEY in your .env file or environment.
+# The base URL and model can also be overridden via environment variables.
+# KIMI_API_KEY is accepted as a backward-compatible fallback.
 # ---------------------------------------------------------------------------
-AI_API_KEY = os.environ.get("KIMI_API_KEY")
-AI_BASE_URL = os.environ.get("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
-AI_MODEL = os.environ.get("KIMI_MODEL", "moonshot-v1-8k")
+AI_API_KEY = os.environ.get("HUNYUAN_API_KEY") or os.environ.get("KIMI_API_KEY")
+AI_BASE_URL = os.environ.get("HUNYUAN_BASE_URL", "https://api.hunyuan.cloud.tencent.com/v1")
+AI_MODEL = os.environ.get("HUNYUAN_MODEL", "hunyuan-turbo")
 
 if AI_API_KEY:
-    print(f"[AI] ✅ {AI_MODEL} configured (Kimi / Moonshot)")
+    print(f"[AI] ✅ {AI_MODEL} configured (Tencent Hunyuan)")
 else:
-    print("[AI] ⚠ KIMI_API_KEY not set — using warm fallback responses")
+    print("[AI] ⚠ HUNYUAN_API_KEY not set — using warm fallback responses")
 
 print("[STT] ✅ Browser Web Speech API ready (EN + zh-HK, zero server deps)")
 
@@ -197,8 +201,7 @@ WARM_FALLBACK_EN = [
 ]
 
 async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: bool = False):
-    """Call Kimi 2.5 API for warm elderly conversation.
-    Supports web search via Kimi's built-in tool calling."""
+    """Call Tencent Hunyuan API for warm elderly conversation."""
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
@@ -222,9 +225,9 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: b
         "max_tokens": 512,
     }
 
-    # Enable Kimi web search if requested
+    # Enable Hunyuan web search if requested
     if use_search:
-        body["tools"] = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
+        body["enable_enhancement"] = True
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -255,7 +258,7 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: b
 
 
 async def call_ai_with_image(user_input: str, image_b64: str, user_id: int, lang: str = 'en'):
-    """Call Kimi API with an image attachment (base64-encoded)."""
+    """Call Hunyuan API with an image attachment (base64-encoded)."""
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
@@ -292,7 +295,7 @@ async def call_ai_with_image(user_input: str, image_b64: str, user_id: int, lang
 
 
 async def call_ai_with_file(user_input: str, file_content: str, filename: str, user_id: int, lang: str = 'en'):
-    """Call Kimi API with file text content attached."""
+    """Call Hunyuan API with file text content attached."""
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
@@ -671,7 +674,7 @@ async def accessibility_mode(request: Request):
 #
 # Accepts free-text input from the user, checks for special command
 # prefixes (reminders, games, preferences), and falls through to the
-# Kimi LLM for general conversation.
+# Hunyuan LLM for general conversation.
 # ---------------------------------------------------------------------------
 @app.post("/get_response")
 async def get_response(request: Request, msg: str = Form(...), use_search: str = Form("false")):
@@ -853,7 +856,7 @@ async def get_response(request: Request, msg: str = Form(...), use_search: str =
     return JSONResponse({"response": response})
 
 # ---------------------------------------------------------------------------
-# File Upload — image analysis / document reading via Kimi vision
+# File Upload — image analysis / document reading via Hunyuan vision
 # ---------------------------------------------------------------------------
 @app.post("/upload_file")
 async def upload_file(request: Request, file: UploadFile = File(...), msg: str = Form("")):
@@ -884,7 +887,7 @@ async def upload_file(request: Request, file: UploadFile = File(...), msg: str =
     is_image = any(fname.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
 
     if is_image:
-        # Send image to Kimi vision
+        # Send image to Hunyuan vision
         img_b64 = base64.b64encode(content_bytes).decode('utf-8')
         response = await call_ai_with_image(msg, img_b64, uid, lang)
     else:
@@ -1147,7 +1150,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print("  The Listening Tree — Elderly Companion Chatbot")
     print("=" * 70)
-    print(f"  AI Model       : {AI_MODEL} (Kimi / Moonshot AI)")
+    print(f"  AI Model       : {AI_MODEL} (Tencent Hunyuan)")
     print(f"  Chat retention  : {CHAT_HISTORY_RETENTION_MINUTES} min")
     print(f"  Voice (EN+zh-HK): Browser Web Speech API")
     print(f"  Features        : Web search · File upload · Image analysis")
