@@ -30,6 +30,7 @@ import secrets
 import random
 import threading
 from datetime import datetime
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Third-party imports
@@ -41,6 +42,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import httpx
 import sqlite3
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+env_path = Path(__file__).parent / '.env'
+load_dotenv(env_path, override=True)
 
 # ---------------------------------------------------------------------------
 # Local imports
@@ -116,10 +122,7 @@ CHAT_HISTORY_RETENTION_MINUTES = 30
 # ---------------------------------------------------------------------------
 # AI configuration — Kimi 2.5 (Moonshot AI, OpenAI-compatible API)
 # ---------------------------------------------------------------------------
-AI_API_KEY = os.environ.get(
-    "KIMI_API_KEY",
-    "sk-qoX1UHDwIuX52oMgxlNNSfuhYviY19latENX1TMgZCAfE0va",
-)
+AI_API_KEY = os.environ.get("KIMI_API_KEY")
 AI_BASE_URL = os.environ.get("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
 AI_MODEL = os.environ.get("KIMI_MODEL", "moonshot-v1-8k")
 

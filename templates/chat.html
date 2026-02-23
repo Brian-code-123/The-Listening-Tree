@@ -758,3 +758,43 @@
     </script>
 </body>
 </html>
+
+<style>
+  /* ── 之前的 main-layout 修正保持不變 ── */
+
+  /* ── Reminder Form 比例修正 ── */
+  .add-reminder-form {
+    display: grid;
+    grid-template-columns: 1fr auto;   /* 文字輸入佔滿，按鈕固定大小 */
+    grid-template-rows: auto auto;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  /* 提醒內容輸入框：佔整行 */
+  .add-reminder-form #reminderLabel {
+    grid-column: 1 / -1;              /* 橫跨兩欄 */
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  /* 時間輸入：第二行左側 */
+  .add-reminder-form #reminderTime {
+    grid-column: 1;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  /* 提交按鈕：第二行右側，永不被截斷 */
+  .add-reminder-form button[type="submit"] {
+    grid-column: 2;
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>

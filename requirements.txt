@@ -14,3 +14,4 @@ httpx==0.28.1
 email_validator==2.2.0
 python-jose[cryptography]==3.4.0
 gunicorn==23.0.0
+python-dotenv==1.0.0
