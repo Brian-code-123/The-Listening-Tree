@@ -9,7 +9,7 @@ holidays, and a local news feed.
 Stack:
     - FastAPI 0.128+  (async ASGI web framework)
     - Uvicorn 0.35+   (high-performance ASGI server)
-    - Kimi / Moonshot  (LLM chat API, moonshot-v1-8k)
+    - Tencent Hunyuan  (LLM chat API, hunyuan-pro)
     - SQLite3          (lightweight embedded database)
     - Vosk 0.3.45      (offline English STT, optional)
     - Web Speech API   (browser-side STT/TTS for EN + zh-HK)
@@ -30,6 +30,7 @@ import secrets
 import random
 import threading
 from datetime import datetime
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Third-party imports
@@ -41,6 +42,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import httpx
 import sqlite3
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent / '.env'
+load_dotenv(env_path, override=True)
 
 # ---------------------------------------------------------------------------
 # Local imports
@@ -114,19 +120,16 @@ user_api_histories: dict = {}
 CHAT_HISTORY_RETENTION_MINUTES = 30
 
 # ---------------------------------------------------------------------------
-# AI configuration — Kimi 2.5 (Moonshot AI, OpenAI-compatible API)
+# AI configuration — Tencent Hunyuan (腾讯混元大模型)
 # ---------------------------------------------------------------------------
-AI_API_KEY = os.environ.get(
-    "KIMI_API_KEY",
-    "sk-qoX1UHDwIuX52oMgxlNNSfuhYviY19latENX1TMgZCAfE0va",
-)
-AI_BASE_URL = os.environ.get("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
-AI_MODEL = os.environ.get("KIMI_MODEL", "moonshot-v1-8k")
+AI_API_KEY = os.environ.get("HUNYUAN_API_KEY")
+AI_BASE_URL = os.environ.get("HUNYUAN_BASE_URL", "https://api.hunyuan.cloud.tencent.com/v1")
+AI_MODEL = os.environ.get("HUNYUAN_MODEL", "hunyuan-pro")
 
 if AI_API_KEY:
-    print(f"[AI] ✅ {AI_MODEL} configured (Kimi / Moonshot)")
+    print(f"[AI] ✅ {AI_MODEL} configured (Tencent Hunyuan 腾讯混元)")
 else:
-    print("[AI] ⚠ KIMI_API_KEY not set — using warm fallback responses")
+    print("[AI] ⚠ HUNYUAN_API_KEY not set — using warm fallback responses")
 
 print("[STT] ✅ Browser Web Speech API ready (EN + zh-HK, zero server deps)")
 
@@ -193,9 +196,8 @@ WARM_FALLBACK_EN = [
     "I hear you, and I think that's wonderful. Tell me more! 😊",
 ]
 
-async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: bool = False):
-    """Call Kimi 2.5 API for warm elderly conversation.
-    Supports web search via Kimi's built-in tool calling."""
+async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
+    """Call Tencent Hunyuan API for warm elderly conversation."""
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
@@ -219,10 +221,6 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: b
         "max_tokens": 512,
     }
 
-    # Enable Kimi web search if requested
-    if use_search:
-        body["tools"] = [{"type": "builtin_function", "function": {"name": "$web_search"}}]
-
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
@@ -237,7 +235,7 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: b
             result = resp.json()
 
         message = result["choices"][0]["message"]
-        reply = message.get("content") or message.get("reasoning_content", "")
+        reply = message.get("content") or ""
 
         history.append({"role": "user", "content": user_input})
         history.append({"role": "assistant", "content": reply})
@@ -248,81 +246,6 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', use_search: b
 
     except Exception as e:
         print(f"[AI] API error ({lang}): {e}")
-        return random.choice(fallback)
-
-
-async def call_ai_with_image(user_input: str, image_b64: str, user_id: int, lang: str = 'en'):
-    """Call Kimi API with an image attachment (base64-encoded)."""
-    system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
-    fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
-
-    if not AI_API_KEY:
-        return random.choice(fallback)
-
-    messages = [{"role": "system", "content": system_prompt}]
-
-    user_content = []
-    if user_input:
-        user_content.append({"type": "text", "text": user_input})
-    user_content.append({
-        "type": "image_url",
-        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
-    })
-    messages.append({"role": "user", "content": user_content})
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{AI_BASE_URL}/chat/completions",
-                json={"model": AI_MODEL, "messages": messages, "max_tokens": 512},
-                headers={
-                    "Authorization": f"Bearer {AI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-            )
-            resp.raise_for_status()
-            result = resp.json()
-        return result["choices"][0]["message"].get("content", "")
-    except Exception as e:
-        print(f"[AI] Image API error: {e}")
-        return random.choice(fallback)
-
-
-async def call_ai_with_file(user_input: str, file_content: str, filename: str, user_id: int, lang: str = 'en'):
-    """Call Kimi API with file text content attached."""
-    system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
-    fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
-
-    if not AI_API_KEY:
-        return random.choice(fallback)
-
-    prompt = f"User uploaded a file named '{filename}'. Here is the content:\n\n{file_content[:8000]}\n\n"
-    if user_input:
-        prompt += f"User message: {user_input}"
-    else:
-        if lang == 'zh-HK':
-            prompt += "請幫我睇吓呢個檔案嘅內容，用廣東話簡單解釋畀我聽。"
-        else:
-            prompt += "Please help me understand this file content."
-
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.append({"role": "user", "content": prompt})
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{AI_BASE_URL}/chat/completions",
-                json={"model": AI_MODEL, "messages": messages, "max_tokens": 512},
-                headers={
-                    "Authorization": f"Bearer {AI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-            )
-            resp.raise_for_status()
-            result = resp.json()
-        return result["choices"][0]["message"].get("content", "")
-    except Exception as e:
-        print(f"[AI] File API error: {e}")
         return random.choice(fallback)
 
 # ---------------------------------------------------------------------------
@@ -671,7 +594,7 @@ async def accessibility_mode(request: Request):
 # Kimi LLM for general conversation.
 # ---------------------------------------------------------------------------
 @app.post("/get_response")
-async def get_response(request: Request, msg: str = Form(...), use_search: str = Form("false")):
+async def get_response(request: Request, msg: str = Form(...)):
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"response": "Please log in."}, status_code=401)
@@ -680,7 +603,6 @@ async def get_response(request: Request, msg: str = Form(...), use_search: str =
     user_input_original = msg.strip()
     user_input_lower = user_input_original.lower()
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    search_on = use_search == "true"
 
     conn = get_db()
     c = conn.cursor()
@@ -839,7 +761,7 @@ async def get_response(request: Request, msg: str = Form(...), use_search: str =
 
         # ---- Normal AI Chat ----
         else:
-            response = await call_ai(user_input_original, uid, lang, use_search=search_on)
+            response = await call_ai(user_input_original, uid, lang)
 
     # Store bot response
     c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
@@ -850,58 +772,6 @@ async def get_response(request: Request, msg: str = Form(...), use_search: str =
     return JSONResponse({"response": response})
 
 # ---------------------------------------------------------------------------
-# File Upload — image analysis / document reading via Kimi vision
-# ---------------------------------------------------------------------------
-@app.post("/upload_file")
-async def upload_file(request: Request, file: UploadFile = File(...), msg: str = Form("")):
-    uid = get_user(request)
-    if uid is None:
-        return JSONResponse({"response": "Please log in."}, status_code=401)
-
-    lang = get_lang(request)
-    content_bytes = await file.read()
-
-    # Check file size (10 MB max)
-    if len(content_bytes) > 10 * 1024 * 1024:
-        err = get_text('file_too_large', lang)
-        return JSONResponse({"response": err})
-
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    conn = get_db()
-    c = conn.cursor()
-
-    # Store user message
-    upload_msg = msg if msg else f"[Uploaded: {file.filename}]"
-    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
-              (uid, lang, timestamp, upload_msg))
-    conn.commit()
-
-    # Determine file type
-    fname = file.filename.lower() if file.filename else ""
-    is_image = any(fname.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'])
-
-    if is_image:
-        # Send image to Kimi vision
-        img_b64 = base64.b64encode(content_bytes).decode('utf-8')
-        response = await call_ai_with_image(msg, img_b64, uid, lang)
-    else:
-        # Try to read as text
-        try:
-            text_content = content_bytes.decode('utf-8')
-        except:
-            try:
-                text_content = content_bytes.decode('big5')
-            except:
-                text_content = content_bytes.decode('utf-8', errors='replace')
-        response = await call_ai_with_file(msg, text_content, file.filename, uid, lang)
-
-    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
-              (uid, lang, timestamp, response))
-    conn.commit()
-    conn.close()
-
-    return JSONResponse({"response": response})
-
 # ---------------------------------------------------------------------------
 # Voice Transcription — Vosk offline English STT
 #
