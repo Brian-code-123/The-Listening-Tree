@@ -253,26 +253,6 @@ ci:       CI/CD / deployment config
 
 ---
 
-## Contributing
-
-1. Fork & clone
-2. Create feature branch: `git checkout -b feat/your-idea`
-3. Add English comments (professional programmer style)
-4. Update translations.py for EN + zh-HK
-5. Test locally: `python run.py`
-6. Commit with conventional prefix
-7. Submit PR
-
-### Ideas for Contribution
-
-- Additional languages (Mandarin, Vietnamese)
-- Health tracking integration
-- Recurring reminders with snooze
-- Family group messaging
-- More memory games
-
----
-
 ## License
 
 **Academic Use Only** – Educational and research applications permitted. See [LICENSE](LICENSE) for full terms. Commercial use requires permission from developers.
