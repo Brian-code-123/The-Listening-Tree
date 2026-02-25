@@ -1,9 +1,6 @@
-# ---------------------------------------------------------------------------
 # The Listening Tree — Production Dependencies
-#
-# Deployed to Vercel / Render / Docker.  Vosk (offline STT) is NOT
+# Deployed to Vercel / Render / Docker. Vosk (offline STT) is NOT
 # included here — see requirements-local.txt for local dev.
-# ---------------------------------------------------------------------------
 
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
@@ -14,3 +11,4 @@ httpx==0.28.1
 email_validator==2.2.0
 python-jose[cryptography]==3.4.0
 gunicorn==23.0.0
+python-dotenv==1.0.0
