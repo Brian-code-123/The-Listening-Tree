@@ -61,7 +61,14 @@ app = FastAPI(
     description="Bilingual AI companion chatbot for elderly wellness",
     version="2.0.0",
 )
-app.add_middleware(SessionMiddleware, secret_key=secrets.token_hex(16))
+# Session secret: prefer explicit environment variable for production stability.
+# If not provided, fall back to a generated ephemeral key (NOT recommended).
+_SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("FLASK_SECRET") or secrets.token_hex(16)
+if _SECRET_KEY and len(_SECRET_KEY) >= 16:
+    print("[SECURITY] 🔑 SECRET_KEY is set")
+else:
+    print("[SECURITY] ⚠ No SECRET_KEY/FLASK_SECRET set — using ephemeral key")
+app.add_middleware(SessionMiddleware, secret_key=_SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
