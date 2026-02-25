@@ -5,29 +5,63 @@
 # Python virtual environments
 venv/
 .venv/
+env/
+ENV/
 
 # Python bytecode & caches
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+dist/
+build/
 
 # Vosk voice models (large binary — local dev only)
-voice_models/
+voice_models/vosk-model-*
 
 # SQLite database (auto-created at runtime)
+reminders.db
 *.db
+*.sqlite
+*.sqlite3
 
 # Environment secrets
 .env
+.env.local
 
 # macOS metadata
 .DS_Store
 **/.DS_Store
+Thumbs.db
 
 # Editor backup files
 *.bak
 *.bak2
+*~
+*.swp
+*.swo
 
-# IDE settings (uncomment if not shared)
-# .vscode/
-# .idea/
+# IDE settings
+.vscode/
+.idea/
+*.code-workspace
+.project
+.settings/
+
+# Node.js / npm (not used; cleanup artifacts)
+node_modules/
+package-lock.json
+npm-debug.log
+
+# Mobile app artifacts (not active; cleanup)
+android/
+ios/
+my-app/
+
+# Vercel deployment
+.vercel/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/

@@ -502,6 +502,21 @@ async def login_page(request: Request):
 
 @app.post("/login", response_class=HTMLResponse)
 async def login_post(request: Request, email: str = Form(...), password: str = Form(...)):
+    """Authenticate user login with email and password credentials.
+
+    Sets session values on successful authentication:
+      - session['user_id']: Database row ID
+      - session['user_email']: User email address
+      - session['language']: User's preferred language (loaded from preferences table)
+
+    Args:
+        request: HTTP request object with session middleware
+        email: User email (case-sensitive, must match registered email exactly)
+        password: Plain-text password (compared directly; not hashed)
+
+    Returns:
+        HTMLResponse: Redirect to / (home) on success, or login.html with error message on failure
+    """
     lang = get_lang(request)
     conn = get_db()
     c = conn.cursor()
@@ -529,6 +544,25 @@ async def register_page(request: Request):
 
 @app.post("/register", response_class=HTMLResponse)
 async def register_post(request: Request, email: str = Form(...), password: str = Form(...), confirm_password: str = Form(...)):
+    """Create a new user account (registration).
+
+    Validation steps:
+      1. Confirm password == password (client-side + server-side check)
+      2. Email must be unique (SQLite UNIQUE constraint)
+      3. Password stored in plaintext (NOT production-safe; use bcrypt/Argon2 for real apps)
+
+    On success: Inserts new user row with created_at timestamp, redirects to /login.
+    On failure: Returns register.html with localized error message.
+
+    Args:
+        request: HTTP request object
+        email: Email address (must not exist in users table)
+        password: Password in plaintext
+        confirm_password: Confirmation password (must == password)
+
+    Returns:
+        HTMLResponse: Redirect to /login on success, or register.html with error on failure
+    """
     lang = get_lang(request)
     if password != confirm_password:
         return templates.TemplateResponse("register.html", tpl_context(request, error="Passwords do not match" if lang == 'en' else "密碼唔一致"))
@@ -591,10 +625,43 @@ async def accessibility_mode(request: Request):
 #
 # Accepts free-text input from the user, checks for special command
 # prefixes (reminders, games, preferences), and falls through to the
-# Kimi LLM for general conversation.
+# Tencent Hunyuan LLM for general conversation.
 # ---------------------------------------------------------------------------
 @app.post("/get_response")
 async def get_response(request: Request, msg: str = Form(...)):
+    """Process user message and return AI/command response.
+
+    Message handling priority (in order):
+      1. Guide trigger keywords ('teach', 'how to use', 'help') → return help text
+      2. Reminder commands ('set reminder', 'delete reminder') → parse, validate, store in DB
+      3. Preference commands ('set preference') → update preferences table
+      4. Game commands ('play game', 'exit game', quiz answers) → manage game state in memory
+      5. Default → send to Tencent Hunyuan LLM for warm conversation response
+
+    Chat history: Every user message + bot response is logged to chat_history table with:
+      - user_id: Current session user ID
+      - lang: Current UI language (en or zh-HK)
+      - timestamp: ISO timestamp
+      - is_bot: 0 for user, 1 for bot
+      - message: Text content
+
+    Args:
+        request: HTTP request (must have user_id in session)
+        msg: User input text (may be voice-transcribed)
+
+    Returns:
+        JSONResponse: {"response": str} with bot reply or error
+    """
+      - is_bot: 0 for user, 1 for bot
+      - message: Text content
+
+    Args:
+        request: HTTP request (must have user_id in session)
+        msg: User input text (may be voice-transcribed)
+
+    Returns:
+        JSONResponse: {"response": str} with bot reply or error
+    """
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"response": "Please log in."}, status_code=401)
@@ -1014,10 +1081,10 @@ if __name__ == "__main__":
     print("=" * 70)
     print("  The Listening Tree — Elderly Companion Chatbot")
     print("=" * 70)
-    print(f"  AI Model       : {AI_MODEL} (Kimi / Moonshot AI)")
+    print(f"  AI Model       : {AI_MODEL} (Tencent Hunyuan)")
     print(f"  Chat retention  : {CHAT_HISTORY_RETENTION_MINUTES} min")
     print(f"  Voice (EN+zh-HK): Browser Web Speech API")
-    print(f"  Features        : Web search · File upload · Image analysis")
+    print(f"  Features        : Reminders · Memory Games · HK Holidays · News")
     print("=" * 70)
 
     port = int(os.environ.get("PORT", 5000))
