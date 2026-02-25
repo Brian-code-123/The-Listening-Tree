@@ -1,31 +1,273 @@
-# Companion-Chatbot-for-Reducing-Loneliness-in-Elderly-Populations
+# The Listening Tree 🌳
 
-https://github.com/binary-hood/ChatBot-Starter?tab=readme-ov-file
+> **Compassionate AI Companion for Elderly Wellness**  
+> Bilingual chatbot (English + Cantonese) powered by Tencent Hunyuan LLM, featuring accessible voice interaction, medication reminders, and cognitive games.
 
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
+[![FastAPI](https://img.shields.io/badge/fastapi-0.115.12-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![License](https://img.shields.io/badge/license-Academic-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-production-brightgreen)](#deployment)
 
-Step 1: docker build -t elderly-companion-chatbot 
+---
 
-Step 2: docker run -p 5000:5000 -v elderly_data:/app elderly-companion-chatbot
+## Overview
 
-Step 3: Access at http://localhost:5000
+**The Listening Tree** is a bilingual AI companion chatbot designed to reduce loneliness and promote wellness in elderly populations. It integrates Tencent Hunyuan for natural conversation, reminders, memory games, Hong Kong public holidays, and local news—all wrapped in an accessible, elderly-friendly glassmorphism UI.
 
-https://dashboard.render.com/web/srv-d5ubq82qcgvc739j4er0/deploys/dep-d5v119ali9vc73d4jl00
+**Built with:** FastAPI (async Python) → Tencent Hunyuan `hunyuan-pro` LLM → SQLite persistence → Bootstrap 5 + FullCalendar.js frontend.
 
-git pull origin main
+---
 
-Project Title:	Companion Chatbot for Reducing Loneliness in Elderly Populations 
+## Key Features
 
-Objective: 
-Develop a user-friendly chatbot to help reduce loneliness in elderly users through daily conversations, simple memory games, and wellness reminders. This project focuses on applying basic NLP techniques and accessible design to create a practical tool for social support. 
-1. Friendly Daily Conversations: 
-o The chatbot initiates check-ins (e.g., “How are you feeling today?”) and responds empathetically. 
-o Uses a pre-trained language model (like DialoGPT) for natural replies. 
-2. Memory-Boosting Games: 
-o Simple trivia or word-recall games (e.g., “What’s the capital of France?”) to keep users mentally active. 
-o Voice-enabled interaction using free tools like Vosk or Google’s Speech-to-Text. 
-3. Personalized Reminders: 
-o Schedule medication or exercise alerts (e.g., “Time for your morning walk!”). 
-o Store user preferences (e.g., favorite topics) in a lightweight SQLite database. 
-4. Elderly-Friendly Design: 
-o Large buttons, clear text, and voice-first interaction to accommodate users with limited tech experience. 
-5. Provide logins function, and store user responses, preferences in a lightweight SQLite database. 
+| Feature | Details |
+|---------|---------|
+| **Warm LLM Chat** | Tencent Hunyuan (`hunyuan-pro`) with patient, elderly-tailored conversation |
+| **Voice I/O** | Web Speech API for English & Cantonese (zero server deps); optional Vosk offline fallback |
+| **Smart Calendar** | FullCalendar.js with Hong Kong public holidays (2025–2027) |
+| **Persistent Reminders** | SQLite-backed medication, activity, and social reminders with browser notifications |
+| **Memory Games** | Bilingual trivia & recall quizzes for cognitive engagement |
+| **News Feed** | NewsAPI.org integration with hardcoded HK news fallback |
+| **Accessible Design** | WCAG AA compliance, 48px touch targets, keyboard navigation, dark/light modes |
+| **Bilingual** | Full English + Cantonese (zh-HK) with live language switching |
+| **Responsive** | 3-column desktop layout → stacked mobile layout |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- **Python 3.12+** or Docker
+- **Tencent Hunyuan API Key** ([Get free credits](https://www.tencentcloud.com/products/hunyuan))
+- Modern browser (Chrome, Edge, Safari 14.1+)
+
+### Local Development
+
+```bash
+# Clone
+git clone https://github.com/Brian-code-123/The-Listening-Tree.git
+cd The-Listening-Tree
+
+# Virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+# Optional: pip install -r requirements-local.txt  (includes Vosk for offline STT)
+
+# Configure environment
+cat > .env << EOF
+HUNYUAN_API_KEY="your-tencent-hunyuan-api-key"
+HUNYUAN_BASE_URL="https://api.hunyuan.cloud.tencent.com/v1"
+HUNYUAN_MODEL="hunyuan-pro"
+NEWS_API_KEY="your-newsapi-key"  # Optional
+EOF
+
+# Run
+python run.py
+# Open http://localhost:5000
+```
+
+### Docker
+
+```bash
+docker build -t the-listening-tree .
+docker run -p 5000:5000 \
+  -e HUNYUAN_API_KEY="your-key" \
+  the-listening-tree
+```
+
+### Vercel Deployment
+
+1. Push code to GitHub.
+2. Connect repository to Vercel.
+3. Set environment variables in Project Settings:
+   - `HUNYUAN_API_KEY`
+   - `SECRET_KEY` (generate: `python -c "import secrets; print(secrets.token_hex(32))"`)
+   - `DATABASE_URL` (optional; use Supabase/Neon PostgreSQL for production persistence)
+4. Deploy.
+
+**Note:** Vercel's `/tmp` is ephemeral. For persistent data, use external PostgreSQL (Supabase, Neon, Planetscale) and set `DATABASE_URL`.
+
+---
+
+## Architecture
+
+```
+Browser (Bootstrap 5 + FullCalendar + Web Speech API)
+       ↓ AJAX/JSON/FormData
+FastAPI (async Python)
+       ├─ POST /get_response     → Command parser → Hunyuan LLM
+       ├─ POST /transcribe       → Vosk STT (optional)
+       ├─ GET /get_reminders     → Active reminders for today
+       ├─ GET /get_chat_history  → Per-user, per-language messages
+       ├─ GET /get_hk_holidays   → Static holiday dataset
+       ├─ GET /get_news          → NewsAPI + 30-min cache
+       └─ Auth routes            → /login, /register, /logout
+       ↓
+SQLite (users, reminders, chat_history, preferences)
+```
+
+---
+
+## Technology Stack
+
+| Component | Package | Version | Purpose |
+|-----------|---------|---------|---------|
+| **Framework** | FastAPI | 0.115.12 | Async ASGI web framework |
+| **Server** | Uvicorn | 0.34.2 | ASGI server |
+| **Process Manager** | Gunicorn | 23.0.0 | Production process manager |
+| **LLM** | Tencent Hunyuan | hunyuan-pro | Conversational AI |
+| **Database** | SQLite3 | Built-in | Persistent data (users, reminders, chat) |
+| **HTTP Client** | httpx | 0.28.1 | Async requests to Hunyuan & NewsAPI |
+| **Templates** | Jinja2 | 3.1.6 | Server-side HTML rendering |
+| **Session Auth** | itsdangerous | 2.2.0 | Secure cookies |
+| **Env Config** | python-dotenv | 1.0.0 | .env file loading |
+| **Voice (Optional)** | Vosk | 0.3.45 | Offline English STT |
+| **Frontend** | Bootstrap | 5.3.2 | Responsive UI |
+| **Calendar** | FullCalendar.js | 6.1 | Interactive calendar widget |
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HUNYUAN_API_KEY` | Yes | — | Tencent Hunyuan API key |
+| `HUNYUAN_BASE_URL` | No | `https://api.hunyuan.cloud.tencent.com/v1` | Hunyuan endpoint |
+| `HUNYUAN_MODEL` | No | `hunyuan-pro` | Model name |
+| `NEWS_API_KEY` | No | — | NewsAPI key (falls back to hardcoded articles) |
+| `DATABASE_URL` | No | `./reminders.db` | SQLite path or Postgres connection string |
+| `SECRET_KEY` | No | Auto-generated | Session signing key (set explicitly for production) |
+| `PORT` | No | `5000` | Server port |
+
+### Database
+
+Auto-created on first run. Four tables:
+- **users** – Email, password, created_at, last_login
+- **reminders** – Per-user medication/activity reminders with time, priority
+- **chat_history** – Per-user, per-language messages (soft-deleted after 30 min)
+- **preferences** – User settings (language, etc.)
+
+For production (Vercel), use external PostgreSQL (Supabase, Neon, Planetscale).
+
+---
+
+## Project Structure
+
+```
+The-Listening-Tree/
+├── run.py                    # Main FastAPI application
+├── translations.py           # Bilingual i18n strings (EN + zh-HK)
+├── requirements.txt          # Production dependencies
+├── requirements-local.txt    # Dev dependencies (+ Vosk)
+├── Dockerfile                # Docker build config
+├── vercel.json               # Vercel routing
+├── .env.example              # Environment template
+│
+├── api/
+│   └── index.py              # Vercel serverless entry point
+│
+├── templates/
+│   ├── chat.html             # Main chat UI (glassmorphism)
+│   ├── login.html            # Login form
+│   ├── register.html         # Registration form
+│   └── accessibility.html    # WCAG AAA large-text mode
+│
+└── static/
+    └── style.css             # Responsive theme (dark/light)
+```
+
+---
+
+## Command Syntax
+
+### Reminders
+- **Set:** `"set reminder take medicine 09:00"`
+- **Delete:** `"delete reminder take medicine"`
+
+### Games
+- **Start:** `"play game"`
+- **Answer:** Type answer (case-insensitive partial matching)
+- **Exit:** `"exit game"`
+
+### Default
+- Any input not matching above commands is sent to Tencent Hunyuan LLM with warm system prompt.
+
+---
+
+## Deployment Options
+
+### Render (Recommended)
+
+1. Push to GitHub  
+2. Create Web Service on Render, connect GitHub repo  
+3. Set Start Command: `gunicorn -w 4 -b 0.0.0.0:5000 -k uvicorn.workers.UvicornWorker run:app`  
+4. Add environment variables  
+5. Deploy  
+
+### VPS / Docker
+
+```bash
+docker build -t listening-tree .
+docker run -d -p 5000:5000 \
+  -e HUNYUAN_API_KEY="..." \
+  -v elder-data:/app \
+  listening-tree
+```
+
+### Vercel
+
+See **Quick Start** section. Use external DB for persistence.
+
+---
+
+## Development
+
+```bash
+# Verify setup
+python -c "from run import app; print('✅ FastAPI app loaded')"
+
+# Local dev with auto-reload
+uvicorn run:app --reload --port 5000
+
+# Check lint  
+flake8 run.py translations.py --max-line-length=100
+```
+
+### Commit Conventions
+
+```
+feat:     New feature
+fix:      Bug fix
+refactor: Code restructure
+docs:     Documentation
+style:    Formatting / whitespace
+perf:     Performance improvement
+ci:       CI/CD / deployment config
+```
+
+---
+
+## License
+
+**Academic Use Only** – Educational and research applications permitted. See [LICENSE](LICENSE) for full terms. Commercial use requires permission from developers.
+
+---
+
+## Credits & Acknowledgments
+
+- **Tencent Hunyuan** – LLM API
+- **FullCalendar.js** – Calendar widget
+- **Bootstrap 5** – Responsive framework
+- **Vosk** – Offline speech recognition
+- **Font Awesome** – Icons
+- **WCAG 2.1** – Accessibility guidelines
+
+---
+
+**Built with ❤️ for elderly wellness · Python + FastAPI · 2026**
