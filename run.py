@@ -659,16 +659,6 @@ async def get_response(request: Request, msg: str = Form(...)):
     Returns:
         JSONResponse: {"response": str} with bot reply or error
     """
-      - is_bot: 0 for user, 1 for bot
-      - message: Text content
-
-    Args:
-        request: HTTP request (must have user_id in session)
-        msg: User input text (may be voice-transcribed)
-
-    Returns:
-        JSONResponse: {"response": str} with bot reply or error
-    """
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"response": "Please log in."}, status_code=401)
