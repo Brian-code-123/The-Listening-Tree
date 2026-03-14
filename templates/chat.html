@@ -2,7 +2,11 @@
 <html lang="{{ lang if lang else 'en' }}">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#5B9A7D">
     <title>{{ translations.app_name if translations else 'The Listening Tree' }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -65,6 +69,7 @@
                     <a href="/set_language/en" class="chat-nav-btn {{ 'active' if lang == 'en' }}">EN</a>
                     <a href="/set_language/zh-HK" class="chat-nav-btn {{ 'active' if lang == 'zh-HK' }}">繁中</a>
                     <a href="/accessibility" class="chat-nav-btn nav-icon" title="{{ translations.accessibility_mode if translations else 'Accessibility Mode' }}"><i class="fas fa-universal-access"></i></a>
+                    <a href="/hk_guide" class="chat-nav-btn" title="{{ translations.hk_guide_nav if translations else 'HK Guide' }}"><i class="fas fa-map-marked-alt"></i> <span class="d-none d-sm-inline">{{ translations.hk_guide_nav if translations else 'HK Guide' }}</span></a>
                     <button type="button" id="ttsToggle" class="chat-nav-btn nav-tts tts-on" title="{{ translations.toggle_speech if translations else 'Toggle text-to-speech' }}">
                         <i class="fas fa-volume-up" id="ttsIcon"></i>
                         <span id="ttsLabel">{{ translations.ai_voice_on if translations else '🔊 AI Voice: ON' }}</span>
@@ -174,6 +179,60 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+
+    <!-- Capacitor bridge — mobile-specific enhancements (no-op in browser) -->
+    <script>
+    (function() {
+        if (window.Capacitor) {
+            document.body.classList.add('capacitor-app');
+            document.documentElement.classList.add('capacitor-app');
+            // Hardware back button (Android)
+            import('@capacitor/app').then(({ App }) => {
+                App.addListener('backButton', ({ canGoBack }) => {
+                    const guidePanel = document.querySelector('.guide-panel.show');
+                    if (guidePanel) { guidePanel.classList.remove('show'); return; }
+                    if (canGoBack) window.history.back();
+                    else App.exitApp();
+                });
+            }).catch(() => {});
+            // Keyboard handling
+            import('@capacitor/keyboard').then(({ Keyboard }) => {
+                Keyboard.addListener('keyboardWillShow', (info) => {
+                    document.body.style.setProperty('--keyboard-height', info.keyboardHeight + 'px');
+                    document.body.classList.add('keyboard-open');
+                    const cb = document.getElementById('messageFormeight');
+                    if (cb) setTimeout(() => cb.scrollTop = cb.scrollHeight, 100);
+                });
+                Keyboard.addListener('keyboardWillHide', () => {
+                    document.body.style.setProperty('--keyboard-height', '0px');
+                    document.body.classList.remove('keyboard-open');
+                });
+            }).catch(() => {});
+            // Haptic feedback
+            import('@capacitor/haptics').then(({ Haptics, ImpactStyle }) => {
+                document.addEventListener('click', (e) => {
+                    if (e.target.closest('.send_btn, .chat-nav-btn, .reminder-delete'))
+                        Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+                });
+            }).catch(() => {});
+            // Hide splash
+            import('@capacitor/splash-screen').then(({ SplashScreen }) => {
+                SplashScreen.hide();
+            }).catch(() => {});
+            // Status bar theme sync
+            import('@capacitor/status-bar').then(({ StatusBar }) => {
+                const t = document.body.getAttribute('data-theme') || 'light';
+                StatusBar.setStyle({ style: t === 'dark' ? 'DARK' : 'LIGHT' }).catch(() => {});
+                StatusBar.setBackgroundColor({ color: t === 'dark' ? '#0F1923' : '#5B9A7D' }).catch(() => {});
+                new MutationObserver(() => {
+                    const th = document.body.getAttribute('data-theme');
+                    StatusBar.setStyle({ style: th === 'dark' ? 'DARK' : 'LIGHT' }).catch(() => {});
+                    StatusBar.setBackgroundColor({ color: th === 'dark' ? '#0F1923' : '#5B9A7D' }).catch(() => {});
+                }).observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
+            }).catch(() => {});
+        }
+    })();
+    </script>
 
     <script>
     $(document).ready(function() {
