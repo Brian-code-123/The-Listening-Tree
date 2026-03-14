@@ -48,15 +48,15 @@ Thumbs.db
 .project
 .settings/
 
-# Node.js / npm (not used; cleanup artifacts)
+# Node.js / npm (Capacitor project)
 node_modules/
 package-lock.json
 npm-debug.log
 
-# Mobile app artifacts (not active; cleanup)
+# Capacitor native platform builds (regenerated via `npx cap sync`)
 android/
 ios/
-my-app/
+www/capacitor-bridge.js
 
 # Vercel deployment
 .vercel/

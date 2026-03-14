@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="{{ lang if lang else 'en' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>{{ translations.hk_guide_title if translations else 'Hong Kong Local Guide' }} — {{ translations.app_name if translations else 'The Listening Tree' }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+HK:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="page-hk-guide" data-theme="light">
+
+    <!-- Theme Toggle -->
+    <button class="theme-toggle" id="themeToggle" title="{{ translations.theme_toggle if translations else 'Toggle Theme' }}">
+        <i class="fas fa-sun" id="themeIcon"></i>
+    </button>
+
+    <!-- Top Navigation Bar -->
+    <nav class="hk-guide-nav">
+        <div class="hk-guide-nav-inner">
+            <a href="/" class="hk-guide-back-btn" title="{{ translations.hk_guide_back if translations else 'Back to Chat' }}">
+                <i class="fas fa-arrow-left"></i>
+                <span>{{ translations.hk_guide_back if translations else 'Back to Chat' }}</span>
+            </a>
+            <h1 class="hk-guide-title">
+                <i class="fas fa-map-marked-alt"></i>
+                {{ translations.hk_guide_title if translations else 'Hong Kong Local Guide' }}
+            </h1>
+            <div class="hk-guide-lang">
+                <a href="/set_language/en" class="chat-nav-btn {{ 'active' if lang == 'en' }}">EN</a>
+                <a href="/set_language/zh-HK" class="chat-nav-btn {{ 'active' if lang == 'zh-HK' }}">繁中</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Category Tabs -->
+    <div class="hk-guide-tabs">
+        <button class="hk-tab active" data-category="all">
+            <i class="fas fa-globe-asia"></i>
+            {{ translations.hk_guide_all if translations else 'All' }}
+        </button>
+        <button class="hk-tab" data-category="food">
+            <i class="fas fa-utensils"></i>
+            {{ translations.hk_guide_food if translations else 'Food' }}
+        </button>
+        <button class="hk-tab" data-category="shopping">
+            <i class="fas fa-shopping-bag"></i>
+            {{ translations.hk_guide_shopping if translations else 'Shopping' }}
+        </button>
+        <button class="hk-tab" data-category="fun">
+            <i class="fas fa-theater-masks"></i>
+            {{ translations.hk_guide_fun if translations else 'Fun & Sights' }}
+        </button>
+        <button class="hk-tab" data-category="events">
+            <i class="fas fa-calendar-star"></i>
+            {{ translations.hk_guide_events if translations else 'Events' }}
+        </button>
+    </div>
+
+    <!-- Last Updated Banner -->
+    <div class="hk-guide-update-bar">
+        <span id="lastUpdated">
+            <i class="fas fa-clock"></i>
+            {{ translations.hk_guide_loading if translations else 'Loading latest info...' }}
+        </span>
+        <button id="refreshGuide" class="hk-refresh-btn" title="{{ translations.refresh_news if translations else 'Refresh' }}">
+            <i class="fas fa-sync-alt"></i>
+            {{ translations.refresh_news if translations else 'Refresh' }}
+        </button>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="hk-guide-container">
+        <!-- Loading State -->
+        <div id="guideLoading" class="hk-guide-loading">
+            <i class="fas fa-spinner fa-spin fa-2x"></i>
+            <p>{{ translations.hk_guide_loading if translations else 'Loading latest info...' }}</p>
+        </div>
+
+        <!-- Content Grid -->
+        <div id="guideContent" class="hk-guide-grid" style="display:none;"></div>
+
+        <!-- Empty State -->
+        <div id="guideEmpty" class="hk-guide-empty" style="display:none;">
+            <i class="fas fa-search fa-2x"></i>
+            <p>{{ translations.hk_guide_empty if translations else 'No items found for this category.' }}</p>
+        </div>
+    </div>
+
+    <!-- Detail Modal -->
+    <div class="hk-guide-modal" id="detailModal">
+        <div class="hk-guide-modal-overlay" id="modalOverlay"></div>
+        <div class="hk-guide-modal-content" id="modalContent">
+            <button class="hk-guide-modal-close" id="modalClose"><i class="fas fa-times"></i></button>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+    $(document).ready(function() {
+        const currentLang = '{{ lang if lang else "en" }}';
+        let allItems = [];
+        let currentCategory = 'all';
+
+        // Theme
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.body.setAttribute('data-theme', savedTheme);
+        updateThemeIcon(savedTheme);
+        $('#themeToggle').on('click', function() {
+            const c = document.body.getAttribute('data-theme');
+            const n = c === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', n);
+            localStorage.setItem('theme', n);
+            updateThemeIcon(n);
+        });
+        function updateThemeIcon(t) { $('#themeIcon').attr('class', t === 'dark' ? 'fas fa-moon' : 'fas fa-sun'); }
+
+        // Tab switching
+        $('.hk-tab').on('click', function() {
+            $('.hk-tab').removeClass('active');
+            $(this).addClass('active');
+            currentCategory = $(this).data('category');
+            renderItems();
+        });
+
+        // TTS for items
+        function speakText(text) {
+            if (!('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel();
+            const clean = text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+            if (!clean) return;
+            const u = new SpeechSynthesisUtterance(clean);
+            u.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
+            u.rate = 0.85;
+            window.speechSynthesis.speak(u);
+        }
+
+        // Category icon mapping
+        function getCategoryIcon(cat) {
+            const icons = { food: 'fa-utensils', shopping: 'fa-shopping-bag', fun: 'fa-theater-masks', events: 'fa-calendar-star' };
+            return icons[cat] || 'fa-map-marker-alt';
+        }
+        function getCategoryColor(cat) {
+            const colors = { food: '#E07A5F', shopping: '#5B8DEF', fun: '#5B9A7D', events: '#F2CC8F' };
+            return colors[cat] || '#5B9A7D';
+        }
+        function getCategoryLabel(cat) {
+            if (currentLang === 'zh-HK') {
+                const labels = { food: '美食', shopping: '購物', fun: '玩樂', events: '活動' };
+                return labels[cat] || cat;
+            }
+            const labels = { food: 'Food', shopping: 'Shopping', fun: 'Fun & Sights', events: 'Events' };
+            return labels[cat] || cat;
+        }
+
+        // Render items to grid
+        function renderItems() {
+            const filtered = currentCategory === 'all' ? allItems : allItems.filter(i => i.category === currentCategory);
+            const $grid = $('#guideContent');
+            $grid.empty();
+
+            if (filtered.length === 0) {
+                $grid.hide();
+                $('#guideEmpty').show();
+                return;
+            }
+
+            $('#guideEmpty').hide();
+            $grid.show();
+
+            filtered.forEach((item, idx) => {
+                const color = getCategoryColor(item.category);
+                const icon = getCategoryIcon(item.category);
+                const catLabel = getCategoryLabel(item.category);
+                const html = `
+                <div class="hk-guide-card fade-in" data-index="${idx}" data-category="${item.category}" style="animation-delay: ${idx * 0.05}s">
+                    <div class="hk-card-badge" style="background: ${color}">
+                        <i class="fas ${icon}"></i> ${catLabel}
+                    </div>
+                    <div class="hk-card-body">
+                        <h3 class="hk-card-title">${item.name}</h3>
+                        <p class="hk-card-desc">${item.short_desc}</p>
+                        ${item.location ? `<div class="hk-card-location"><i class="fas fa-map-marker-alt"></i> ${item.location}</div>` : ''}
+                        ${item.price_range ? `<div class="hk-card-price"><i class="fas fa-dollar-sign"></i> ${item.price_range}</div>` : ''}
+                        ${item.hours ? `<div class="hk-card-hours"><i class="fas fa-clock"></i> ${item.hours}</div>` : ''}
+                    </div>
+                    <div class="hk-card-footer">
+                        <button class="hk-card-speak" onclick="event.stopPropagation();" data-text="${item.name}. ${item.short_desc}" title="{{ translations.voice_read if translations else 'Read aloud' }}">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                        <button class="hk-card-detail" title="{{ translations.read_more if translations else 'Read more' }}">
+                            {{ translations.read_more if translations else 'Read more' }} <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>`;
+                $grid.append(html);
+            });
+
+            // Card click → detail
+            $('.hk-guide-card').on('click', function() {
+                const cat = $(this).data('category');
+                const items = currentCategory === 'all' ? allItems : allItems.filter(i => i.category === currentCategory);
+                const idx = $(this).index();
+                if (items[idx]) showDetail(items[idx]);
+            });
+
+            // Speak button
+            $('.hk-card-speak').on('click', function(e) {
+                e.stopPropagation();
+                speakText($(this).data('text'));
+            });
+        }
+
+        // Show detail modal
+        function showDetail(item) {
+            const color = getCategoryColor(item.category);
+            const icon = getCategoryIcon(item.category);
+            const catLabel = getCategoryLabel(item.category);
+            let tipsHtml = '';
+            if (item.tips && item.tips.length) {
+                tipsHtml = `<div class="modal-tips"><h4><i class="fas fa-lightbulb"></i> ${currentLang === 'zh-HK' ? '小貼士' : 'Tips'}</h4><ul>`;
+                item.tips.forEach(t => { tipsHtml += `<li>${t}</li>`; });
+                tipsHtml += '</ul></div>';
+            }
+            const html = `
+                <div class="modal-header-bar" style="background: ${color}">
+                    <i class="fas ${icon}"></i> ${catLabel}
+                </div>
+                <div class="modal-detail-body">
+                    <h2>${item.name}</h2>
+                    <p class="modal-full-desc">${item.full_desc || item.short_desc}</p>
+                    ${item.location ? `<div class="modal-info-row"><i class="fas fa-map-marker-alt"></i> <strong>${currentLang === 'zh-HK' ? '地點' : 'Location'}:</strong> ${item.location}</div>` : ''}
+                    ${item.price_range ? `<div class="modal-info-row"><i class="fas fa-dollar-sign"></i> <strong>${currentLang === 'zh-HK' ? '價錢' : 'Price'}:</strong> ${item.price_range}</div>` : ''}
+                    ${item.hours ? `<div class="modal-info-row"><i class="fas fa-clock"></i> <strong>${currentLang === 'zh-HK' ? '營業時間' : 'Hours'}:</strong> ${item.hours}</div>` : ''}
+                    ${item.transport ? `<div class="modal-info-row"><i class="fas fa-subway"></i> <strong>${currentLang === 'zh-HK' ? '交通' : 'Transport'}:</strong> ${item.transport}</div>` : ''}
+                    ${item.elderly_friendly ? `<div class="modal-elderly-badge"><i class="fas fa-wheelchair"></i> ${currentLang === 'zh-HK' ? '長者友善' : 'Elderly Friendly'}</div>` : ''}
+                    ${tipsHtml}
+                    ${item.url && item.url !== '#' ? `<a href="${item.url}" target="_blank" rel="noopener" class="modal-link-btn"><i class="fas fa-external-link-alt"></i> ${currentLang === 'zh-HK' ? '了解更多' : 'Learn More'}</a>` : ''}
+                    <button class="modal-speak-btn" onclick="speakModalContent()">
+                        <i class="fas fa-volume-up"></i> ${currentLang === 'zh-HK' ? '朗讀內容' : 'Read Aloud'}
+                    </button>
+                </div>`;
+            $('#modalBody').html(html);
+            $('#detailModal').addClass('show');
+
+            window.speakModalContent = function() {
+                let text = item.name + '. ' + (item.full_desc || item.short_desc);
+                if (item.location) text += '. ' + (currentLang === 'zh-HK' ? '地點：' : 'Location: ') + item.location;
+                speakText(text);
+            };
+        }
+
+        // Close modal
+        $('#modalClose, #modalOverlay').on('click', function() {
+            $('#detailModal').removeClass('show');
+            window.speechSynthesis.cancel();
+        });
+
+        // Load data
+        function loadGuideData() {
+            $('#guideLoading').show();
+            $('#guideContent').hide();
+            $('#guideEmpty').hide();
+
+            $.get('/get_hk_guide', function(data) {
+                allItems = data.items || [];
+                const updatedText = currentLang === 'zh-HK'
+                    ? '<i class="fas fa-clock"></i> 最後更新：' + (data.last_updated || '剛剛')
+                    : '<i class="fas fa-clock"></i> Last updated: ' + (data.last_updated || 'Just now');
+                $('#lastUpdated').html(updatedText);
+                $('#guideLoading').hide();
+                renderItems();
+            }).fail(function() {
+                $('#guideLoading').hide();
+                $('#guideEmpty').show().find('p').text(
+                    currentLang === 'zh-HK' ? '載入失敗，請稍後再試。' : 'Failed to load. Please try again later.'
+                );
+            });
+        }
+
+        loadGuideData();
+        $('#refreshGuide').on('click', function() {
+            $(this).find('i').addClass('fa-spin');
+            $.get('/get_hk_guide?refresh=1', function(data) {
+                allItems = data.items || [];
+                const updatedText = currentLang === 'zh-HK'
+                    ? '<i class="fas fa-clock"></i> 最後更新：' + (data.last_updated || '剛剛')
+                    : '<i class="fas fa-clock"></i> Last updated: ' + (data.last_updated || 'Just now');
+                $('#lastUpdated').html(updatedText);
+                renderItems();
+                $('#refreshGuide').find('i').removeClass('fa-spin');
+            });
+        });
+
+        // Auto-refresh every 15 minutes
+        setInterval(loadGuideData, 15 * 60 * 1000);
+    });
+    </script>
+</body>
+</html>

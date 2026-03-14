@@ -218,6 +218,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'reminder_label': 'What to remind',
         'reminder_time_label': 'Time',
         'voice_read': 'Read aloud',
+
+        # HK Local Guide
+        'hk_guide_title': 'Hong Kong Local Guide',
+        'hk_guide_back': 'Back to Chat',
+        'hk_guide_all': 'All',
+        'hk_guide_food': 'Food',
+        'hk_guide_shopping': 'Shopping',
+        'hk_guide_fun': 'Fun & Sights',
+        'hk_guide_events': 'Events',
+        'hk_guide_loading': 'Loading latest info...',
+        'hk_guide_empty': 'No items found for this category.',
+        'hk_guide_nav': 'HK Guide',
     },
 
     'zh-HK': {
@@ -416,6 +428,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'reminder_label': '提醒內容',
         'reminder_time_label': '時間',
         'voice_read': '語音朗讀',
+
+        # HK Local Guide
+        'hk_guide_title': '香港本地攻略',
+        'hk_guide_back': '返回傾偈',
+        'hk_guide_all': '全部',
+        'hk_guide_food': '美食',
+        'hk_guide_shopping': '購物',
+        'hk_guide_fun': '玩樂景點',
+        'hk_guide_events': '活動',
+        'hk_guide_loading': '載入最新資訊...',
+        'hk_guide_empty': '呢個分類暫時冇項目。',
+        'hk_guide_nav': '香港攻略',
     },
 }
 
