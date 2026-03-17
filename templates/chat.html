@@ -72,9 +72,11 @@
                     <a href="/hk_guide" class="chat-nav-btn" title="{{ translations.hk_guide_nav if translations else 'HK Guide' }}"><i class="fas fa-map-marked-alt"></i> <span class="d-none d-sm-inline">{{ translations.hk_guide_nav if translations else 'HK Guide' }}</span></a>
                     <button type="button" id="ttsToggle" class="chat-nav-btn nav-tts tts-on" title="{{ translations.toggle_speech if translations else 'Toggle text-to-speech' }}">
                         <i class="fas fa-volume-up" id="ttsIcon"></i>
-                        <span id="ttsLabel">{{ translations.ai_voice_on if translations else '🔊 AI Voice: ON' }}</span>
+                        <span id="ttsLabel">{{ translations.voice_on if translations else '🔊 AI Voice: ON' }}</span>
                     </button>
-                </div>
+
+                    <button type="button" class="chat-nav-btn nav-icon" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}"><i class="fas fa-question-circle"></i></button>
+                                </div>
 
                 <!-- Chat Messages -->
                 <div id="chatDropZone" class="chat-drop-zone">
@@ -151,13 +153,9 @@
         </div>
     </div>
 
-    <!-- Mobile sidebar toggle FAB -->
-    <button class="sidebar-toggle-btn" id="sidebarToggleFab" title="Toggle sidebar">
-        <i class="fas fa-calendar-alt"></i>
-    </button>
+    
 
-    <!-- Guide Helper FAB -->
-    <button class="guide-fab" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">?</button>
+    
 
     <!-- Guide Helper Panel -->
     <div class="guide-panel" id="guidePanel">
@@ -257,7 +255,7 @@
         }
 
         // ========== Mobile Sidebar Toggle ==========
-        $('#sidebarToggleFab, #sidebarToggleHeader').on('click', function() {
+        $('#sidebarToggleHeader').on('click', function() {
             $('#sidebarColumn').toggleClass('hidden-mobile');
         });
 
@@ -283,8 +281,8 @@
         $('#ttsToggle').on('click', function() {
             ttsEnabled = !ttsEnabled;
             if (!ttsEnabled) window.speechSynthesis.cancel();
-            const onLabel = '{{ translations.ai_voice_on if translations else "🔊 AI Voice: ON" }}';
-            const offLabel = '{{ translations.ai_voice_off if translations else "🔇 AI Voice: OFF" }}';
+            const onLabel = '{{ translations.voice_on if translations else "🔊 AI Voice: ON" }}';
+            const offLabel = '{{ translations.voice_off if translations else "🔇 AI Voice: OFF" }}';
             if (ttsEnabled) {
                 $('#ttsIcon').attr('class', 'fas fa-volume-up');
                 $('#ttsLabel').text(onLabel);

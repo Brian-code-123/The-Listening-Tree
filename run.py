@@ -78,11 +78,11 @@ app = FastAPI(
 )
 # Session secret: prefer explicit environment variable for production stability.
 # If not provided, fall back to a generated ephemeral key (NOT recommended).
-_SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("FLASK_SECRET") or secrets.token_hex(16)
+_SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET") or secrets.token_hex(16)
 if _SECRET_KEY and len(_SECRET_KEY) >= 16:
     print("[SECURITY] 🔑 SECRET_KEY is set")
 else:
-    print("[SECURITY] ⚠ No SECRET_KEY/FLASK_SECRET set — using ephemeral key")
+    print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
 app.add_middleware(SessionMiddleware, secret_key=_SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -863,11 +863,32 @@ async def get_response(request: Request, msg: str = Form(...)):
 @app.post("/transcribe")
 async def transcribe_audio(request: Request, audio: UploadFile = File(...)):
     """Receive raw 16 kHz mono PCM WAV from browser, return transcribed text."""
+    audio_bytes = await audio.read()
+
+    # 1. Use OpenAI Whisper if API key is configured (Better for Cantonese/Accents)
+    if os.environ.get("OPENAI_API_KEY"):
+        try:
+            from openai import OpenAI
+            import io
+            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            audio_file = io.BytesIO(audio_bytes)
+            audio_file.name = "audio.wav"
+            print(f"[Whisper] Transcribing with OpenAI Whisper...")
+            response = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="zh"  # Setting to Chinese helps with Cantonese/Mandarin
+            )
+            return JSONResponse({"text": response.text.strip()})
+        except Exception as e:
+            print(f"[Whisper] Transcription error: {e}")
+            # Fall through to Vosk if Whisper fails
+
+    # 2. Fallback to Vosk offline English model
     model = get_vosk_model()
     if model is None:
         return JSONResponse({"text": "", "error": "STT model not available"})
 
-    audio_bytes = await audio.read()
     try:
         from vosk import KaldiRecognizer
         import wave, io
@@ -896,6 +917,20 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...)):
 # ---------------------------------------------------------------------------
 # Reminder Management endpoints (AJAX)
 # ---------------------------------------------------------------------------
+@app.post("/register_device")
+async def register_device(request: Request):
+    try:
+        data = await request.json()
+        token = data.get("device_token")
+        uid = get_user(request)
+        if uid and token:
+            # In a real setup, save this `token` to the database for this user
+            print(f"[Push] Registered device token for {uid}: {token}")
+            return JSONResponse({"status": "ok"})
+    except:
+        pass
+    return JSONResponse({"status": "ignored"})
+
 @app.post("/deactivate_reminder")
 async def deactivate_reminder(request: Request, label: str = Form(...)):
     uid = get_user(request)

@@ -1,3 +1,15 @@
+<div align="center">
+  <img src="logo.png" alt="The Listening Tree Logo" width="200" />
+  <h1>The Listening Tree 聆聽樹</h1>
+</div>
+
+
+<div align="center">
+  <img src="logo.png" alt="The Listening Tree Logo" width="200" />
+  <h1>The Listening Tree 聆聽樹</h1>
+  <p><em>An Elderly-Friendly Companion App with Voice Interaction</em></p>
+</div>
+
 # The Listening Tree 🌳
 
 > **Compassionate AI Companion for Elderly Wellness**  
@@ -12,7 +24,7 @@
 
 ## Overview
 
-**The Listening Tree** is a bilingual AI companion chatbot designed to reduce loneliness and promote wellness in elderly populations. It integrates Tencent Hunyuan for natural conversation, reminders, memory games, Hong Kong public holidays, and local news—all wrapped in an accessible, elderly-friendly glassmorphism UI.
+**The Listening Tree** is a bilingual companion chatbot designed to reduce loneliness and promote wellness in elderly populations. It integrates Tencent Hunyuan for natural conversation, reminders, memory games, Hong Kong public holidays, and local news—all wrapped in an accessible, elderly-friendly glassmorphism UI.
 
 **Built with:** FastAPI (async Python) → Tencent Hunyuan `hunyuan-pro` LLM → SQLite persistence → Bootstrap 5 + FullCalendar.js frontend.
 
@@ -119,7 +131,7 @@ SQLite (users, reminders, chat_history, preferences)
 | **Framework** | FastAPI | 0.115.12 | Async ASGI web framework |
 | **Server** | Uvicorn | 0.34.2 | ASGI server |
 | **Process Manager** | Gunicorn | 23.0.0 | Production process manager |
-| **LLM** | Tencent Hunyuan | hunyuan-pro | Conversational AI |
+| **LLM** | Tencent Hunyuan | hunyuan-pro | Conversational System |
 | **Database** | SQLite3 | Built-in | Persistent data (users, reminders, chat) |
 | **HTTP Client** | httpx | 0.28.1 | Async requests to Hunyuan & NewsAPI |
 | **Templates** | Jinja2 | 3.1.6 | Server-side HTML rendering |
