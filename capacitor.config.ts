@@ -4,7 +4,7 @@ const config: CapacitorConfig = {
   appId: 'com.listeningtree.app',
   appName: 'The Listening Tree',
   // webDir points to the local fallback page.
-  // The app loads from the remote server URL so all Flask routes work.
+  // The app loads from the remote server URL so backend routes work.
   webDir: 'www',
   server: {
     // ───────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ const config: CapacitorConfig = {
     //   url: 'https://your-app.vercel.app'
     //
     // When `url` is set, Capacitor loads the remote web app inside
-    // the native WebView — all Flask routes, sessions, and JS work
+    // the native WebView — backend routes, sessions, and JS work
     // exactly as in a browser.
     // ───────────────────────────────────────────────────────────────
     url: 'http://localhost:5000',

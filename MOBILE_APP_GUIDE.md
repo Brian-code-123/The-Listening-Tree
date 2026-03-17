@@ -49,7 +49,7 @@ npm run cap:open:android
 
 ```
 The-Listening-Tree/
-├── run.py                 # Flask 后端服务器
+├── run.py                 # FastAPI 后端服务器
 ├── templates/             # HTML 模板（旧版 Web UI）
 ├── static/               # CSS、JavaScript 静态文件
 ├── www/                  # 编译后的 Web 资源（给 Capacitor 用）
@@ -91,7 +91,7 @@ The-Listening-Tree/
 ```
 本地开发：
 npm run dev 
-  → Flask 启动在 localhost:5000
+  → 後端（FastAPI）啟動在 localhost:5000
   → 浏览器访问 http://localhost:5000
 
 手机应用开发：

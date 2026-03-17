@@ -24,12 +24,14 @@
     "@capacitor/haptics": "^6.0.0",
     "@capacitor/ios": "^6.2.1",
     "@capacitor/keyboard": "^6.0.0",
+    "@capacitor/push-notifications": "^6.0.5",
     "@capacitor/splash-screen": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0"
   },
   "author": "The Listening Tree Team",
   "license": "MIT",
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "typescript": "^5.9.3"
   }
 }
