@@ -30,6 +30,12 @@
         <!-- Example: render_template('chat.html', GA_MEASUREMENT_ID='G-XXXXXXXXXX') -->
         {% endif %}
 
+
+    <!-- Vercel Analytics -->
+    <script>
+      window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+    </script>
+    <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body class="page-chat" data-theme="light">
 
