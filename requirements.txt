@@ -29,3 +29,4 @@ python-dotenv==1.0.0
 # Offline English STT (native binary) - enable only for local dev
 # vosk==0.3.45
 
+openai

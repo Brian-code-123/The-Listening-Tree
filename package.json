@@ -1,0 +1,39 @@
+{
+  "name": "the-listening-tree",
+  "version": "1.0.0",
+  "description": "The Listening Tree — Elderly Companion Chatbot (Capacitor Mobile App)",
+  "main": "index.js",
+  "scripts": {
+    "dev:backend": "python run.py",
+    "dev": "npm run dev:backend",
+    "cap:init": "npx cap init 'The Listening Tree' com.listeningtree.app --web-dir www",
+    "cap:add:ios": "npx cap add ios",
+    "cap:add:android": "npx cap add android",
+    "cap:sync": "npx cap sync",
+    "cap:open:ios": "npx cap open ios",
+    "cap:open:android": "npx cap open android",
+    "cap:copy": "npx cap copy",
+    "build:mobile": "node scripts/prepare-www.js && npx cap sync"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/browser": "^6.0.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/haptics": "^6.0.0",
+    "@capacitor/ios": "^6.2.1",
+    "@capacitor/keyboard": "^6.0.0",
+    "@capacitor/push-notifications": "^6.0.5",
+    "@capacitor/splash-screen": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0",
+    "@vercel/analytics": "^2.0.1",
+    "vercel": "^50.33.0"
+  },
+  "author": "The Listening Tree Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "typescript": "^5.9.3"
+  }
+}

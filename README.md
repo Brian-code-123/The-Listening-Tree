@@ -1,7 +1,7 @@
 # The Listening Tree 🌳
 
 > **Compassionate AI Companion for Elderly Wellness**  
-> Bilingual chatbot (English + Cantonese) powered by Tencent Hunyuan LLM, featuring accessible voice interaction, medication reminders, and cognitive games.
+> Bilingual chatbot (English + Cantonese) powered by Zhipu AI (GLM-4) LLM, featuring accessible voice interaction, medication reminders, and cognitive games.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org)
 [![FastAPI](https://img.shields.io/badge/fastapi-0.115.12-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
@@ -12,9 +12,9 @@
 
 ## Overview
 
-**The Listening Tree** is a bilingual AI companion chatbot designed to reduce loneliness and promote wellness in elderly populations. It integrates Tencent Hunyuan for natural conversation, reminders, memory games, Hong Kong public holidays, and local news—all wrapped in an accessible, elderly-friendly glassmorphism UI.
+**The Listening Tree** is a bilingual companion chatbot designed to reduce loneliness and promote wellness in elderly populations. It integrates Zhipu AI (GLM-4) for natural conversation, reminders, memory games, Hong Kong public holidays, and local news—all wrapped in an accessible, elderly-friendly glassmorphism UI.
 
-**Built with:** FastAPI (async Python) → Tencent Hunyuan `hunyuan-pro` LLM → SQLite persistence → Bootstrap 5 + FullCalendar.js frontend.
+**Built with:** FastAPI (async Python) → Zhipu AI `glm-4-flash` LLM → SQLite persistence → Bootstrap 5 + FullCalendar.js frontend + Capacitor Mobile App.
 
 ---
 
@@ -22,7 +22,7 @@
 
 | Feature | Details |
 |---------|---------|
-| **Warm LLM Chat** | Tencent Hunyuan (`hunyuan-pro`) with patient, elderly-tailored conversation |
+| **Warm LLM Chat** | Zhipu AI (`glm-4-flash`) with patient, elderly-tailored conversation |
 | **Voice I/O** | Web Speech API for English & Cantonese (zero server deps); optional Vosk offline fallback |
 | **Smart Calendar** | FullCalendar.js with Hong Kong public holidays (2025–2027) |
 | **Persistent Reminders** | SQLite-backed medication, activity, and social reminders with browser notifications |
@@ -59,15 +59,16 @@ pip install -r requirements.txt
 
 # Configure environment
 cat > .env << EOF
-HUNYUAN_API_KEY="your-tencent-hunyuan-api-key"
-HUNYUAN_BASE_URL="https://api.hunyuan.cloud.tencent.com/v1"
-HUNYUAN_MODEL="hunyuan-pro"
+ZHIPU_API_KEY="your-zhipu-api-key"
+ZHIPU_BASE_URL="https://open.bigmodel.cn/api/paas/v4"
+ZHIPU_MODEL="glm-4-flash"
 NEWS_API_KEY="your-newsapi-key"  # Optional
 EOF
 
-# Run
+# Run Backend
 python run.py
-# Open http://localhost:5000
+# Open on Web: http://localhost:5000
+# Or run Capacitor Mobile App: npm run cap:open:ios
 ```
 
 ### Docker
@@ -75,31 +76,95 @@ python run.py
 ```bash
 docker build -t the-listening-tree .
 docker run -p 5000:5000 \
-  -e HUNYUAN_API_KEY="your-key" \
+  -e ZHIPU_API_KEY="your-key" \
   the-listening-tree
 ```
 
-### Vercel Deployment
+### Vercel Deployment (Detailed)
 
-1. Push code to GitHub.
-2. Connect repository to Vercel.
-3. Set environment variables in Project Settings:
-   - `HUNYUAN_API_KEY`
-   - `SECRET_KEY` (generate: `python -c "import secrets; print(secrets.token_hex(32))"`)
-   - `DATABASE_URL` (optional; use Supabase/Neon PostgreSQL for production persistence)
-4. Deploy.
+We added `vercel.json` and a Vercel serverless entry at `api/index.py` so the Vercel Python builder can find your FastAPI `app`.
 
-**Note:** Vercel's `/tmp` is ephemeral. For persistent data, use external PostgreSQL (Supabase, Neon, Planetscale) and set `DATABASE_URL`.
+Two ways to deploy: A) Git-based (recommended for CI), or B) CLI (quick manual deploy).
+
+1) GitHub → Vercel (automatic builds)
+
+- Push your code (make sure `vercel.json` and `api/index.py` are committed):
+
+```bash
+git add vercel.json api/index.py README.md
+git commit -m "chore: add vercel config + serverless entrypoint"
+git push origin main
+```
+
+- On vercel.com choose **Import Project** → select your GitHub repo → when prompted set:
+  - **Root Directory**: `.` (project root)
+  - **Build & Output Settings**: leave empty for Python (Vercel will detect `api/index.py`)
+  - Add Environment Variables in Project Settings: `ZHIPU_API_KEY`, `SECRET_KEY`, and optionally `DATABASE_URL`.
+
+- Vercel will run automatic builds on each push. If you saw a build failure like "No fastapi entrypoint found", ensure `api/index.py` and `vercel.json` exist in the repository and that the commit was pushed.
+
+2) Quick deploy from your machine (CLI) — no global install required (use `npx`)
+
+- Login (one-time):
+
+```bash
+npx vercel@latest login
+```
+
+- Deploy from project root (interactive) or use `--prod` for production:
+
+```bash
+cd /path/to/The-Listening-Tree
+npx vercel@latest --prod
+```
+
+- Notes:
+  - If you get a prompt to select a project, choose to create or link to the correct project.
+  - `npx` avoids global `npm` permission problems.
+
+3) Fixing `npm` global permission errors (optional)
+
+- If you prefer globally installing `vercel` but got `EACCES` errors, create a local npm global folder:
+
+```bash
+mkdir -p ~/.npm-global
+npm config set prefix '~/.npm-global'
+echo 'export PATH=$HOME/.npm-global/bin:$PATH' >> ~/.zshrc
+source ~/.zshrc
+npm install -g vercel
+```
+
+- Or use `sudo npm install -g vercel` (not recommended due to permission/security concerns).
+
+4) What we added to this repo
+
+- `vercel.json` — routing/build override to help Vercel find the FastAPI app.
+- `api/index.py` — serverless entrypoint that dynamically loads `fastapi/main.py` and exposes `app` to Vercel's Python runtime.
+
+5) Troubleshooting
+
+- Build failed: "No fastapi entrypoint found" → confirm `api/index.py` and `vercel.json` are present in the default branch pushed to GitHub.
+- 500 / runtime errors → check Vercel build logs and the function logs (Vercel Console → Deployments → Logs). Missing Python packages will show in build logs; add them to `requirements.txt` in the repo root or in `fastapi/requirements.txt` (we included a minimal `fastapi/requirements.txt`).
+
+6) Quick verification
+
+- After deploy, test the endpoints (replace with your prod domain):
+
+```bash
+curl https://<your-project>.vercel.app/api/data
+curl https://<your-project>.vercel.app/
+```
+
 
 ---
 
 ## Architecture
 
 ```
-Browser (Bootstrap 5 + FullCalendar + Web Speech API)
+Browser / iOS / Android (Bootstrap 5 + FullCalendar + Web Speech API)
        ↓ AJAX/JSON/FormData
 FastAPI (async Python)
-       ├─ POST /get_response     → Command parser → Hunyuan LLM
+       ├─ POST /get_response     → Command parser → Zhipu LLM
        ├─ POST /transcribe       → Vosk STT (optional)
        ├─ GET /get_reminders     → Active reminders for today
        ├─ GET /get_chat_history  → Per-user, per-language messages
@@ -119,13 +184,14 @@ SQLite (users, reminders, chat_history, preferences)
 | **Framework** | FastAPI | 0.115.12 | Async ASGI web framework |
 | **Server** | Uvicorn | 0.34.2 | ASGI server |
 | **Process Manager** | Gunicorn | 23.0.0 | Production process manager |
-| **LLM** | Tencent Hunyuan | hunyuan-pro | Conversational AI |
+| **LLM** | Zhipu AI | glm-4-flash | Conversational System |
 | **Database** | SQLite3 | Built-in | Persistent data (users, reminders, chat) |
-| **HTTP Client** | httpx | 0.28.1 | Async requests to Hunyuan & NewsAPI |
+| **HTTP Client** | httpx | 0.28.1 | Async requests to Zhipu & NewsAPI |
 | **Templates** | Jinja2 | 3.1.6 | Server-side HTML rendering |
 | **Session Auth** | itsdangerous | 2.2.0 | Secure cookies |
 | **Env Config** | python-dotenv | 1.0.0 | .env file loading |
 | **Voice (Optional)** | Vosk | 0.3.45 | Offline English STT |
+| **Mobile App** | Capacitor | 6.2 | iOS / Android Native Wrapper |
 | **Frontend** | Bootstrap | 5.3.2 | Responsive UI |
 | **Calendar** | FullCalendar.js | 6.1 | Interactive calendar widget |
 
@@ -137,9 +203,9 @@ SQLite (users, reminders, chat_history, preferences)
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HUNYUAN_API_KEY` | Yes | — | Tencent Hunyuan API key |
-| `HUNYUAN_BASE_URL` | No | `https://api.hunyuan.cloud.tencent.com/v1` | Hunyuan endpoint |
-| `HUNYUAN_MODEL` | No | `hunyuan-pro` | Model name |
+| `ZHIPU_API_KEY` | Yes | — | Zhipu AI API key |
+| `ZHIPU_BASE_URL` | No | `https://open.bigmodel.cn/api/paas/v4` | Zhipu endpoint |
+| `ZHIPU_MODEL` | No | `glm-4-flash` | Model name |
 | `NEWS_API_KEY` | No | — | NewsAPI key (falls back to hardcoded articles) |
 | `DATABASE_URL` | No | `./reminders.db` | SQLite path or Postgres connection string |
 | `SECRET_KEY` | No | Auto-generated | Session signing key (set explicitly for production) |

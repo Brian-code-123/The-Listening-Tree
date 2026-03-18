@@ -1,21 +1,23 @@
 # AI Coding Agent Instructions for Elderly Companion Chatbot
 
 ## Project Overview
-This is a Flask-based chatbot application designed to reduce loneliness in elderly populations through:
+This is a FastAPI-based chatbot application designed to reduce loneliness in elderly populations through:
 - **Natural language conversations** using Microsoft DialoGPT-Medium (transformer-based model)
 - **Voice interaction** via Vosk offline speech recognition (no cloud dependency)
 - **Memory games** with trivia/word-recall for cognitive engagement
 - **Personalized reminders** for medications, exercise, social activities
 - **Elderly-friendly UI** with large buttons, clear text, voice-first interaction
 
-**Key Architecture**: Python Flask backend + SQLite persistence + client-side JavaScript for audio handling.
+**Key Architecture**: Python FastAPI backend + SQLite persistence + client-side JavaScript for audio handling.
 
 ## Critical Developer Workflows
 
 ### Local Development
 ```bash
 pip install -r requirements.txt          # Install Python dependencies
-python run.py                            # Start Flask server (http://localhost:5000)
+# Start the FastAPI app (uses Uvicorn ASGI server). Example:
+#   uvicorn run:app --reload --host 0.0.0.0 --port 5000
+python run.py                            # Start FastAPI server (http://localhost:5000)
 ```
 
 ### Containerized Deployment
@@ -28,7 +30,7 @@ The Dockerfile uses multi-stage builds: builder stage downloads 100MB+ Vosk mode
 ### Database Management
 - SQLite file: `reminders.db` (created automatically on first run via `init_db()`)
 - Tables: `users` (email/password), `reminders`, `chat_history`, `preferences`
-- Each user identified by email stored in Flask session (`session['user_id']`)
+- Each user identified by email stored in a server-side session (`request.session['user_id']`)
 
 ## Architecture Patterns
 
@@ -74,7 +76,7 @@ These are NOT persisted to database—lost on server restart.
 ### State Management Philosophy
 - **Transient state** (chat context, game progress) → in-memory Python dictionaries
 - **Persistent state** (accounts, preferences, message logs) → SQLite
-- **Client secrets** → Flask session with `secrets.token_hex(16)` generated key (NOT hardcoded)
+- **Client secrets** → server-side session with `secrets.token_hex(16)` generated key (NOT hardcoded)
 
 ### Error Handling Patterns
 - Register/login: `sqlite3.IntegrityError` catches duplicate emails; return error to template
@@ -86,7 +88,7 @@ These are NOT persisted to database—lost on server restart.
 ### Dependencies & Their Role
 | Package | Purpose | Notes |
 |---------|---------|-------|
-| `flask` | Web framework, routing, session management | Secret key generated per session |
+| `fastapi` | Web framework, routing, session management (Starlette sessions) | Secret key generated per session |
 | `transformers` + `torch` | DialoGPT model inference | Requires CUDA for GPU acceleration; CPU-only on ARM |
 | `vosk` | Offline speech recognition | Lightweight; 100MB model download |
 | `sqlite3` | Database (builtin) | Single `.db` file; concurrent write locks possible |
@@ -146,6 +148,39 @@ Reminder Set → Command parser → INSERT reminders table → Background thread
 - No persistent auth tokens; session revoked on logout or browser close
 - Secret key rotated per app restart (not persisted)
 
+## GitHub Copilot Claude Model Support
+
+To enable **Claude 3.5 Sonnet** model in VS Code's GitHub Copilot Chat:
+
+### Step 1: Update Extensions
+1. Open VS Code
+2. Go to **Extensions** (`Cmd+Shift+X` on macOS)
+3. Search for **"GitHub Copilot Chat"** and **"GitHub Copilot"**
+4. Click **Update** if available (must be on v1.220+ for Claude support)
+5. Reload VS Code (`Cmd+Shift+P` → "Reload Window")
+
+### Step 2: Enable Third-Party Model Providers
+1. Visit [github.com/settings/copilot](https://github.com/settings/copilot)
+2. Scroll to **"Chat Model Preferences"** section
+3. Toggle **"Anthropic Claude"** to **ON** (Enable)
+4. If you see **"Google Gemini"**, toggle that too (optional)
+5. Click **Save**
+
+### Step 3: Select Claude in VS Code
+1. Open Copilot Chat panel in VS Code (`Cmd+Shift+L`)
+2. Look for the **model selector** (usually a dropdown arrow at the top of the chat window or bottom-right)
+3. Select **"Claude 3.5 Sonnet"** from the dropdown
+4. Start chatting!
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Claude option not visible | (1) Restart VS Code; (2) Check that Copilot Chat is v1.220+; (3) Verify GitHub account has been logged in (Cmd+Shift+P → "GitHub: Sign In") |
+| "Model not available" error | Check [github.com/settings/copilot](https://github.com/settings/copilot) — Anthropic toggle may have been disabled or your account tier doesn't support it |
+| Enterprise/Org restrictions | Your GitHub organization admin may have disabled third-party models. Contact your admin to enable "Anthropic Claude" in org policy |
+| Still seeing only GPT-4? | Hard-clear cache: (1) Close VS Code; (2) Delete `~/.vscode/copilot-cache` (if exists); (3) Reopen VS Code |
+
 ---
 
-**Last Updated**: January 2026 | **Stack**: Flask + SQLite + DialoGPT + Vosk + Bootstrap 5
+**Last Updated**: March 2026 | **Stack**: FastAPI + SQLite + DialoGPT + Vosk + Bootstrap 5

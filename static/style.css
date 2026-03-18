@@ -216,7 +216,7 @@ body {
 }
 .guide-panel-close:hover { opacity: 1; }
 
-.guide-panel-body { padding: 16px; overflow-y: auto; max-height: calc(70vh - 60px); }
+.guide-panel-body { padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); overflow-y: auto; max-height: calc(70vh - 60px); }
 
 .guide-item {
     padding: 12px 14px;
@@ -238,14 +238,26 @@ body {
 /* ================================================================
    CHAT PAGE — 3-COLUMN GLASSMORPHISM LAYOUT
    ================================================================ */
-.page-chat { height: 100vh; overflow: hidden; }
+.page-chat { 
+    height: 100vh; 
+    overflow: hidden; 
+}
+
+@media (max-width: 992px) {
+    .page-chat {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+}
 
 .page-chat .main-layout {
     display: grid;
     grid-template-columns: 1fr 340px;
     gap: 16px;
     height: 100vh;
-    padding: 16px;
+    padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
     max-width: 1440px;
     margin: 0 auto;
 }
@@ -612,13 +624,13 @@ body {
 /* ---- Responsive ---- */
 @media (max-width: 992px) {
     .page-chat .main-layout { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
-    .page-chat .chat-column { height: calc(100vh - 32px); }
+    .page-chat .chat-column { height: calc(100vh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
     .page-chat .sidebar-column { height: auto; overflow: visible; padding-bottom: 80px; }
     .page-chat .sidebar-toggle-btn { display: flex; }
     .page-chat .sidebar-column.hidden-mobile { display: none; }
 }
 @media (max-width: 576px) {
-    .page-chat .main-layout { padding: 8px; gap: 10px; }
+    .page-chat .main-layout { padding: calc(8px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); gap: 10px; }
     .page-chat .msg_head { padding: 10px 14px; }
     .page-chat .chat-nav-bar { padding: 6px 10px; gap: 4px; }
     .page-chat .chat-nav-btn { padding: 4px 10px; font-size: 0.78rem; }
@@ -696,7 +708,7 @@ body {
     background: var(--primary); color: white; border-color: var(--primary);
 }
 .page-login .help-section, .page-register .help-section {
-    margin-top: 20px; padding: 16px; background: var(--bg-glass); backdrop-filter: blur(8px);
+    margin-top: 20px; padding: calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); background: var(--bg-glass); backdrop-filter: blur(8px);
     border-radius: var(--radius-sm); border: 1px solid var(--border);
 }
 .page-login .help-section h3, .page-register .help-section h3 { color: var(--primary); font-size: 1rem; margin-bottom: 6px; }
@@ -813,6 +825,27 @@ body {
     .page-accessibility .input-wrapper { flex-direction: column; }
 }
 
+/* ========== Auth Page Slide Animations ========== */
+@keyframes slideInFromLeft {
+    from { opacity: 0; transform: translateX(-30px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideInFromRight {
+    from { opacity: 0; transform: translateX(30px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+.page-login .auth-welcome { animation: slideInFromLeft 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.page-register .auth-welcome { animation: slideInFromRight 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+/* ========== Bible Verse Styling ========== */
+.bible-verse {
+    margin: 0; padding: 24px; background: rgba(255, 255, 255, 0.1); 
+    border-left: 4px solid rgba(255, 255, 255, 0.6); border-radius: 8px;
+    font-size: 1.1rem; line-height: 1.8; font-style: italic; color: white;
+}
+.bible-verse p { margin: 0 0 12px 0; letter-spacing: 0.5px; }
+.bible-verse footer { font-size: 0.95rem; font-weight: 500; opacity: 0.95; }
+
 /* ========== Utility ========== */
 @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
@@ -834,4 +867,594 @@ body {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+/* ========== Font Scaling ========== */
+body.font-scale-medium .msg_cotainer, 
+body.font-scale-medium .msg_cotainer_send,
+body.font-scale-medium .type_msg {
+    font-size: 1.25rem !important;
+}
+
+body.font-scale-large .msg_cotainer, 
+body.font-scale-large .msg_cotainer_send,
+body.font-scale-large .type_msg {
+    font-size: 1.5rem !important;
+}
+
+/* ========== Mobile UI Enhancements ========== */
+@media (max-width: 576px) {
+    .guide-fab {
+        bottom: calc(110px + env(safe-area-inset-bottom));
+        right: 16px;
+        width: 48px;
+        height: 48px;
+        font-size: 1.4rem;
+        box-shadow: 0 4px 15px rgba(224, 122, 95, 0.4);
+    }
+    .guide-panel {
+        bottom: calc(160px + env(safe-area-inset-bottom));
+        right: 16px;
+        width: calc(100vw - 32px);
+    }
+    .page-chat .sidebar-toggle-btn {
+        bottom: calc(110px + env(safe-area-inset-bottom));
+        left: 16px;
+    }
+}
+
+
+/* ==========  Hong Kong Local Guide page (`/hk_guide`) ========== */
+.page-hk-guide {
+    background-color: var(--bg-body);
+    color: var(--text-primary);
+    font-family: 'Inter', 'Noto Sans HK', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.hk-guide-nav {
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    border-bottom: 1px solid var(--border);
+    padding: calc(10px + env(safe-area-inset-top)) 15px 10px;
+}
+
+.hk-guide-nav-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.hk-guide-back-btn {
+    text-decoration: none;
+    color: var(--primary);
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: 0.2s;
+}
+
+.hk-guide-back-btn:hover { color: var(--accent); }
+
+.hk-guide-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hk-guide-lang {
+    display: flex;
+    gap: 8px;
+}
+
+.hk-guide-tabs {
+    display: flex;
+    overflow-x: auto;
+    gap: 12px;
+    padding: 15px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    scrollbar-width: none; /* Firefox */
+}
+
+.hk-guide-tabs::-webkit-scrollbar { display: none; }
+
+.hk-tab {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    padding: 8px 16px;
+    border-radius: 20px;
+    color: var(--text-primary);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hk-tab:hover { background: var(--border); }
+.hk-tab.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.hk-guide-update-bar {
+    text-align: center;
+    padding: 10px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    background: var(--bg-body);
+}
+
+.hk-guide-container {
+    flex: 1;
+    max-width: 800px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 15px;
+    padding-bottom: calc(30px + env(safe-area-inset-bottom));
+}
+
+.hk-guide-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.hk-guide-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    cursor: pointer;
+    transition: 0.2s transform, 0.2s box-shadow;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.hk-guide-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow);
+}
+
+.hk-guide-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--primary);
+    font-weight: 700;
+    font-size: 1.15rem;
+}
+
+.hk-guide-card-badge {
+    background: var(--primary);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: auto;
+}
+
+.hk-guide-card-body {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    flex: 1;
+}
+
+/* Modal */
+.hk-guide-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+
+.hk-guide-modal.show { display: flex; }
+
+.hk-guide-modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(3px);
+}
+
+.hk-guide-modal-content {
+    background: var(--bg-card);
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    border-radius: var(--radius);
+    position: relative;
+    z-index: 10;
+    padding: 24px;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    animation: guideSlideUp 0.3s ease;
+}
+
+.hk-guide-modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 1.4rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.hk-guide-loading, .hk-guide-empty {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+}
+
+/* ================================================================
+   HK GUIDE UI REDESIGN
+   ================================================================ */
+.page-hk-guide {
+    min-height: 100vh;
+    background: var(--gradient-bg);
+    padding-bottom: 40px;
+    overflow-x: hidden;
+}
+
+/* Nav */
+.hk-guide-nav {
+    background: var(--bg-glass-strong);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border-bottom: var(--glass-border);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    padding: env(safe-area-inset-top) 16px 0;
+    box-shadow: var(--shadow);
+}
+.hk-guide-nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.hk-guide-back-btn {
+    text-decoration: none;
+    color: var(--primary);
+    font-size: 1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-glass);
+    padding: 8px 16px;
+    border-radius: 20px;
+    transition: all 0.3s;
+}
+.hk-guide-back-btn:hover {
+    background: var(--primary);
+    color: white;
+}
+.hk-guide-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.hk-guide-lang {
+    display: flex;
+    gap: 8px;
+}
+
+/* Tabs */
+.hk-guide-tabs {
+    display: flex;
+    gap: 12px;
+    padding: 16px 24px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.hk-guide-tabs::-webkit-scrollbar { display: none; }
+.hk-tab {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 10px 24px;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 1rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.hk-tab:hover {
+    transform: translateY(-2px);
+}
+.hk-tab.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    box-shadow: 0 4px 16px var(--primary-light);
+}
+
+/* Info Bar */
+.hk-guide-update-bar {
+    max-width: 1200px;
+    margin: 0 auto 20px;
+    padding: 0 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+.hk-refresh-btn {
+    background: var(--bg-glass);
+    border: 1px solid var(--border);
+    color: var(--primary);
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.hk-refresh-btn:hover {
+    background: var(--primary-light);
+}
+
+/* Container & Grid */
+.hk-guide-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+.hk-guide-grid {
+    display: grid;
+    /* Desktop: multiple columns */
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 24px;
+}
+
+/* Cards */
+.hk-guide-card {
+    background: var(--bg-card);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: var(--glass-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+}
+.hk-guide-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+}
+
+.hk-card-badge {
+    padding: 8px 16px;
+    color: white;
+    font-weight: 700;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.hk-card-body {
+    padding: 20px;
+    flex: 1;
+}
+.hk-card-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 12px 0;
+    line-height: 1.4;
+}
+.hk-card-desc {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 16px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.hk-card-location, .hk-card-price, .hk-card-hours {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+.hk-card-location i, .hk-card-price i, .hk-card-hours i {
+    color: var(--primary);
+    margin-top: 3px;
+    width: 16px;
+    text-align: center;
+}
+
+.hk-card-footer {
+    padding: 16px 20px;
+    background: var(--bg-glass);
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.hk-card-speak {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--accent-light);
+    color: var(--accent);
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+.hk-card-speak:hover {
+    background: var(--accent);
+    color: white;
+    transform: scale(1.1);
+}
+.hk-card-detail {
+    background: none;
+    border: none;
+    color: var(--primary);
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 20px;
+    transition: all 0.2s;
+}
+.hk-card-detail:hover {
+    background: var(--primary-light);
+}
+
+/* Loading & Empty */
+.hk-guide-loading, .hk-guide-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+}
+.hk-guide-loading i, .hk-guide-empty i {
+    font-size: 3rem;
+    margin-bottom: 16px;
+    color: var(--primary);
+}
+.hk-guide-empty i {
+    color: var(--accent);
+}
+.hk-guide-loading p, .hk-guide-empty p {
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+/* Modal */
+.hk-guide-modal {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.hk-guide-modal.active {
+    display: flex;
+}
+.hk-guide-modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.hk-guide-modal-content {
+    position: relative;
+    background: var(--bg-card);
+    width: 100%;
+    max-width: 600px;
+    max-height: 85vh;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    border: var(--glass-border);
+    overflow-y: auto;
+    z-index: 2001;
+    animation: modalPop 0.3s ease;
+}
+@keyframes modalPop {
+    from { opacity: 0; transform: scale(0.95) translateY(20px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.hk-guide-modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--bg-glass-strong);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2002;
+    transition: all 0.2s;
+}
+.hk-guide-modal-close:hover {
+    background: var(--danger);
+    color: white;
+    border-color: var(--danger);
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .hk-guide-title { font-size: 1.1rem; }
+    .hk-guide-title span { display: none; }
+    .hk-guide-tabs { padding: 12px 16px; }
+    .hk-tab { padding: 8px 16px; font-size: 0.95rem; }
+    .hk-guide-container { padding: 0 16px; }
+    /* Single column layout for mobile is handled by CSS grid automatically resizing, but we can enforce it: */
+    .hk-guide-grid { grid-template-columns: 1fr; gap: 16px; }
+    .hk-card-badge { padding: 6px 12px; font-size: 0.85rem; }
+    .hk-card-body { padding: 16px; }
+    .hk-card-title { font-size: 1.15rem; }
+    .hk-guide-modal-content { max-height: 90vh; }
 }

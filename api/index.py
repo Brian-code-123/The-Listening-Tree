@@ -1,3 +1,7 @@
-# Vercel entry point — imports the FastAPI app from run.py
-# Vercel's @vercel/python runtime looks for `app` in this file.
-from run import app  # noqa: F401  (re-exported for Vercel)
+import sys
+import os
+
+# Add the project root to the sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from run import app
