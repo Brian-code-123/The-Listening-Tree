@@ -84,8 +84,10 @@ if _SECRET_KEY and len(_SECRET_KEY) >= 16:
 else:
     print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
 app.add_middleware(SessionMiddleware, secret_key=_SECRET_KEY)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # ---------------------------------------------------------------------------
 # Vosk STT — lazy-loaded on first use (English offline model)
