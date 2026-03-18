@@ -80,17 +80,81 @@ docker run -p 5000:5000 \
   the-listening-tree
 ```
 
-### Vercel Deployment
+### Vercel Deployment (Detailed)
 
-1. Push code to GitHub.
-2. Connect repository to Vercel.
-3. Set environment variables in Project Settings:
-   - `ZHIPU_API_KEY`
-   - `SECRET_KEY` (generate: `python -c "import secrets; print(secrets.token_hex(32))"`)
-   - `DATABASE_URL` (optional; use Supabase/Neon PostgreSQL for production persistence)
-4. Deploy.
+We added `vercel.json` and a Vercel serverless entry at `api/index.py` so the Vercel Python builder can find your FastAPI `app`.
 
-**Note:** Vercel's `/tmp` is ephemeral. For persistent data, use external PostgreSQL (Supabase, Neon, Planetscale) and set `DATABASE_URL`.
+Two ways to deploy: A) Git-based (recommended for CI), or B) CLI (quick manual deploy).
+
+1) GitHub → Vercel (automatic builds)
+
+- Push your code (make sure `vercel.json` and `api/index.py` are committed):
+
+```bash
+git add vercel.json api/index.py README.md
+git commit -m "chore: add vercel config + serverless entrypoint"
+git push origin main
+```
+
+- On vercel.com choose **Import Project** → select your GitHub repo → when prompted set:
+  - **Root Directory**: `.` (project root)
+  - **Build & Output Settings**: leave empty for Python (Vercel will detect `api/index.py`)
+  - Add Environment Variables in Project Settings: `ZHIPU_API_KEY`, `SECRET_KEY`, and optionally `DATABASE_URL`.
+
+- Vercel will run automatic builds on each push. If you saw a build failure like "No fastapi entrypoint found", ensure `api/index.py` and `vercel.json` exist in the repository and that the commit was pushed.
+
+2) Quick deploy from your machine (CLI) — no global install required (use `npx`)
+
+- Login (one-time):
+
+```bash
+npx vercel@latest login
+```
+
+- Deploy from project root (interactive) or use `--prod` for production:
+
+```bash
+cd /path/to/The-Listening-Tree
+npx vercel@latest --prod
+```
+
+- Notes:
+  - If you get a prompt to select a project, choose to create or link to the correct project.
+  - `npx` avoids global `npm` permission problems.
+
+3) Fixing `npm` global permission errors (optional)
+
+- If you prefer globally installing `vercel` but got `EACCES` errors, create a local npm global folder:
+
+```bash
+mkdir -p ~/.npm-global
+npm config set prefix '~/.npm-global'
+echo 'export PATH=$HOME/.npm-global/bin:$PATH' >> ~/.zshrc
+source ~/.zshrc
+npm install -g vercel
+```
+
+- Or use `sudo npm install -g vercel` (not recommended due to permission/security concerns).
+
+4) What we added to this repo
+
+- `vercel.json` — routing/build override to help Vercel find the FastAPI app.
+- `api/index.py` — serverless entrypoint that dynamically loads `fastapi/main.py` and exposes `app` to Vercel's Python runtime.
+
+5) Troubleshooting
+
+- Build failed: "No fastapi entrypoint found" → confirm `api/index.py` and `vercel.json` are present in the default branch pushed to GitHub.
+- 500 / runtime errors → check Vercel build logs and the function logs (Vercel Console → Deployments → Logs). Missing Python packages will show in build logs; add them to `requirements.txt` in the repo root or in `fastapi/requirements.txt` (we included a minimal `fastapi/requirements.txt`).
+
+6) Quick verification
+
+- After deploy, test the endpoints (replace with your prod domain):
+
+```bash
+curl https://<your-project>.vercel.app/api/data
+curl https://<your-project>.vercel.app/
+```
+
 
 ---
 
