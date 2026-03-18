@@ -235,7 +235,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     'zh-HK': {
         # Navigation & Layout
         'app_name': '聆聽樹',
-        'tagline': '你嘅友善夥伴',
+        'tagline': '陪伴你的好朋友',
         'logout': '登出',
         'language': '語言',
         'accessibility_mode': '無障礙模式',
@@ -375,7 +375,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'listen_msg': '聽回覆',
         'voice_on': '🔊 語音：開',
         'voice_off': '🔇 語音：關',
-        'welcome_chat': '你好！我係你嘅友善夥伴。你今日過得點呀？😊',
+        'welcome_chat': '你好！我是陪伴你的好朋友，今天過得怎麼樣呢？😊',
         'no_speech_support': '你嘅瀏覽器唔支援語音辨識，請用 Chrome 或 Edge。',
         'no_speech_detected': '聽唔到語音，請再試一次。',
         'mic_denied': '咪高峰權限被拒絕，請檢查瀏覽器設定。',
