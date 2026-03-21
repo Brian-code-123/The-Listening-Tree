@@ -754,11 +754,11 @@ async def get_response(request: Request, msg: str = Form(...), file: Optional[Up
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     # Handle Photo Memory upload
+    # Zhipu GLM-4V expects pure base64 string. The 'data:image/...;base64,' prefix violates format causing 1210 error.
     image_base64 = None
     if file and file.content_type.startswith("image/"):
         contents = await file.read()
         image_base64 = base64.b64encode(contents).decode("utf-8")
-        image_base64 = f"data:{file.content_type};base64,{image_base64}"
 
     conn = get_db()
     c = conn.cursor()
