@@ -355,6 +355,9 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', image_data: O
 
     except Exception as e:
         _builtins._original_print(f"[AI] Error calling Zhipu ({lang}): {e}")
+        # Return a clearer error if it's an image memory request instead of a generic text fallback
+        if image_data:
+            return "啊，這張相片有啲睇唔清楚，你可以再發多一次俾我睇下嗎？" if lang == 'zh-HK' else "Oh, I couldn't quite see that photo. Could you try sending it again?"
         return random.choice(fallback)
 
 # ---------------------------------------------------------------------------

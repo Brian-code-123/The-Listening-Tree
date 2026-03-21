@@ -357,14 +357,44 @@
         $('#photoInput').on('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
+            
+            // Show preview and compress image on client-side
             const reader = new FileReader();
             reader.onload = (event) => {
-                pendingImageData = file; // Store the actual file object for FormData
-                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                // Show a preview in the chat
-                const previewHTML = `<div class="d-flex justify-content-end mb-4"><div class="img_cont_msg"><img src="${event.target.result}" class="user_img_msg" style="border-radius:10px;width:150px;height:auto;object-fit:cover;"></div></div>`;
-                $('#messageFormeight').append(previewHTML);
-                $('#text').val('{{ translations.photo_memory_prompt if translations else "Look at this photo memory!" }}');
+                const img = new Image();
+                img.onload = () => {
+                    // Compress using Canvas to avoid API payload limits (max ~800px)
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    const MAX_SIZE = 800;
+                    
+                    if (width > height && width > MAX_SIZE) {
+                        height *= MAX_SIZE / width;
+                        width = MAX_SIZE;
+                    } else if (height > MAX_SIZE) {
+                        width *= MAX_SIZE / height;
+                        height = MAX_SIZE;
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Convert back to blob (JPEG to save space)
+                    canvas.toBlob((blob) => {
+                        pendingImageData = blob; // Compressed blob for FormData
+                        
+                        // Show preview in chat
+                        const previewHTML = `<div class="d-flex justify-content-end mb-4"><div class="img_cont_msg"><img src="${event.target.result}" class="user_img_msg" style="border-radius:10px;max-width:200px;width:100%;height:auto;object-fit:cover;"></div></div>`;
+                        $('#messageFormeight').append(previewHTML);
+                        $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
+                        
+                        $('#text').val('{{ translations.photo_memory_prompt if translations else "Look at this photo memory!" }}');
+                    }, 'image/jpeg', 0.85); // 85% quality JPEG
+                };
+                img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         });
@@ -382,7 +412,7 @@
             const formData = new FormData();
             formData.append('msg', text || 'Photo Memory');
             if (pendingImageData) {
-                formData.append('file', pendingImageData);
+                formData.append('file', pendingImageData, 'photo.jpg');
                 pendingImageData = null; // Clear after use
                 $('#photoInput').val('');
             }
