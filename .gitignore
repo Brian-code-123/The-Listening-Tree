@@ -66,4 +66,6 @@ www/capacitor-bridge.js
 .coverage
 htmlcov/
 tests/
+# Ignore markdown files except README.md (keep README in repo)
 *.md
+!README.md
