@@ -117,7 +117,8 @@ async def run_periodic_tasks():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Start background task
-    bg_task = asyncio.create_all_tasks() # Placeholder for tracking
+    # Start the periodic background task. `asyncio.create_all_tasks()` does
+    # not exist — use `create_task` to schedule the coroutine.
     task = asyncio.create_task(run_periodic_tasks())
     yield
     # Shutdown: Clean up task
@@ -820,7 +821,9 @@ async def get_response(request: Request, msg: str = Form(...), file: Optional[Up
                 return JSONResponse({"response": response})
 
         try:
+            # Validate time format (HH:MM) and parse hours/minutes
             h, m = map(int, time_str.split(':'))
+            # Ensure valid 24-hour format (0-23 for hours, 0-59 for minutes)
             if 0 <= h <= 23 and 0 <= m <= 59:
                 c.execute("INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
                           (uid, label, time_str, timestamp))
@@ -828,7 +831,8 @@ async def get_response(request: Request, msg: str = Form(...), file: Optional[Up
                 response = f"提醒已設置：{label}，時間 {time_str}" if lang == 'zh-HK' else f"Reminder set: {label} at {time_str}"
             else:
                 response = "時間無效。請用24小時格式 HH:MM" if lang == 'zh-HK' else "Invalid time. Use 24-hour format HH:MM"
-        except:
+        except (ValueError, IndexError):
+            # Handle malformed time strings (e.g., invalid separators, non-numeric values)
             response = "時間格式錯誤。請用 HH:MM" if lang == 'zh-HK' else "Invalid time format. Use HH:MM"
 
     elif user_input_lower.startswith("delete reminder") or user_input_lower.startswith("刪除提醒"):
