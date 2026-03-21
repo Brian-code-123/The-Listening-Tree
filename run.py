@@ -317,12 +317,12 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', image_data: O
     messages.append({"role": "user", "content": content})
 
     # Use glm-4v if image provided, else standard chat model
-    model_name = "glm-4v" if image_data else ZHIPU_MODEL
+    model_name = "glm-4v-flash" if image_data else ZHIPU_MODEL
 
     payload = {
         "model": model_name,
         "messages": messages,
-        "temperature": 0.7,
+        "temperature": 0.1, # Lower temperature for faster, more focused vision response
         "top_p": 0.95,
         "max_tokens": 512,
     }
