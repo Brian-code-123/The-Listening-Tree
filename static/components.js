@@ -13,15 +13,15 @@ const UI = {
         const containerClass = isBot ? 'justify-content-start' : 'justify-content-end';
         const imgClass = isBot ? 'img_cont_msg' : 'img_cont_msg';
         const avatar = isBot ? '/static/Chatbot.png' : '/static/User.png';
-        const msgContainerClass = isBot ? 'msg_container' : 'msg_container_send';
-        const timeClass = isBot ? 'msg_time' : 'msg_time_send';
+        const msgContainerClass = isBot ? 'msg_cotainer' : 'msg_cotainer_send';
+        const timeClass = 'msg_time';
 
         let innerContent = isImage 
             ? `<img src="${content}" style="border-radius:10px; width:150px; height:auto; object-fit:cover;">`
             : content;
 
         return `
-            <div class="d-flex ${containerClass} mb-4">
+            <div class="d-flex ${containerClass} mb-4 fade-in">
                 ${isBot ? `<div class="${imgClass}"><img src="${avatar}" class="rounded-circle user_img_msg"></div>` : ''}
                 <div class="${msgContainerClass}">
                     ${innerContent}
