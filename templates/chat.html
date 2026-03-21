@@ -16,6 +16,7 @@
     <!-- FullCalendar -->
     <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/components.js"></script>
         {% if GA_MEASUREMENT_ID %}
         <!-- Google Analytics (GA4) -->
         <script async src="https://www.googletagmanager.com/gtag/js?id={{ GA_MEASUREMENT_ID }}"></script>
@@ -38,6 +39,11 @@
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body class="page-chat" data-theme="light">
+
+    <!-- Connectivity Status Banner -->
+    <div id="offlineBanner" class="alert alert-warning text-center small py-1 mb-0 d-none" style="z-index: 9999; position: sticky; top: 0;">
+        <i class="fas fa-wifi-slash"></i> {{ translations.offline_mode if translations else 'Offline - Connection Limited' }}
+    </div>
 
     <!-- Theme Toggle -->
     <button class="theme-toggle" id="themeToggle" title="{{ translations.theme_toggle if translations else 'Toggle Theme' }}">
@@ -95,6 +101,10 @@
                         <input type="text" id="text" name="msg"
                                placeholder="{{ translations.type_message if translations else 'Type your message...' }}"
                                autocomplete="off" class="type_msg" required>
+                        <button type="button" id="photoBtn" class="send_btn secondary_btn ms-1" title="Upload Memory Photo">
+                            <i class="fas fa-camera"></i>
+                        </button>
+                        <input type="file" id="photoInput" accept="image/*" style="display: none;">
                         <button type="button" id="micBtn" class="send_btn mic-btn" title="{{ translations.start_voice if translations else 'Start Voice' }}">
                             <i class="fas fa-microphone"></i>
                         </button>
@@ -307,18 +317,8 @@
 
         // ========== Chat Messages ==========
         function appendMessage(sender, message, time) {
-            const botImg = "/static/Chatbot.png";
-            const userImg = "/static/User.png";
-            const imgSrc = sender === 'bot' ? botImg : userImg;
-            const justify = sender === 'bot' ? 'start' : 'end';
-            const msgClass = sender === 'bot' ? 'msg_cotainer' : 'msg_cotainer_send';
-            const msgHTML = `
-                <div class="d-flex justify-content-${justify} mb-4 fade-in">
-                    ${sender === 'bot' ? `<img src="${imgSrc}" class="user_img_msg" alt="Bot">` : ''}
-                    <div class="${msgClass}">${message}<span class="msg_time">${time}</span></div>
-                    ${sender === 'user' ? `<img src="${imgSrc}" class="user_img_msg" alt="You">` : ''}
-                </div>`;
-            $('#messageFormeight').append(msgHTML);
+            const html = UI.MessageBubble(sender, message, time);
+            $('#messageFormeight').append(html);
             $('#messageFormeight').scrollTop($('#messageFormeight')[0].scrollHeight);
         }
 
@@ -339,17 +339,60 @@
         }
         loadChatHistory();
 
+        // Network Status Support
+        function updateNetworkStatus() {
+            if (navigator.onLine) {
+                $('#offlineBanner').addClass('d-none');
+            } else {
+                $('#offlineBanner').removeClass('d-none');
+            }
+        }
+        window.addEventListener('online', updateNetworkStatus);
+        window.addEventListener('offline', updateNetworkStatus);
+        updateNetworkStatus();
+
+        // Photo Memories Support
+        let pendingImageData = null;
+        $('#photoBtn').on('click', () => $('#photoInput').click());
+        $('#photoInput').on('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                pendingImageData = file; // Store the actual file object for FormData
+                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                // Show a preview in the chat
+                const previewHTML = `<div class="d-flex justify-content-end mb-4"><div class="img_cont_msg"><img src="${event.target.result}" class="user_img_msg" style="border-radius:10px;width:150px;height:auto;object-fit:cover;"></div></div>`;
+                $('#messageFormeight').append(previewHTML);
+                $('#text').val('{{ translations.photo_memory_prompt if translations else "Look at this photo memory!" }}');
+            };
+            reader.readAsDataURL(file);
+        });
+
         // Handle message submit
         $('#messageArea').on('submit', function(event) {
             event.preventDefault();
             const text = $('#text').val().trim();
-            if (!text) return;
+            if (!text && !pendingImageData) return;
+            
             const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            appendMessage('user', text, time);
+            if (text) appendMessage('user', text, time);
             $('#text').val('');
+
+            const formData = new FormData();
+            formData.append('msg', text || 'Photo Memory');
+            if (pendingImageData) {
+                formData.append('file', pendingImageData);
+                pendingImageData = null; // Clear after use
+                $('#photoInput').val('');
+            }
+
             $.ajax({
-                type: 'POST', url: '/get_response',
-                data: { msg: text },
+                type: 'POST', 
+                url: '/get_response',
+                data: formData,
+                processData: false,
+                contentType: false,
                 success: function(data) {
                     appendMessage('bot', data.response, time);
                     speakText(data.response);

@@ -26,16 +26,19 @@ import io
 import json
 import wave
 import base64
+import asyncio
 import secrets
 import random
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Third-party imports
 # ---------------------------------------------------------------------------
-from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException
+from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -69,12 +72,69 @@ if _MINIMAL_STARTUP:
 from translations import get_text, get_all_translations, TRANSLATIONS
 
 # ---------------------------------------------------------------------------
+# Background Periodic Task Manager (Async Replacement for Daemon Thread)
+# ---------------------------------------------------------------------------
+async def run_periodic_tasks():
+    """Background loop: runs every 60s. Handles reminders and housekeeping.
+
+    Replaces the previous threading.Thread with an async loop integrated
+    into the FastAPI lifecycle.
+    """
+    while True:
+        try:
+            now = datetime.now()
+            today = now.strftime("%Y-%m-%d")
+            current_time = now.strftime("%H:%M")
+
+            # 1. Check Reminders
+            conn = sqlite3.connect(_DB_PATH)
+            c = conn.cursor()
+            c.execute(
+                "SELECT u.email, r.label, r.reminder_time FROM reminders r "
+                "JOIN users u ON r.user_id = u.id "
+                "WHERE r.is_active = 1 AND DATE(r.created_at) = ?",
+                (today,),
+            )
+            for email, label, rtime in c.fetchall():
+                if rtime == current_time:
+                    # In a real app, this would trigger a push notification or WebSocket msg
+                    _builtins._original_print(f"[REMINDER] ⏰  {email}: {label} at {rtime}")
+            conn.close()
+
+            # 2. Daily Housekeeping (Auto-expire old reminders at 00:00)
+            if now.hour == 0 and now.minute == 0:
+                auto_expire_old_reminders()
+
+            # 3. Clean Chat History (Every 10 minutes)
+            if now.minute % 10 == 0:
+                cleanup_old_chat_history()
+
+        except Exception as e:
+            _builtins._original_print(f"[ERROR] periodic_tasks: {e}")
+
+        await asyncio.sleep(60)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start background task
+    bg_task = asyncio.create_all_tasks() # Placeholder for tracking
+    task = asyncio.create_task(run_periodic_tasks())
+    yield
+    # Shutdown: Clean up task
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+# ---------------------------------------------------------------------------
 # Application initialisation
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="The Listening Tree",
     description="Bilingual AI companion chatbot for elderly wellness",
     version="2.0.0",
+    lifespan=lifespan
 )
 # Session secret: prefer explicit environment variable for production stability.
 # If not provided, fall back to a generated ephemeral key (NOT recommended).
@@ -221,8 +281,10 @@ WARM_FALLBACK_EN = [
     "I hear you, and I think that's wonderful. Tell me more! 😊",
 ]
 
-async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
-    """Call Zhipu AI (智谱AI) for warm elderly conversation."""
+async def call_ai(user_input: str, user_id: int, lang: str = 'en', image_data: Optional[str] = None):
+    """Call Zhipu AI (智谱AI) for warm elderly conversation.
+    Supports image-based "Photo Memories" with GLM-4v (Vision).
+    """
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
@@ -235,11 +297,30 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
     history = user_api_histories[history_key]
 
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-20:])
-    messages.append({"role": "user", "content": user_input})
+    messages.extend(history[-10:]) # Keep it lean for vision
+
+    content = []
+    if image_data:
+        # User uploaded a photobook memory
+        # Zhipu AI GLM-4v expects image_url in specific format
+        content.append({
+            "type": "text", 
+            "text": f"這是一張老人家分享的照片，請根據圖片內容，用溫暖、關懷的語氣與他聊天。用戶說：{user_input}" if lang == 'zh-HK' else f"This is a photo shared by an elderly user. Please talk to them warmly about the image content. User said: {user_input}"
+        })
+        content.append({
+            "type": "image_url", 
+            "image_url": {"url": image_data}
+        })
+    else:
+        content = user_input
+
+    messages.append({"role": "user", "content": content})
+
+    # Use glm-4v if image provided, else standard chat model
+    model_name = "glm-4v" if image_data else ZHIPU_MODEL
 
     payload = {
-        "model": ZHIPU_MODEL,
+        "model": model_name,
         "messages": messages,
         "temperature": 0.7,
         "top_p": 0.95,
@@ -247,7 +328,7 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 f"{ZHIPU_BASE_URL}/chat/completions",
                 json=payload,
@@ -263,16 +344,17 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
         reply = message.get("content", "")
 
         if reply.strip():
+            # Only store text content in history (save tokens/memory)
             history.append({"role": "user", "content": user_input})
             history.append({"role": "assistant", "content": reply})
-            if len(history) > 30:
-                user_api_histories[history_key] = history[-20:]
+            if len(history) > 20:
+                user_api_histories[history_key] = history[-10:]
             return reply
         else:
             raise ValueError("Empty response from API")
 
     except Exception as e:
-        print(f"[AI] Error calling Zhipu ({lang}): {e}")
+        _builtins._original_print(f"[AI] Error calling Zhipu ({lang}): {e}")
         return random.choice(fallback)
 
 # ---------------------------------------------------------------------------
@@ -471,12 +553,11 @@ def check_reminders() -> None:
         threading.Event().wait(60)
 
 
-# Start background reminder thread (skip on Vercel — serverless has no
-# persistent threads)
-if not ON_VERCEL:
-    threading.Thread(target=check_reminders, daemon=True).start()
-else:
-    print("[INFO] Vercel mode — background reminder thread disabled")
+# Start background reminder thread (Obsolete: Replaced by Lifespan task)
+# if not ON_VERCEL:
+#     threading.Thread(target=check_reminders, daemon=True).start()
+# else:
+#     print("[INFO] Vercel mode — background reminder thread disabled")
 
 # ---------------------------------------------------------------------------
 # Session helpers
@@ -655,29 +736,9 @@ async def accessibility_mode(request: Request):
 # Tencent Hunyuan LLM for general conversation.
 # ---------------------------------------------------------------------------
 @app.post("/get_response")
-async def get_response(request: Request, msg: str = Form(...)):
+async def get_response(request: Request, msg: str = Form(...), file: Optional[UploadFile] = File(None)):
     """Process user message and return AI/command response.
-
-    Message handling priority (in order):
-      1. Guide trigger keywords ('teach', 'how to use', 'help') → return help text
-      2. Reminder commands ('set reminder', 'delete reminder') → parse, validate, store in DB
-      3. Preference commands ('set preference') → update preferences table
-      4. Game commands ('play game', 'exit game', quiz answers) → manage game state in memory
-      5. Default → send to Tencent Hunyuan LLM for warm conversation response
-
-    Chat history: Every user message + bot response is logged to chat_history table with:
-      - user_id: Current session user ID
-      - lang: Current UI language (en or zh-HK)
-      - timestamp: ISO timestamp
-      - is_bot: 0 for user, 1 for bot
-      - message: Text content
-
-    Args:
-        request: HTTP request (must have user_id in session)
-        msg: User input text (may be voice-transcribed)
-
-    Returns:
-        JSONResponse: {"response": str} with bot reply or error
+    Photo Memories Integration: If file is provided, use vision model.
     """
     uid = get_user(request)
     if uid is None:
@@ -688,10 +749,17 @@ async def get_response(request: Request, msg: str = Form(...)):
     user_input_lower = user_input_original.lower()
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+    # Handle Photo Memory upload
+    image_base64 = None
+    if file and file.content_type.startswith("image/"):
+        contents = await file.read()
+        image_base64 = base64.b64encode(contents).decode("utf-8")
+        image_base64 = f"data:{file.content_type};base64,{image_base64}"
+
     conn = get_db()
     c = conn.cursor()
 
-    # Store user message with language tag
+    # Store user message
     c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
               (uid, lang, timestamp, user_input_original))
     conn.commit()
@@ -845,7 +913,7 @@ async def get_response(request: Request, msg: str = Form(...)):
 
         # ---- Normal AI Chat ----
         else:
-            response = await call_ai(user_input_original, uid, lang)
+            response = await call_ai(user_input_original, uid, lang, image_data=image_base64)
 
     # Store bot response
     c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
