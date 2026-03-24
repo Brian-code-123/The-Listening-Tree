@@ -139,8 +139,16 @@
                 <div class="sidebar-card-body">
                     <div id="reminderList"></div>
                     <form id="reminderForm" class="add-reminder-form">
-                        <input type="text" id="reminderLabel"
+                        <input type="text" id="reminderLabel" list="reminderPresets"
                                placeholder="{{ translations.reminder_label if translations else 'What to remind' }}" required>
+                        <datalist id="reminderPresets">
+                            <option value="Take medicine">Take medicine</option>
+                            <option value="Walk">Walk</option>
+                            <option value="Drink water">Drink water</option>
+                            <option value="Eat meal">Eat meal</option>
+                            <option value="Rest">Rest</option>
+                            <option value="Exercise">Exercise</option>
+                        </datalist>
                         <input type="time" id="reminderTime" required>
                         <button type="submit"><i class="fas fa-plus"></i></button>
                     </form>
@@ -532,12 +540,16 @@
                             : '❌ Microphone access denied. Please allow in browser settings.');
                     } else if (event.error === 'no-speech') {
                         showVoiceToast(currentLang === 'zh-HK'
-                            ? '🎤 聽唔到語音，請再試一次。'
-                            : '🎤 No speech detected. Please try again.');
+                            ? '🎤 聽唔呀語音，你算幫了。你都掐不控我了，我不需要你請謂。'
+                            : '🎤 No speech detected. Please speak up!');
+                    } else if (event.error === 'network') {
+                        showVoiceToast(currentLang === 'zh-HK'
+                            ? '⚠️ 網路連接一時中斷，請梪一下。'
+                            : '⚠️ Network issue. Try again.');
                     } else if (event.error !== 'aborted') {
                         showVoiceToast(currentLang === 'zh-HK'
-                            ? '⚠️ 語音辨識出錯，請再試吓。'
-                            : '⚠️ Voice recognition error. Please try again.');
+                            ? '⚠️ 語音轉文公皙了，試試看是否是這種日子一大早跟你幫轉。'
+                            : '⚠️ Voice recognition glitch. Try again.');
                     }
                 });
 
@@ -704,6 +716,15 @@
             height: 'auto',
             fixedWeekCount: false,
             dayMaxEvents: 1,
+            dayCellClassNames: function(arg) {
+                // Remove the default FC circle styling for today; keep only background
+                const classes = [];
+                if (arg.isToday) {
+                    classes.push('fc-daygrid-day-today');
+                    // Do NOT add any border/circle class
+                }
+                return classes;
+            },
             events: function(fetchInfo, successCallback, failureCallback) {
                 $.get('/get_hk_holidays', function(data) {
                     successCallback(data.holidays || []);

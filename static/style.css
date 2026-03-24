@@ -233,6 +233,39 @@ body {
 
 @media (max-width: 480px) {
     .guide-panel { width: calc(100vw - 32px); right: 16px; bottom: 80px; }
+    
+    /* Mobile: Move guide FAB to sidebar or collapse it inside nav */
+    #guideFab {
+        position: fixed;
+        bottom: auto;
+        right: auto;
+        left: 16px;
+        top: 16px;
+        width: 44px;
+        height: 44px;
+        z-index: 1000;
+        background: var(--primary);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        box-shadow: 0 2px 8px rgba(91, 154, 125, 0.3);
+    }
+    #guideFab:hover { transform: scale(1.1); box-shadow: 0 4px 12px rgba(91, 154, 125, 0.4); }
+    
+    /* On mobile, position guide panel below the FAB */
+    .guide-panel { 
+        width: calc(100vw - 32px); 
+        right: 16px; 
+        left: 16px;
+        bottom: auto;
+        top: 70px;
+        max-height: calc(80vh - 120px);
+    }
 }
 
 /* ================================================================
@@ -1457,4 +1490,16 @@ body.font-scale-large .type_msg {
     .hk-card-body { padding: 16px; }
     .hk-card-title { font-size: 1.15rem; }
     .hk-guide-modal-content { max-height: 90vh; }
+}
+
+/* ===== FullCalendar Today Styling (remove border, keep background only) ===== */
+.fc .fc-daygrid-day.fc-daygrid-day-today {
+    background-color: rgba(91, 154, 125, 0.15) !important;  /* Light green background */
+}
+.fc .fc-daygrid-day.fc-daygrid-day-today .fc-daygrid-day-frame {
+    border: none !important;  /* Remove any circle/border styling */
+}
+.fc .fc-daygrid-day-today .fc-daygrid-day-number {
+    text-decoration: none !important;
+    font-weight: normal !important;
 }
