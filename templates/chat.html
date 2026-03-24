@@ -495,23 +495,13 @@
          * 3. Else → show a friendly "not supported" message.
          */
         async function startRecording() {
-            // Request mic permission first
-            try {
-                await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch (e) {
-                showVoiceToast(currentLang === 'zh-HK'
-                    ? '❌ 咪高峰權限被拒絕，請檢查瀏覽器設定。'
-                    : '❌ Microphone access denied. Please check browser settings.');
-                return;
-            }
-
             _isRecording = true;
             $('#micBtn')
                 .addClass('recording-active pulse-recording')
                 .find('i').removeClass('fa-microphone').addClass('fa-stop');
             $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
 
-            // --- Strategy 1: Web Speech API (supports EN + zh-HK) ---
+            // --- Web Speech API (preferred: supports EN + zh-HK, auto handles permissions) ---
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 _recognition = new SpeechRecognition();
@@ -534,22 +524,31 @@
                 _recognition.addEventListener('error', function (event) {
                     console.warn('[STT] error:', event.error);
                     stopRecording();
-                    if (event.error === 'not-allowed') {
-                        showVoiceToast(currentLang === 'zh-HK'
-                            ? '❌ 咪高峰權限被拒絕，請喺瀏覽器設定允許。'
-                            : '❌ Microphone access denied. Please allow in browser settings.');
-                    } else if (event.error === 'no-speech') {
-                        showVoiceToast(currentLang === 'zh-HK'
-                            ? '🎤 聽唔呀語音，你算幫了。你都掐不控我了，我不需要你請謂。'
-                            : '🎤 No speech detected. Please speak up!');
-                    } else if (event.error === 'network') {
-                        showVoiceToast(currentLang === 'zh-HK'
-                            ? '⚠️ 網路連接一時中斷，請梪一下。'
-                            : '⚠️ Network issue. Try again.');
-                    } else if (event.error !== 'aborted') {
-                        showVoiceToast(currentLang === 'zh-HK'
-                            ? '⚠️ 語音轉文公皙了，試試看是否是這種日子一大早跟你幫轉。'
-                            : '⚠️ Voice recognition glitch. Try again.');
+                    
+                    // Friendly error messages for elderly users
+                    switch(event.error) {
+                        case 'not-allowed':
+                            showVoiceToast(currentLang === 'zh-HK'
+                                ? '❌ 咪高峰權限被拒絕。請檢查瀏覽器設定，允許存取麥克風。'
+                                : '❌ Microphone access denied. Please allow in browser settings.');
+                            break;
+                        case 'no-speech':
+                            showVoiceToast(currentLang === 'zh-HK'
+                                ? '🎤 聽唔到語音。請講得大聲啲！'
+                                : '🎤 No speech detected. Please speak louder!');
+                            break;
+                        case 'network':
+                            showVoiceToast(currentLang === 'zh-HK'
+                                ? '⚠️ 網路連接有問題，請檢查網絡。'
+                                : '⚠️ Network connection issue. Please check your network.');
+                            break;
+                        case 'aborted':
+                            // User cancelled — silent
+                            break;
+                        default:
+                            showVoiceToast(currentLang === 'zh-HK'
+                                ? '⚠️ 語音轉文字失敗，請再試一次。'
+                                : '⚠️ Voice recognition failed. Please try again.');
                     }
                 });
 
@@ -562,15 +561,24 @@
                     }
                 });
 
-                _recognition.start();
+                try {
+                    _recognition.start();
+                    console.log('[STT] started Web Speech API');
+                } catch (e) {
+                    console.error('[STT] failed to start:', e);
+                    stopRecording();
+                    showVoiceToast(currentLang === 'zh-HK'
+                        ? '⚠️ 語音功能啟動失敗。'
+                        : '⚠️ Failed to start voice recognition.');
+                }
                 return;  // done — Web Speech API handles everything
             }
 
-            // --- Strategy 2: Vosk fallback (English only, server-side) ---
+            // --- Vosk fallback (English only, server-side) ---
             if (currentLang !== 'zh-HK') {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
+                        audio: { echoCancellation: true, noiseSuppression: true }
                     });
                     _audioChunks = [];
                     _mediaRecorder = new MediaRecorder(stream, {
@@ -598,24 +606,36 @@
                             $('#text').val(text);
                             setTimeout(() => $('#messageArea').submit(), 150);
                         } else {
-                            showVoiceToast('🎤 No speech detected. Please try again.');
+                            showVoiceToast(currentLang === 'zh-HK'
+                                ? '🎤 聽唔到語音。請再試一次。'
+                                : '🎤 No speech detected. Please try again.');
                             $('#text').attr('placeholder', PLACEHOLDER_IDLE);
                         }
                     });
 
                     _mediaRecorder.start();
+                    console.log('[STT] started Vosk fallback');
                 } catch (e) {
+                    console.error('[STT] Vosk failed:', e.message);
                     stopRecording();
-                    showVoiceToast('⚠️ Voice recording failed. Please try again.');
+                    if (e.name === 'NotAllowedError') {
+                        showVoiceToast(currentLang === 'zh-HK'
+                            ? '❌ 咪高峰權限被拒絕。'
+                            : '❌ Microphone permission denied.');
+                    } else {
+                        showVoiceToast(currentLang === 'zh-HK'
+                            ? '⚠️ 語音錄製失敗。'
+                            : '⚠️ Voice recording failed.');
+                    }
                 }
                 return;
             }
 
-            // --- Strategy 3: Nothing available for zh-HK without Web Speech API ---
+            // --- No fallback for zh-HK without Web Speech API ---
             stopRecording();
             showVoiceToast(currentLang === 'zh-HK'
-                ? '你嘅瀏覽器唔支援語音辨識，請用 Chrome 或 Edge。'
-                : 'Speech recognition not supported. Please use Chrome or Edge.');
+                ? '你嘅瀏覽器唔支援語音辨識，請用 Chrome、Edge 或 Safari。'
+                : 'Speech recognition not supported. Please use Chrome, Edge, or Safari.');
         }
 
         // Mic button: toggle recording on/off
@@ -716,12 +736,16 @@
             height: 'auto',
             fixedWeekCount: false,
             dayMaxEvents: 1,
+            dayCellContent: function(arg) {
+                // Custom date display: unified format (no "日" character for Chinese)
+                const dayNum = arg.date.getDate();
+                return { html: dayNum.toString() };
+            },
             dayCellClassNames: function(arg) {
-                // Remove the default FC circle styling for today; keep only background
+                // Include 'fc-daygrid-day-today' for today styling, no border circle
                 const classes = [];
                 if (arg.isToday) {
                     classes.push('fc-daygrid-day-today');
-                    // Do NOT add any border/circle class
                 }
                 return classes;
             },
