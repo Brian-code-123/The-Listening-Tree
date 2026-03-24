@@ -126,7 +126,7 @@ async def lifespan(app: FastAPI):
     try:
         await task
     except asyncio.CancelledError:
-        pass
+        raise
 
 # ---------------------------------------------------------------------------
 # Application initialisation
@@ -145,7 +145,6 @@ if _SECRET_KEY and len(_SECRET_KEY) >= 16:
 else:
     print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
 app.add_middleware(SessionMiddleware, secret_key=_SECRET_KEY)
-import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -525,43 +524,7 @@ def auto_expire_old_reminders() -> None:
         print(f"[EXPIRE] 📅 Marked {expired} old reminders as inactive")
 
 
-def check_reminders() -> None:
-    """Background loop (daemon thread): check reminders every 60 s.
 
-    Also triggers periodic housekeeping:
-      - auto_expire_old_reminders   every hour (minute == 0)
-      - cleanup_old_chat_history    every 10 minutes
-    """
-    while True:
-        conn = sqlite3.connect(_DB_PATH)
-        c = conn.cursor()
-        today = datetime.now().strftime("%Y-%m-%d")
-        current_time = datetime.now().strftime("%H:%M")
-        c.execute(
-            "SELECT u.email, r.label, r.reminder_time FROM reminders r "
-            "JOIN users u ON r.user_id = u.id "
-            "WHERE r.is_active = 1 AND DATE(r.created_at) = ?",
-            (today,),
-        )
-        for email, label, rtime in c.fetchall():
-            if rtime == current_time:
-                print(f"[REMINDER] ⏰ {email}: {label} at {rtime}")
-        conn.close()
-
-        # Periodic housekeeping
-        if datetime.now().minute == 0:
-            auto_expire_old_reminders()
-        if datetime.now().minute % 10 == 0:
-            cleanup_old_chat_history()
-
-        threading.Event().wait(60)
-
-
-# Start background reminder thread (Obsolete: Replaced by Lifespan task)
-# if not ON_VERCEL:
-#     threading.Thread(target=check_reminders, daemon=True).start()
-# else:
-#     print("[INFO] Vercel mode — background reminder thread disabled")
 
 # ---------------------------------------------------------------------------
 # Session helpers
