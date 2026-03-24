@@ -281,10 +281,8 @@ WARM_FALLBACK_EN = [
     "I hear you, and I think that's wonderful. Tell me more! 😊",
 ]
 
-async def call_ai(user_input: str, user_id: int, lang: str = 'en', image_data: Optional[str] = None):
-    """Call Zhipu AI (智谱AI) for warm elderly conversation.
-    Supports image-based "Photo Memories" with GLM-4v (Vision).
-    """
+async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
+    """Call Zhipu AI (智谱AI) for warm elderly conversation."""
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
@@ -297,32 +295,14 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', image_data: O
     history = user_api_histories[history_key]
 
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-10:]) # Keep it lean for vision
+    messages.extend(history[-10:])
 
-    content = []
-    if image_data:
-        # User uploaded a photobook memory
-        # Zhipu AI GLM-4v expects image_url in specific format
-        content.append({
-            "type": "text", 
-            "text": f"這是一張老人家分享的照片，請根據圖片內容，用溫暖、關懷的語氣與他聊天。用戶說：{user_input}" if lang == 'zh-HK' else f"This is a photo shared by an elderly user. Please talk to them warmly about the image content. User said: {user_input}"
-        })
-        content.append({
-            "type": "image_url", 
-            "image_url": {"url": image_data}
-        })
-    else:
-        content = user_input
-
-    messages.append({"role": "user", "content": content})
-
-    # Use glm-4v if image provided, else standard chat model
-    model_name = "glm-4v-flash" if image_data else ZHIPU_MODEL
+    messages.append({"role": "user", "content": user_input})
 
     payload = {
-        "model": model_name,
+        "model": ZHIPU_MODEL,
         "messages": messages,
-        "temperature": 0.1, # Lower temperature for faster, more focused vision response
+        "temperature": 0.7,
         "top_p": 0.95,
         "max_tokens": 512,
     }
@@ -344,7 +324,6 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', image_data: O
         reply = message.get("content", "")
 
         if reply.strip():
-            # Only store text content in history (save tokens/memory)
             history.append({"role": "user", "content": user_input})
             history.append({"role": "assistant", "content": reply})
             if len(history) > 20:
@@ -355,9 +334,6 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', image_data: O
 
     except Exception as e:
         _builtins._original_print(f"[AI] Error calling Zhipu ({lang}): {e}")
-        # Return a clearer error if it's an image memory request instead of a generic text fallback
-        if image_data:
-            return "啊，這張相片有啲睇唔清楚，你可以再發多一次俾我睇下嗎？" if lang == 'zh-HK' else "Oh, I couldn't quite see that photo. Could you try sending it again?"
         return random.choice(fallback)
 
 # ---------------------------------------------------------------------------
@@ -703,10 +679,8 @@ async def accessibility_mode(request: Request):
 # Tencent Hunyuan LLM for general conversation.
 # ---------------------------------------------------------------------------
 @app.post("/get_response")
-async def get_response(request: Request, msg: str = Form(...), file: Optional[UploadFile] = File(None)):
-    """Process user message and return AI/command response.
-    Photo Memories Integration: If file is provided, use vision model.
-    """
+async def get_response(request: Request, msg: str = Form(...)):
+    """Process user message and return AI/command response."""
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"response": "Please log in."}, status_code=401)
@@ -715,13 +689,6 @@ async def get_response(request: Request, msg: str = Form(...), file: Optional[Up
     user_input_original = msg.strip()
     user_input_lower = user_input_original.lower()
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # Handle Photo Memory upload
-    # Zhipu GLM-4V expects pure base64 string. The 'data:image/...;base64,' prefix violates format causing 1210 error.
-    image_base64 = None
-    if file and file.content_type.startswith("image/"):
-        contents = await file.read()
-        image_base64 = base64.b64encode(contents).decode("utf-8")
 
     conn = get_db()
     c = conn.cursor()
@@ -883,7 +850,7 @@ async def get_response(request: Request, msg: str = Form(...), file: Optional[Up
 
         # ---- Normal AI Chat ----
         else:
-            response = await call_ai(user_input_original, uid, lang, image_data=image_base64)
+            response = await call_ai(user_input_original, uid, lang)
 
     # Store bot response
     c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
