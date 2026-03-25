@@ -466,7 +466,12 @@ def get_db():
     elif DB_BACKEND == "postgres" and not _psycopg2_available:
         # Fallback to SQLite if psycopg2 unavailable (shouldn't reach here on Vercel)
         _builtins._original_print("[DB] ⚠ psycopg2 unavailable; falling back to SQLite")
-        conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        # Use a proper SQLite path, not the PostgreSQL connection string
+        if ON_VERCEL:
+            sqlite_path = "/tmp/reminders.db"
+        else:
+            sqlite_path = os.path.join(os.path.dirname(__file__), "reminders.db")
+        conn = sqlite3.connect(sqlite_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
     # SQLite connection for local development
