@@ -50,8 +50,15 @@ try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
     from psycopg2 import IntegrityError as PgIntegrityError
+    _psycopg2_available = True
 except ImportError:
-    raise RuntimeError("psycopg2 is required. Install with: pip install psycopg2-binary")
+    _psycopg2_available = False
+    # Gracefully handle psycopg2 import failure — will use SQLite as fallback
+    psycopg2 = None
+    RealDictCursor = None
+    # Create a base class that catches both PostgreSQL and SQLite integrity errors
+    class PgIntegrityError(Exception):
+        pass
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -454,8 +461,14 @@ questions = [
 # ---------------------------------------------------------------------------
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
-    if DB_BACKEND == "postgres":
+    if DB_BACKEND == "postgres" and _psycopg2_available:
         return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
+    elif DB_BACKEND == "postgres" and not _psycopg2_available:
+        # Fallback to SQLite if psycopg2 unavailable (shouldn't reach here on Vercel)
+        _builtins._original_print("[DB] ⚠ psycopg2 unavailable; falling back to SQLite")
+        conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
     # SQLite connection for local development
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -711,9 +724,13 @@ async def register_post(request: Request, email: str = Form(...), password: str 
         conn.commit()
         conn.close()
         return RedirectResponse(url="/login", status_code=303)
-    except PgIntegrityError:
+    except (PgIntegrityError, sqlite3.IntegrityError) as e:
         conn.close()
         return templates.TemplateResponse("register.html", tpl_context(request, error="Email already exists" if lang == 'en' else "電郵已存在"))
+    except Exception as e:
+        conn.close()
+        _builtins._original_print(f"[ERROR] Registration failed: {e}")
+        return templates.TemplateResponse("register.html", tpl_context(request, error="Registration failed" if lang == 'en' else "註冊失敗"))
 
 @app.get("/forgot_password")
 async def forgot_password(request: Request):
