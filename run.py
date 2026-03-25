@@ -650,6 +650,8 @@ async def index(request: Request):
 
 @app.get("/set_language/{lang}")
 async def set_language(request: Request, lang: str):
+    """Set user language preference and persist to database.
+    Always return to /chat (authenticated view) to avoid redirect loops."""
     if lang in ('en', 'zh-HK'):
         request.session['language'] = lang
         uid = get_user(request)
@@ -661,8 +663,8 @@ async def set_language(request: Request, lang: str):
                       (uid, 'language', lang, ts))
             conn.commit()
             conn.close()
-    referer = request.headers.get('referer', '/')
-    return RedirectResponse(url=referer, status_code=303)
+    # Always return to /chat (authenticated users only); avoids redirect loops and lost sessions
+    return RedirectResponse(url="/", status_code=303)
 
 @app.get("/accessibility", response_class=HTMLResponse)
 async def accessibility_mode(request: Request):
