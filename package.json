@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev:backend": "python run.py",
-    "dev": "npm run dev",
+    "dev": "npm run dev:5001",
     "cap:init": "npx cap init 'The Listening Tree' com.listeningtree.app --web-dir www",
     "cap:add:ios": "npx cap add ios",
     "cap:add:android": "npx cap add android",
