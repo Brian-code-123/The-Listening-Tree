@@ -228,12 +228,25 @@ def db_execute(cursor, query: str, params: tuple = ()) -> None:
 
 def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, ts: str) -> None:
     """Insert or update user preference using PostgreSQL UPSERT syntax."""
+    if DB_BACKEND == "postgres":
+        cursor.execute(
+            """
+            INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, pref_key)
+            DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
+            """,
+            (user_id, key, value, ts),
+        )
+        return
+
+    # SQLite fallback (dev / serverless emergency mode)
     cursor.execute(
         """
         INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (user_id, pref_key)
-        DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, pref_key)
+        DO UPDATE SET pref_value = excluded.pref_value, updated_at = excluded.updated_at
         """,
         (user_id, key, value, ts),
     )
