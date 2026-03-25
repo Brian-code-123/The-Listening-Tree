@@ -65,3 +65,13 @@ www/capacitor-bridge.js
 .pytest_cache/
 .coverage
 htmlcov/
+tests/
+# Ignore markdown files except README.md (keep README in repo)
+*.md
+!README.md
+
+# Development patch scripts and temporary outputs (do not commit)
+patch_run.py
+patch2.py
+out.txt
+patch*.py

@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev:backend": "python run.py",
-    "dev": "npm run dev:backend",
+    "dev": "npm run dev:5001",
     "cap:init": "npx cap init 'The Listening Tree' com.listeningtree.app --web-dir www",
     "cap:add:ios": "npx cap add ios",
     "cap:add:android": "npx cap add android",
@@ -13,7 +13,9 @@
     "cap:open:ios": "npx cap open ios",
     "cap:open:android": "npx cap open android",
     "cap:copy": "npx cap copy",
-    "build:mobile": "node scripts/prepare-www.js && npx cap sync"
+    "build": "npm run cap:sync",
+    "build-and-sync": "npm run cap:sync && npx cap copy ios && npx cap copy android",
+    "dev:5001": "PORT=5001 python run.py"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
@@ -27,6 +29,7 @@
     "@capacitor/push-notifications": "^6.0.5",
     "@capacitor/splash-screen": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0",
+    "@supabase/supabase-js": "^2.100.0",
     "@vercel/analytics": "^2.0.1",
     "vercel": "^50.33.0"
   },

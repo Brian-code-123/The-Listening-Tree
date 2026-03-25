@@ -26,22 +26,30 @@ import io
 import json
 import wave
 import base64
+import asyncio
 import secrets
 import random
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Third-party imports
 # ---------------------------------------------------------------------------
-from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException
+from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import httpx
-import sqlite3
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from psycopg2 import IntegrityError as PgIntegrityError
+except ImportError:
+    raise RuntimeError("psycopg2 is required. Install with: pip install psycopg2-binary")
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -69,12 +77,73 @@ if _MINIMAL_STARTUP:
 from translations import get_text, get_all_translations, TRANSLATIONS
 
 # ---------------------------------------------------------------------------
+# Background Periodic Task Manager (Async Replacement for Daemon Thread)
+# ---------------------------------------------------------------------------
+async def run_periodic_tasks():
+    """Background loop: runs every 60s. Handles reminders and housekeeping.
+
+    Replaces the previous threading.Thread with an async loop integrated
+    into the FastAPI lifecycle.
+    """
+    while True:
+        try:
+            now = datetime.now()
+            today = now.strftime("%Y-%m-%d")
+            current_time = now.strftime("%H:%M")
+
+            # 1. Check Reminders
+            conn = get_db()
+            c = conn.cursor()
+            query = (
+                "SELECT u.email, r.label, r.reminder_time FROM reminders r "
+                "JOIN users u ON r.user_id = u.id "
+                "WHERE r.is_active = 1 AND DATE(r.created_at) = ?"
+            )
+            db_execute(c, query, (today,))
+            for row in c.fetchall():
+                email = row["email"]
+                label = row["label"]
+                rtime = row["reminder_time"]
+                if rtime == current_time:
+                    # In a real app, this would trigger a push notification or WebSocket msg
+                    _builtins._original_print(f"[REMINDER] ⏰  {email}: {label} at {rtime}")
+            conn.close()
+
+            # 2. Daily Housekeeping (Auto-expire old reminders at 00:00)
+            if now.hour == 0 and now.minute == 0:
+                auto_expire_old_reminders()
+
+            # 3. Clean Chat History (Every 10 minutes)
+            if now.minute % 10 == 0:
+                cleanup_old_chat_history()
+
+        except Exception as e:
+            _builtins._original_print(f"[ERROR] periodic_tasks: {e}")
+
+        await asyncio.sleep(60)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start background task
+    # Start the periodic background task. `asyncio.create_all_tasks()` does
+    # not exist — use `create_task` to schedule the coroutine.
+    task = asyncio.create_task(run_periodic_tasks())
+    yield
+    # Shutdown: Clean up task
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        raise
+
+# ---------------------------------------------------------------------------
 # Application initialisation
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="The Listening Tree",
     description="Bilingual AI companion chatbot for elderly wellness",
     version="2.0.0",
+    lifespan=lifespan
 )
 # Session secret: prefer explicit environment variable for production stability.
 # If not provided, fall back to a generated ephemeral key (NOT recommended).
@@ -84,7 +153,6 @@ if _SECRET_KEY and len(_SECRET_KEY) >= 16:
 else:
     print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
 app.add_middleware(SessionMiddleware, secret_key=_SECRET_KEY)
-import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -104,6 +172,48 @@ VOSK_MODEL_PATH = os.path.join(
 
 # Detect Vercel environment (serverless — no persistent filesystem)
 ON_VERCEL = bool(os.environ.get("VERCEL"))
+
+# Production environment detection
+IN_PRODUCTION = ON_VERCEL or os.environ.get("ENVIRONMENT") == "production"
+
+
+# ─────────────────────────────────────────────────────────────
+# Database: PostgreSQL (production) / Optional local fallback (dev-only)
+# ─────────────────────────────────────────────────────────────
+# Vercel and production deployments REQUIRE DATABASE_URL to be a Postgres connection.
+# On development machines without Postgres, the app will fail at startup (intended).
+# To migrate from SQLite: use scripts/migrate_sqlite_to_postgres.py
+_DATABASE_URL = os.environ.get("DATABASE_URL")
+if not _DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is required and must point to a PostgreSQL database. "
+        "Example: postgresql://user:password@hostname:5432/dbname"
+    )
+DB_BACKEND = "postgres"
+_DB_PATH = _DATABASE_URL
+
+
+def _db_param_placeholder(query: str) -> str:
+    """Convert SQLite ? placeholders to PostgreSQL %s."""
+    return query.replace("?", "%s")
+
+
+def db_execute(cursor, query: str, params: tuple = ()) -> None:
+    """Execute a query with automatic placeholder conversion."""
+    cursor.execute(_db_param_placeholder(query), params)
+
+
+def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, ts: str) -> None:
+    """Insert or update user preference using PostgreSQL UPSERT syntax."""
+    cursor.execute(
+        """
+        INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (user_id, pref_key)
+        DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
+        """,
+        (user_id, key, value, ts),
+    )
 
 
 def get_vosk_model():
@@ -235,7 +345,8 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
     history = user_api_histories[history_key]
 
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-20:])
+    messages.extend(history[-10:])
+
     messages.append({"role": "user", "content": user_input})
 
     payload = {
@@ -247,7 +358,7 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 f"{ZHIPU_BASE_URL}/chat/completions",
                 json=payload,
@@ -265,14 +376,14 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
         if reply.strip():
             history.append({"role": "user", "content": user_input})
             history.append({"role": "assistant", "content": reply})
-            if len(history) > 30:
-                user_api_histories[history_key] = history[-20:]
+            if len(history) > 20:
+                user_api_histories[history_key] = history[-10:]
             return reply
         else:
             raise ValueError("Empty response from API")
 
     except Exception as e:
-        print(f"[AI] Error calling Zhipu ({lang}): {e}")
+        _builtins._original_print(f"[AI] Error calling Zhipu ({lang}): {e}")
         return random.choice(fallback)
 
 # ---------------------------------------------------------------------------
@@ -303,90 +414,83 @@ questions = [
 ]
 
 # ---------------------------------------------------------------------------
-# Database Setup — SQLite3
-#
-# On Vercel the project filesystem is read-only so we write to /tmp.
-# For production persistence swap to an external DB (Turso / Neon / Supabase).
+# Database Setup — SQLite (local) / PostgreSQL (Supabase)
 # ---------------------------------------------------------------------------
-_DB_PATH = os.environ.get(
-    "DATABASE_URL",
-    "/tmp/reminders.db" if ON_VERCEL else "reminders.db",
-)
+def get_db():
+    """Open a PostgreSQL connection with dict-like row access."""
+    return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
 
 
-def get_db() -> sqlite3.Connection:
-    """Open a new SQLite connection with Row factory enabled."""
-    conn = sqlite3.connect(_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    conn = sqlite3.connect(_DB_PATH)
+def init_db() -> None:
+    """Initialize PostgreSQL schema with all required tables and indexes."""
+    conn = get_db()
     c = conn.cursor()
 
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        username TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_login TIMESTAMP,
-        is_active BOOLEAN DEFAULT 1
-    )""")
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id BIGSERIAL PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            username TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP,
+            is_active BOOLEAN DEFAULT TRUE
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reminders (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            reminder_time TEXT NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE,
+            repeat_type TEXT DEFAULT 'once',
+            priority TEXT DEFAULT 'normal',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            lang TEXT DEFAULT 'en',
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_bot BOOLEAN NOT NULL,
+            message TEXT NOT NULL,
+            is_deleted BOOLEAN DEFAULT FALSE,
+            token_count INTEGER
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS preferences (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            pref_key TEXT NOT NULL,
+            pref_value TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, pref_key)
+        )
+        """
+    )
+    c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)")
 
-    c.execute("""CREATE TABLE IF NOT EXISTS reminders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        label TEXT NOT NULL,
-        reminder_time TEXT NOT NULL,
-        is_active BOOLEAN DEFAULT 1,
-        repeat_type TEXT DEFAULT 'once',
-        priority TEXT DEFAULT 'normal',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS chat_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        lang TEXT DEFAULT 'en',
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        is_bot BOOLEAN NOT NULL,
-        message TEXT NOT NULL,
-        is_deleted BOOLEAN DEFAULT 0,
-        token_count INTEGER,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS preferences (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        pref_key TEXT NOT NULL,
-        pref_value TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        UNIQUE(user_id, pref_key)
-    )""")
-
-    c.execute('CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)')
-
-    # Migration: add lang column if missing (must run before lang index)
-    try:
-        c.execute("SELECT lang FROM chat_history LIMIT 1")
-    except sqlite3.OperationalError:
-        c.execute("ALTER TABLE chat_history ADD COLUMN lang TEXT DEFAULT 'en'")
-
-    c.execute('CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)')
     conn.commit()
     conn.close()
-    print("[DB] ✅ Database initialized")
+    print("[DB] ✅ PostgreSQL database initialized")
 
 
 # Run once at import time to ensure tables exist
@@ -403,11 +507,12 @@ def cleanup_old_chat_history() -> None:
     Sets ``is_deleted = 1`` instead of physically removing rows so that
     analytics or audit queries can still access the data if needed.
     """
-    conn = sqlite3.connect(_DB_PATH)
+    conn = get_db()
     c = conn.cursor()
     cutoff_time = datetime.now().timestamp() - (CHAT_HISTORY_RETENTION_MINUTES * 60)
     cutoff_datetime = datetime.fromtimestamp(cutoff_time).strftime("%Y-%m-%d %H:%M:%S")
-    c.execute(
+    db_execute(
+        c,
         "UPDATE chat_history SET is_deleted = 1 WHERE timestamp < ? AND is_deleted = 0",
         (cutoff_datetime,),
     )
@@ -423,11 +528,12 @@ def auto_expire_old_reminders() -> None:
 
     Runs once per hour (top of the hour) from the background thread.
     """
-    conn = sqlite3.connect(_DB_PATH)
+    conn = get_db()
     c = conn.cursor()
     today = datetime.now().strftime("%Y-%m-%d")
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute(
+    db_execute(
+        c,
         "UPDATE reminders SET is_active = 0, updated_at = ? "
         "WHERE DATE(created_at) < ? AND is_active = 1",
         (ts, today),
@@ -439,44 +545,7 @@ def auto_expire_old_reminders() -> None:
         print(f"[EXPIRE] 📅 Marked {expired} old reminders as inactive")
 
 
-def check_reminders() -> None:
-    """Background loop (daemon thread): check reminders every 60 s.
 
-    Also triggers periodic housekeeping:
-      - auto_expire_old_reminders   every hour (minute == 0)
-      - cleanup_old_chat_history    every 10 minutes
-    """
-    while True:
-        conn = sqlite3.connect(_DB_PATH)
-        c = conn.cursor()
-        today = datetime.now().strftime("%Y-%m-%d")
-        current_time = datetime.now().strftime("%H:%M")
-        c.execute(
-            "SELECT u.email, r.label, r.reminder_time FROM reminders r "
-            "JOIN users u ON r.user_id = u.id "
-            "WHERE r.is_active = 1 AND DATE(r.created_at) = ?",
-            (today,),
-        )
-        for email, label, rtime in c.fetchall():
-            if rtime == current_time:
-                print(f"[REMINDER] ⏰ {email}: {label} at {rtime}")
-        conn.close()
-
-        # Periodic housekeeping
-        if datetime.now().minute == 0:
-            auto_expire_old_reminders()
-        if datetime.now().minute % 10 == 0:
-            cleanup_old_chat_history()
-
-        threading.Event().wait(60)
-
-
-# Start background reminder thread (skip on Vercel — serverless has no
-# persistent threads)
-if not ON_VERCEL:
-    threading.Thread(target=check_reminders, daemon=True).start()
-else:
-    print("[INFO] Vercel mode — background reminder thread disabled")
 
 # ---------------------------------------------------------------------------
 # Session helpers
@@ -547,16 +616,16 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
     lang = get_lang(request)
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT id, email FROM users WHERE email = ? AND password = ?", (email, password))
+    db_execute(c, "SELECT id, email FROM users WHERE email = ? AND password = ?", (email, password))
     user = c.fetchone()
     if user:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        c.execute("UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
+        db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
         conn.commit()
         request.session['user_email'] = user["email"]
         request.session['user_id'] = user["id"]
         # Load language preference
-        c.execute("SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
+        db_execute(c, "SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
         pref = c.fetchone()
         if pref:
             request.session['language'] = pref["pref_value"]
@@ -597,11 +666,11 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     c = conn.cursor()
     try:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        c.execute("INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, password, ts))
+        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, password, ts))
         conn.commit()
         conn.close()
         return RedirectResponse(url="/login", status_code=303)
-    except sqlite3.IntegrityError:
+    except PgIntegrityError:
         conn.close()
         return templates.TemplateResponse("register.html", tpl_context(request, error="Email already exists" if lang == 'en' else "電郵已存在"))
 
@@ -626,6 +695,8 @@ async def index(request: Request):
 
 @app.get("/set_language/{lang}")
 async def set_language(request: Request, lang: str):
+    """Set user language preference and persist to database.
+    Always return to /chat (authenticated view) to avoid redirect loops."""
     if lang in ('en', 'zh-HK'):
         request.session['language'] = lang
         uid = get_user(request)
@@ -633,12 +704,11 @@ async def set_language(request: Request, lang: str):
             conn = get_db()
             c = conn.cursor()
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            c.execute("INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
-                      (uid, 'language', lang, ts))
+            db_insert_or_replace_preference(c, uid, 'language', lang, ts)
             conn.commit()
             conn.close()
-    referer = request.headers.get('referer', '/')
-    return RedirectResponse(url=referer, status_code=303)
+    # Always return to /chat (authenticated users only); avoids redirect loops and lost sessions
+    return RedirectResponse(url="/", status_code=303)
 
 @app.get("/accessibility", response_class=HTMLResponse)
 async def accessibility_mode(request: Request):
@@ -656,29 +726,7 @@ async def accessibility_mode(request: Request):
 # ---------------------------------------------------------------------------
 @app.post("/get_response")
 async def get_response(request: Request, msg: str = Form(...)):
-    """Process user message and return AI/command response.
-
-    Message handling priority (in order):
-      1. Guide trigger keywords ('teach', 'how to use', 'help') → return help text
-      2. Reminder commands ('set reminder', 'delete reminder') → parse, validate, store in DB
-      3. Preference commands ('set preference') → update preferences table
-      4. Game commands ('play game', 'exit game', quiz answers) → manage game state in memory
-      5. Default → send to Tencent Hunyuan LLM for warm conversation response
-
-    Chat history: Every user message + bot response is logged to chat_history table with:
-      - user_id: Current session user ID
-      - lang: Current UI language (en or zh-HK)
-      - timestamp: ISO timestamp
-      - is_bot: 0 for user, 1 for bot
-      - message: Text content
-
-    Args:
-        request: HTTP request (must have user_id in session)
-        msg: User input text (may be voice-transcribed)
-
-    Returns:
-        JSONResponse: {"response": str} with bot reply or error
-    """
+    """Process user message and return AI/command response."""
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"response": "Please log in."}, status_code=401)
@@ -691,9 +739,12 @@ async def get_response(request: Request, msg: str = Form(...)):
     conn = get_db()
     c = conn.cursor()
 
-    # Store user message with language tag
-    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
-              (uid, lang, timestamp, user_input_original))
+    # Store user message
+    db_execute(
+        c,
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
+        (uid, lang, timestamp, user_input_original),
+    )
     conn.commit()
 
     response = ""
@@ -734,7 +785,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[1:-1])
             else:
                 response = "格式：設置提醒 [活動] [HH:MM]"
-                c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
         else:
@@ -744,20 +795,26 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[2:-1])
             else:
                 response = "Usage: set reminder [activity] [HH:MM]"
-                c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
 
         try:
+            # Validate time format (HH:MM) and parse hours/minutes
             h, m = map(int, time_str.split(':'))
+            # Ensure valid 24-hour format (0-23 for hours, 0-59 for minutes)
             if 0 <= h <= 23 and 0 <= m <= 59:
-                c.execute("INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
-                          (uid, label, time_str, timestamp))
+                db_execute(
+                    c,
+                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
+                    (uid, label, time_str, timestamp),
+                )
                 conn.commit()
                 response = f"提醒已設置：{label}，時間 {time_str}" if lang == 'zh-HK' else f"Reminder set: {label} at {time_str}"
             else:
                 response = "時間無效。請用24小時格式 HH:MM" if lang == 'zh-HK' else "Invalid time. Use 24-hour format HH:MM"
-        except:
+        except (ValueError, IndexError):
+            # Handle malformed time strings (e.g., invalid separators, non-numeric values)
             response = "時間格式錯誤。請用 HH:MM" if lang == 'zh-HK' else "Invalid time format. Use HH:MM"
 
     elif user_input_lower.startswith("delete reminder") or user_input_lower.startswith("刪除提醒"):
@@ -768,7 +825,7 @@ async def get_response(request: Request, msg: str = Form(...)):
             parts = user_input_lower.split(maxsplit=2)
             label = parts[2] if len(parts) == 3 else None
         if label:
-            c.execute("DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
+            db_execute(c, "DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
             if c.rowcount > 0:
                 response = f"已刪除提醒：{label}" if lang == 'zh-HK' else f"Deleted reminder: {label}"
             else:
@@ -782,8 +839,7 @@ async def get_response(request: Request, msg: str = Form(...)):
         parts = user_input_lower.split(maxsplit=4)
         if len(parts) >= 4:
             key, value = parts[2], parts[3]
-            c.execute("INSERT OR REPLACE INTO preferences (user_id, pref_key, pref_value, updated_at) VALUES (?, ?, ?, ?)",
-                      (uid, key, value, timestamp))
+            db_insert_or_replace_preference(c, uid, key, value, timestamp)
             conn.commit()
             response = f"Preference updated: {key} = {value}"
         else:
@@ -848,8 +904,11 @@ async def get_response(request: Request, msg: str = Form(...)):
             response = await call_ai(user_input_original, uid, lang)
 
     # Store bot response
-    c.execute("INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
-              (uid, lang, timestamp, response))
+    db_execute(
+        c,
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
+        (uid, lang, timestamp, response),
+    )
     conn.commit()
     conn.close()
 
@@ -941,7 +1000,7 @@ async def deactivate_reminder(request: Request, label: str = Form(...)):
     conn = get_db()
     c = conn.cursor()
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    c.execute("UPDATE reminders SET is_active = 0, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
+    db_execute(c, "UPDATE reminders SET is_active = 0, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
     conn.commit()
     conn.close()
     return JSONResponse({"success": True})
@@ -954,8 +1013,11 @@ async def get_reminders(request: Request):
     conn = get_db()
     c = conn.cursor()
     today = datetime.now().strftime('%Y-%m-%d')
-    c.execute("SELECT label, reminder_time, is_active FROM reminders WHERE user_id = ? AND DATE(created_at) = ? ORDER BY created_at DESC",
-              (uid, today))
+    db_execute(
+        c,
+        "SELECT label, reminder_time, is_active FROM reminders WHERE user_id = ? AND DATE(created_at) = ? ORDER BY created_at DESC",
+        (uid, today),
+    )
     reminders = [{"label": r["label"], "time": r["reminder_time"], "active": bool(r["is_active"])} for r in c.fetchall()]
     conn.close()
     return JSONResponse({"reminders": reminders})
@@ -969,11 +1031,34 @@ async def get_chat_history(request: Request):
     lang = get_lang(request)
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = 0 ORDER BY timestamp",
-              (uid, lang))
+    db_execute(
+        c,
+        "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = 0 ORDER BY timestamp",
+        (uid, lang),
+    )
     history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
     conn.close()
     return JSONResponse({"history": history})
+
+
+@app.get("/health/db")
+async def health_db():
+    """Database connectivity health check: verify PostgreSQL is accessible.
+    
+    Useful for monitoring Vercel deployments. Returns {"ok": true} if DB is reachable.
+    """
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT 1")
+        _ = c.fetchone()
+        return JSONResponse({"ok": True, "backend": "postgres"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "backend": "postgres", "error": str(e)}, status_code=500)
+    finally:
+        if conn is not None:
+            conn.close()
 
 # ---------------------------------------------------------------------------
 # HK Public Holidays 2025-2027

@@ -1,6 +1,5 @@
 # The Listening Tree — Production Dependencies
-# Deployed to Vercel / Render / Docker. Vosk (offline STT) is NOT
-# included here — see requirements-local.txt for local dev.
+# FastAPI + PostgreSQL + Zhipu AI
 
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
@@ -12,21 +11,5 @@ email_validator==2.2.0
 python-jose[cryptography]==3.4.0
 gunicorn==23.0.0
 python-dotenv==1.0.0
-
-# ---------------------------------------------------------------------------
-# Developer / Optional Dependencies (DEV-ONLY)
-# ---------------------------------------------------------------------------
-# The packages below are recommended only for local development or optional
-# features (offline speech-to-text, debugging, formatting, testing). They are
-# commented out to avoid accidental installation in production environments
-# (e.g. Vercel deploys). To install dev deps locally, uncomment the lines
-# below or copy them to a separate dev file and run `pip install -r`.
-#
-# Example (install dev deps):
-#   pip install -r requirements.txt
-#   pip install vosk==0.3.45
-#
-# Offline English STT (native binary) - enable only for local dev
-# vosk==0.3.45
-
+psycopg2-binary==2.9.10
 openai
