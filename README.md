@@ -39,7 +39,6 @@
 ### Prerequisites
 
 - **Python 3.12+** or Docker
-- **Tencent Hunyuan API Key** ([Get free credits](https://www.tencentcloud.com/products/hunyuan))
 - Modern browser (Chrome, Edge, Safari 14.1+)
 
 ### Local Development
