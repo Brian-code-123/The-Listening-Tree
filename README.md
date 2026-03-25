@@ -14,7 +14,7 @@
 
 **The Listening Tree** is a bilingual companion chatbot designed to reduce loneliness and promote wellness in elderly populations. It integrates Zhipu AI (GLM-4) for natural conversation, reminders, memory games, Hong Kong public holidays, and local news—all wrapped in an accessible, elderly-friendly glassmorphism UI.
 
-**Built with:** FastAPI (async Python) → Zhipu AI `glm-4-flash` LLM → SQLite persistence → Bootstrap 5 + FullCalendar.js frontend + Capacitor Mobile App.
+**Built with:** FastAPI (async Python) → Zhipu AI `glm-4-flash` LLM → **PostgreSQL (production)** persistence → Bootstrap 5 + FullCalendar.js frontend + Capacitor Mobile App.
 
 ---
 
@@ -25,7 +25,7 @@
 | **Warm LLM Chat** | Zhipu AI (`glm-4-flash`) with patient, elderly-tailored conversation |
 | **Voice I/O** | Web Speech API for English & Cantonese (zero server deps); optional Vosk offline fallback |
 | **Smart Calendar** | FullCalendar.js with Hong Kong public holidays (2025–2027) |
-| **Persistent Reminders** | SQLite-backed medication, activity, and social reminders with browser notifications |
+| **Persistent Reminders** | SQLite (local dev) or PostgreSQL/Supabase (production) medication, activity, and social reminders |
 | **Memory Games** | Bilingual trivia & recall quizzes for cognitive engagement |
 | **News Feed** | NewsAPI.org integration with hardcoded HK news fallback |
 | **Accessible Design** | WCAG AA compliance, 48px touch targets, keyboard navigation, dark/light modes |
@@ -185,7 +185,7 @@ SQLite (users, reminders, chat_history, preferences)
 | **Server** | Uvicorn | 0.34.2 | ASGI server |
 | **Process Manager** | Gunicorn | 23.0.0 | Production process manager |
 | **LLM** | Zhipu AI | glm-4-flash | Conversational System |
-| **Database** | SQLite3 | Built-in | Persistent data (users, reminders, chat) |
+| **Database** | PostgreSQL | Supabase / Neon / Custom | Production-grade data persistence (users, reminders, chat, preferences) |
 | **HTTP Client** | httpx | 0.28.1 | Async requests to Zhipu & NewsAPI |
 | **Templates** | Jinja2 | 3.1.6 | Server-side HTML rendering |
 | **Session Auth** | itsdangerous | 2.2.0 | Secure cookies |
@@ -207,19 +207,44 @@ SQLite (users, reminders, chat_history, preferences)
 | `ZHIPU_BASE_URL` | No | `https://open.bigmodel.cn/api/paas/v4` | Zhipu endpoint |
 | `ZHIPU_MODEL` | No | `glm-4-flash` | Model name |
 | `NEWS_API_KEY` | No | — | NewsAPI key (falls back to hardcoded articles) |
-| `DATABASE_URL` | No | `./reminders.db` | SQLite path or Postgres connection string |
-| `SECRET_KEY` | No | Auto-generated | Session signing key (set explicitly for production) |
+| `DATABASE_URL` | **Yes** | — | **PostgreSQL connection string** (required). Example: `postgresql://user:pass@host:5432/dbname` Use Supabase, Neon, or other provider. |
+| `SECRET_KEY` | **Yes** | — | **64-char hex string** for session signing. Generate with: `python -c "import secrets; print(secrets.token_hex(32))"` Must be fixed per deployment environment. |
 | `PORT` | No | `5000` | Server port |
 
 ### Database
 
-Auto-created on first run. Four tables:
+PostgreSQL tables auto-created on startup:
 - **users** – Email, password, created_at, last_login
 - **reminders** – Per-user medication/activity reminders with time, priority
 - **chat_history** – Per-user, per-language messages (soft-deleted after 30 min)
 - **preferences** – User settings (language, etc.)
 
-For production (Vercel), use external PostgreSQL (Supabase, Neon, Planetscale).
+For production (Vercel), use managed PostgreSQL: [Supabase](https://supabase.co), [Neon](https://neon.tech), or equivalent.
+
+### SQLite → PostgreSQL Migration
+
+If migrating from SQLite, use the provided migration script:
+
+```bash
+export SQLITE_PATH=reminders.db
+export DATABASE_URL='postgresql://user:pass@host:5432/dbname'
+python scripts/migrate_sqlite_to_postgres.py
+```
+
+This will transfer all user data, reminders, and chat history to PostgreSQL.
+
+### Health Check
+
+After deployment, verify database connectivity:
+
+```bash
+curl https://<your-app>.vercel.app/health/db
+```
+
+Expected response (if successful):
+```json
+{"ok": true, "backend": "postgres"}
+```
 
 ---
 
