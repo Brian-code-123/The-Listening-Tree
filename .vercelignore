@@ -1,0 +1,42 @@
+# Vercel deployment exclusions
+# These directories are NOT deployed to Vercel
+
+# Build artifacts
+build/
+.next/
+out/
+dist/
+
+# iOS/Android build files (large, not needed on serverless)
+ios/
+android/
+*.xcarchive
+*.ipa
+*.apk
+
+# Development & testing
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+
+# Large data files
+*.db
+reminders.db
+
+# Git history (not needed on deployment)
+.git/
+
+# IDE & editor
+.vscode/
+.idea/
+*.code-workspace
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Temporary & cache
+*.tmp
+*.cache
+.cache/
