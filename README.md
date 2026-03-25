@@ -323,17 +323,7 @@ ci:       CI/CD / deployment config
 
 **Academic Use Only** – Educational and research applications permitted. See [LICENSE](LICENSE) for full terms. Commercial use requires permission from developers.
 
----
-
-## Credits & Acknowledgments
-
-- **Tencent Hunyuan** – LLM API
-- **FullCalendar.js** – Calendar widget
-- **Bootstrap 5** – Responsive framework
-- **Vosk** – Offline speech recognition
-- **Font Awesome** – Icons
-- **WCAG 2.1** – Accessibility guidelines
 
 ---
 
-**Built with ❤️ for elderly wellness · Python + FastAPI · 2026**
+**Built with ❤️ 2026**
