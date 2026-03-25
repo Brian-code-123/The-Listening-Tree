@@ -30,10 +30,12 @@ import asyncio
 import secrets
 import random
 import threading
+import builtins as _builtins
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+import sqlite3
 
 # ---------------------------------------------------------------------------
 # Third-party imports
@@ -63,10 +65,10 @@ load_dotenv(env_path, override=True)
 # retain the verbose messages during development.
 # ---------------------------------------------------------------------------
 _MINIMAL_STARTUP = os.environ.get("MINIMAL_STARTUP", "1") != "0"
-if _MINIMAL_STARTUP:
-    import builtins as _builtins
-    # keep original print available for later (we'll restore it in __main__)
+if not hasattr(_builtins, "_original_print"):
     _builtins._original_print = _builtins.print
+if _MINIMAL_STARTUP:
+    # keep original print available for later (we'll restore it in __main__)
     def _silent_print(*args, **kwargs):
         return None
     _builtins.print = _silent_print
@@ -124,6 +126,11 @@ async def run_periodic_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Vercel serverless functions should not run perpetual background loops.
+    if os.environ.get("VERCEL"):
+        yield
+        return
+
     # Startup: Start background task
     # Start the periodic background task. `asyncio.create_all_tasks()` does
     # not exist — use `create_task` to schedule the coroutine.
@@ -134,7 +141,8 @@ async def lifespan(app: FastAPI):
     try:
         await task
     except asyncio.CancelledError:
-        raise
+        # Normal cancellation during shutdown.
+        pass
 
 # ---------------------------------------------------------------------------
 # Application initialisation
@@ -184,23 +192,38 @@ IN_PRODUCTION = ON_VERCEL or os.environ.get("ENVIRONMENT") == "production"
 # On development machines without Postgres, the app will fail at startup (intended).
 # To migrate from SQLite: use scripts/migrate_sqlite_to_postgres.py
 _DATABASE_URL = os.environ.get("DATABASE_URL")
+# Allow a local SQLite fallback for development when DATABASE_URL is not set.
+# Production / Vercel deployments should set DATABASE_URL to a Postgres URL.
 if not _DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL environment variable is required and must point to a PostgreSQL database. "
-        "Example: postgresql://user:password@hostname:5432/dbname"
-    )
-DB_BACKEND = "postgres"
-_DB_PATH = _DATABASE_URL
+    DB_BACKEND = "sqlite"
+    # Vercel filesystem is read-only except /tmp.
+    if ON_VERCEL:
+        _DB_PATH = "/tmp/reminders.db"
+    else:
+        _DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
+    # Ensure folder exists
+    try:
+        Path(_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+else:
+    DB_BACKEND = "postgres"
+    _DB_PATH = _DATABASE_URL
 
 
 def _db_param_placeholder(query: str) -> str:
     """Convert SQLite ? placeholders to PostgreSQL %s."""
-    return query.replace("?", "%s")
+    if DB_BACKEND == "postgres":
+        return query.replace("?", "%s")
+    return query
 
 
 def db_execute(cursor, query: str, params: tuple = ()) -> None:
     """Execute a query with automatic placeholder conversion."""
-    cursor.execute(_db_param_placeholder(query), params)
+    if DB_BACKEND == "postgres":
+        cursor.execute(_db_param_placeholder(query), params)
+    else:
+        cursor.execute(query, params)
 
 
 def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, ts: str) -> None:
@@ -418,7 +441,12 @@ questions = [
 # ---------------------------------------------------------------------------
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
-    return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
+    if DB_BACKEND == "postgres":
+        return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
+    # SQLite connection for local development
+    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def init_db() -> None:
@@ -1053,12 +1081,18 @@ async def health_db():
         c = conn.cursor()
         c.execute("SELECT 1")
         _ = c.fetchone()
-        return JSONResponse({"ok": True, "backend": "postgres"})
+        return JSONResponse({"ok": True, "backend": DB_BACKEND})
     except Exception as e:
-        return JSONResponse({"ok": False, "backend": "postgres", "error": str(e)}, status_code=500)
+        return JSONResponse({"ok": False, "backend": DB_BACKEND, "error": str(e)}, status_code=500)
     finally:
         if conn is not None:
             conn.close()
+
+
+@app.get("/health")
+async def health():
+    """Basic process-level health probe for uptime checks."""
+    return JSONResponse({"ok": True, "service": "the-listening-tree", "backend": DB_BACKEND})
 
 # ---------------------------------------------------------------------------
 # HK Public Holidays 2025-2027
