@@ -481,14 +481,23 @@ def get_db():
 
 
 def init_db() -> None:
-    """Initialize PostgreSQL schema with all required tables and indexes."""
+    """Initialize PostgreSQL/SQLite schema with all required tables and indexes."""
     conn = get_db()
     c = conn.cursor()
 
-    c.execute(
-        """
+    # Use database-appropriate syntax
+    if DB_BACKEND == "postgres":
+        id_type = "BIGSERIAL PRIMARY KEY"
+        id_ref = "BIGINT"
+    else:
+        # SQLite
+        id_type = "INTEGER PRIMARY KEY AUTOINCREMENT"
+        id_ref = "INTEGER"
+
+    # Users table
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
-            id BIGSERIAL PRIMARY KEY,
+            id {id_type},
             email TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             username TEXT,
@@ -496,13 +505,13 @@ def init_db() -> None:
             last_login TIMESTAMP,
             is_active BOOLEAN DEFAULT TRUE
         )
-        """
-    )
-    c.execute(
-        """
+    """)
+    
+    # Reminders table
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS reminders (
-            id BIGSERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            id {id_type},
+            user_id {id_ref} NOT NULL,
             label TEXT NOT NULL,
             reminder_time TEXT NOT NULL,
             is_active BOOLEAN DEFAULT TRUE,
@@ -511,13 +520,13 @@ def init_db() -> None:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
-    c.execute(
-        """
+    """)
+    
+    # Chat history table
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS chat_history (
-            id BIGSERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            id {id_type},
+            user_id {id_ref} NOT NULL,
             lang TEXT DEFAULT 'en',
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             is_bot BOOLEAN NOT NULL,
@@ -525,21 +534,22 @@ def init_db() -> None:
             is_deleted BOOLEAN DEFAULT FALSE,
             token_count INTEGER
         )
-        """
-    )
-    c.execute(
-        """
+    """)
+    
+    # Preferences table
+    c.execute(f"""
         CREATE TABLE IF NOT EXISTS preferences (
-            id BIGSERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            id {id_type},
+            user_id {id_ref} NOT NULL,
             pref_key TEXT NOT NULL,
             pref_value TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, pref_key)
         )
-        """
-    )
+    """)
+    
+    # Create indexes
     c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
@@ -549,7 +559,8 @@ def init_db() -> None:
 
     conn.commit()
     conn.close()
-    print("[DB] ✅ PostgreSQL database initialized")
+    backend_str = "PostgreSQL" if DB_BACKEND == "postgres" else "SQLite"
+    print(f"[DB] ✅ {backend_str} database initialized")
 
 
 # Run once at import time to ensure tables exist
