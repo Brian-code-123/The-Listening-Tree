@@ -162,23 +162,33 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan
 )
-# Session secret: prefer explicit environment variable for production stability.
-# If not provided, fall back to a generated ephemeral key (NOT recommended).
-_SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET") or secrets.token_hex(16)
-if _SECRET_KEY and len(_SECRET_KEY) >= 16:
-    print("[SECURITY] 🔑 SECRET_KEY is set")
-else:
-    print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
-app.add_middleware(SessionMiddleware, secret_key=_SECRET_KEY)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Detect Vercel environment (serverless — no persistent filesystem)
 ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 # Production environment detection
 IN_PRODUCTION = ON_VERCEL or os.environ.get("ENVIRONMENT") == "production"
+
+# Session secret: prefer explicit environment variable for production stability.
+# If not provided, fall back to a generated ephemeral key (NOT recommended).
+_SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET") or secrets.token_hex(16)
+if IN_PRODUCTION and not (os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET")):
+    raise RuntimeError("SECRET_KEY (or SESSION_SECRET/FASTAPI_SECRET) is required in production to prevent session loss across restarts.")
+if _SECRET_KEY and len(_SECRET_KEY) >= 16:
+    print("[SECURITY] 🔑 SECRET_KEY is set")
+else:
+    print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_SECRET_KEY,
+    session_cookie="lt_session",
+    max_age=60 * 60 * 24 * 30,
+    same_site="lax",
+    https_only=IN_PRODUCTION,
+)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -462,6 +472,7 @@ def init_db() -> None:
     """)
     
     # Create indexes
+    c.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
@@ -619,9 +630,11 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
         HTMLResponse: Redirect to / (home) on success, or login.html with error message on failure
     """
     lang = get_lang(request)
+    email = email.strip().lower()
+    password = password.strip()
     conn = get_db()
     c = conn.cursor()
-    db_execute(c, "SELECT id, email FROM users WHERE email = ? AND password = ?", (email, password))
+    db_execute(c, "SELECT id, email FROM users WHERE LOWER(email) = LOWER(?) AND password = ?", (email, password))
     user = c.fetchone()
     if user:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -665,6 +678,9 @@ async def register_post(request: Request, email: str = Form(...), password: str 
         HTMLResponse: Redirect to /login on success, or register.html with error on failure
     """
     lang = get_lang(request)
+    email = email.strip().lower()
+    password = password.strip()
+    confirm_password = confirm_password.strip()
     if password != confirm_password:
         return templates.TemplateResponse("register.html", tpl_context(request, error="Passwords do not match" if lang == 'en' else "密碼唔一致"))
     conn = get_db()
