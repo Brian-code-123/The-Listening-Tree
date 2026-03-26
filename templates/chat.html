@@ -384,18 +384,10 @@
         });
 
         // ================================================================
-        // Voice Recording (STT) — Unified Bilingual Engine
-        //
-        // Primary:  Browser Web Speech API  (EN + zh-HK)
-        // Fallback: Server-side Vosk        (EN only, offline)
-        //
-        // Flow:  mic button → recognise → inject text into #text
-        //        → auto-submit form → same response pipeline as typing
+        // Voice Recording (STT) — Browser Web Speech API only
         // ================================================================
 
         let _recognition = null;
-        let _mediaRecorder = null;
-        let _audioChunks = [];
         let _isRecording = false;
 
         // Localised placeholder strings (set by Jinja)
@@ -418,59 +410,6 @@
                 try { _recognition.stop(); } catch (e) { /* already stopped */ }
                 _recognition = null;
             }
-            if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
-                _mediaRecorder.stop();
-            }
-        }
-
-        /**
-         * Encode raw PCM Float32 samples → 16-bit mono WAV Blob.
-         * Used when falling back to server-side Vosk transcription.
-         */
-        function encodePCMToWAV(samples, sampleRate) {
-            const numSamples = samples.length;
-            const buf = new ArrayBuffer(44 + numSamples * 2);
-            const view = new DataView(buf);
-            const writeStr = (off, s) => {
-                for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
-            };
-            writeStr(0, 'RIFF');
-            view.setUint32(4, 36 + numSamples * 2, true);
-            writeStr(8, 'WAVE');
-            writeStr(12, 'fmt ');
-            view.setUint32(16, 16, true);
-            view.setUint16(20, 1, true);
-            view.setUint16(22, 1, true);
-            view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true);
-            view.setUint16(32, 2, true);
-            view.setUint16(34, 16, true);
-            writeStr(36, 'data');
-            view.setUint32(40, numSamples * 2, true);
-            let off = 44;
-            for (let i = 0; i < numSamples; i++) {
-                const s = Math.max(-1, Math.min(1, samples[i]));
-                view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-                off += 2;
-            }
-            return new Blob([buf], { type: 'audio/wav' });
-        }
-
-        /**
-         * Send a WAV blob to the /transcribe endpoint (Vosk offline STT).
-         * Returns the transcribed text or an empty string on failure.
-         */
-        async function voskTranscribe(wavBlob) {
-            const form = new FormData();
-            form.append('audio', wavBlob, 'audio.wav');
-            try {
-                const resp = await fetch('/transcribe', { method: 'POST', body: form });
-                const data = await resp.json();
-                return data.text || '';
-            } catch (e) {
-                console.error('[Vosk]', e);
-                return '';
-            }
         }
 
         /**
@@ -487,12 +426,7 @@
         }
 
         /**
-         * Start recording.  The strategy:
-         *
-         * 1. If Web Speech API exists (Chrome / Edge / Safari) → use it
-         *    for BOTH English and Cantonese (set lang accordingly).
-         * 2. Else if English selected → fall back to Vosk (server-side).
-         * 3. Else → show a friendly "not supported" message.
+         * Start recording using browser Web Speech API.
          */
         async function startRecording() {
             _isRecording = true;
@@ -501,7 +435,6 @@
                 .find('i').removeClass('fa-microphone').addClass('fa-stop');
             $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
 
-            // --- Web Speech API (preferred: supports EN + zh-HK, auto handles permissions) ---
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 _recognition = new SpeechRecognition();
@@ -573,65 +506,6 @@
                 }
                 return;  // done — Web Speech API handles everything
             }
-
-            // --- Vosk fallback (English only, server-side) ---
-            if (currentLang !== 'zh-HK') {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: { echoCancellation: true, noiseSuppression: true }
-                    });
-                    _audioChunks = [];
-                    _mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
-
-                    _mediaRecorder.addEventListener('dataavailable', (e) => {
-                        if (e.data.size) _audioChunks.push(e.data);
-                    });
-
-                    _mediaRecorder.addEventListener('stop', async () => {
-                        $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
-                        stream.getTracks().forEach(t => t.stop());
-
-                        const blob = new Blob(_audioChunks, { type: 'audio/webm' });
-                        const arrayBuf = await blob.arrayBuffer();
-                        const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-                        const decoded = await audioCtx.decodeAudioData(arrayBuf);
-                        const pcm = decoded.getChannelData(0);
-                        const wavBlob = encodePCMToWAV(pcm, 16000);
-                        const text = await voskTranscribe(wavBlob);
-
-                        stopRecording();
-                        if (text) {
-                            $('#text').val(text);
-                            setTimeout(() => $('#messageArea').submit(), 150);
-                        } else {
-                            showVoiceToast(currentLang === 'zh-HK'
-                                ? '🎤 聽唔到語音。請再試一次。'
-                                : '🎤 No speech detected. Please try again.');
-                            $('#text').attr('placeholder', PLACEHOLDER_IDLE);
-                        }
-                    });
-
-                    _mediaRecorder.start();
-                    console.log('[STT] started Vosk fallback');
-                } catch (e) {
-                    console.error('[STT] Vosk failed:', e.message);
-                    stopRecording();
-                    if (e.name === 'NotAllowedError') {
-                        showVoiceToast(currentLang === 'zh-HK'
-                            ? '❌ 咪高峰權限被拒絕。'
-                            : '❌ Microphone permission denied.');
-                    } else {
-                        showVoiceToast(currentLang === 'zh-HK'
-                            ? '⚠️ 語音錄製失敗。'
-                            : '⚠️ Voice recording failed.');
-                    }
-                }
-                return;
-            }
-
-            // --- No fallback for zh-HK without Web Speech API ---
             stopRecording();
             showVoiceToast(currentLang === 'zh-HK'
                 ? '你嘅瀏覽器唔支援語音辨識，請用 Chrome、Edge 或 Safari。'

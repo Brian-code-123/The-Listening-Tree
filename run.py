@@ -10,8 +10,7 @@ Stack:
     - FastAPI 0.128+  (async ASGI web framework)
     - Uvicorn 0.35+   (high-performance ASGI server)
     - Tencent Hunyuan  (LLM chat API, hunyuan-pro)
-    - SQLite3          (lightweight embedded database)
-    - Vosk 0.3.45      (offline English STT, optional)
+    - PostgreSQL (Supabase)  (primary database)
     - Web Speech API   (browser-side STT/TTS for EN + zh-HK)
 
 Author:  The Listening Tree Team
@@ -22,10 +21,7 @@ License: Academic — Educational & Research Use
 # Standard library imports
 # ---------------------------------------------------------------------------
 import os
-import io
 import json
-import wave
-import base64
 import asyncio
 import secrets
 import random
@@ -35,12 +31,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-import sqlite3
 
 # ---------------------------------------------------------------------------
 # Third-party imports
 # ---------------------------------------------------------------------------
-from fastapi import FastAPI, Request, Form, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -50,20 +45,19 @@ try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
     from psycopg2 import IntegrityError as PgIntegrityError
-    _psycopg2_available = True
 except ImportError:
-    _psycopg2_available = False
-    # Gracefully handle psycopg2 import failure — will use SQLite as fallback
     psycopg2 = None
     RealDictCursor = None
-    # Create a base class that catches both PostgreSQL and SQLite integrity errors
     class PgIntegrityError(Exception):
         pass
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / '.env'
-load_dotenv(env_path, override=True)
+load_dotenv(env_path, override=False)
+env_local_path = Path(__file__).parent / '.env.local'
+if env_local_path.exists():
+    load_dotenv(env_local_path, override=not bool(os.environ.get("DATABASE_URL")))
 
 # ---------------------------------------------------------------------------
 # Minimal startup output
@@ -133,6 +127,14 @@ async def run_periodic_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize database schema on app startup (not at import time).
+    # This prevents import-time failures in serverless handlers.
+    try:
+        ensure_db_initialized(strict=not IN_PRODUCTION)
+    except Exception as e:
+        _builtins._original_print(f"[DB] ❌ Startup initialization failed: {e}")
+        raise
+
     # Vercel serverless functions should not run perpetual background loops.
     if os.environ.get("VERCEL"):
         yield
@@ -172,19 +174,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-# ---------------------------------------------------------------------------
-# Vosk STT — lazy-loaded on first use (English offline model)
-#
-# Vosk provides fully offline speech-to-text for English.
-# On Vercel (serverless), the native binary is unavailable so voice
-# recognition falls back to the browser's Web Speech API exclusively.
-# ---------------------------------------------------------------------------
-_vosk_model = None
-_vosk_lock = threading.Lock()
-VOSK_MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "voice_models", "vosk-model-small-en-us-0.15"
-)
-
 # Detect Vercel environment (serverless — no persistent filesystem)
 ON_VERCEL = bool(os.environ.get("VERCEL"))
 
@@ -193,96 +182,41 @@ IN_PRODUCTION = ON_VERCEL or os.environ.get("ENVIRONMENT") == "production"
 
 
 # ─────────────────────────────────────────────────────────────
-# Database: PostgreSQL (production) / Optional local fallback (dev-only)
+# Database: PostgreSQL (Supabase)
 # ─────────────────────────────────────────────────────────────
-# Vercel and production deployments REQUIRE DATABASE_URL to be a Postgres connection.
-# On development machines without Postgres, the app will fail at startup (intended).
-# To migrate from SQLite: use scripts/migrate_sqlite_to_postgres.py
 _DATABASE_URL = os.environ.get("DATABASE_URL")
-# Allow a local SQLite fallback for development when DATABASE_URL is not set.
-# Production / Vercel deployments should set DATABASE_URL to a Postgres URL.
 if not _DATABASE_URL:
-    DB_BACKEND = "sqlite"
-    # Vercel filesystem is read-only except /tmp.
-    if ON_VERCEL:
-        _DB_PATH = "/tmp/reminders.db"
-    else:
-        _DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
-    # Ensure folder exists
-    try:
-        Path(_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-else:
-    DB_BACKEND = "postgres"
-    _DB_PATH = _DATABASE_URL
+    raise RuntimeError("DATABASE_URL is required. Configure Supabase PostgreSQL URL in environment variables.")
+
+DB_BACKEND = "postgres"
+_DB_PATH = _DATABASE_URL
+
+if psycopg2 is None:
+    raise RuntimeError("psycopg2 is required for PostgreSQL connection but is not installed.")
 
 
 def _db_param_placeholder(query: str) -> str:
-    """Convert SQLite ? placeholders to PostgreSQL %s."""
-    if DB_BACKEND == "postgres":
-        return query.replace("?", "%s")
-    return query
+    """Convert SQLite-style placeholders to PostgreSQL placeholders."""
+    return query.replace("?", "%s")
 
 
 def db_execute(cursor, query: str, params: tuple = ()) -> None:
-    """Execute a query with automatic placeholder conversion."""
-    if DB_BACKEND == "postgres":
-        cursor.execute(_db_param_placeholder(query), params)
-    else:
-        cursor.execute(query, params)
+    """Execute a query with PostgreSQL placeholder conversion."""
+    cursor.execute(_db_param_placeholder(query), params)
 
 
 def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, ts: str) -> None:
     """Insert or update user preference using PostgreSQL UPSERT syntax."""
-    if DB_BACKEND == "postgres":
-        cursor.execute(
-            """
-            INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (user_id, pref_key)
-            DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
-            """,
-            (user_id, key, value, ts),
-        )
-        return
-
-    # SQLite fallback (dev / serverless emergency mode)
     cursor.execute(
         """
         INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, pref_key)
-        DO UPDATE SET pref_value = excluded.pref_value, updated_at = excluded.updated_at
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (user_id, pref_key)
+        DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
         """,
         (user_id, key, value, ts),
     )
 
-
-def get_vosk_model():
-    """Return the cached Vosk Model instance (thread-safe, singleton).
-
-    Returns None when running on Vercel or if the model directory is
-    missing.  The first call that finds a valid model directory will
-    load the model and cache it for all subsequent requests.
-    """
-    global _vosk_model
-    if ON_VERCEL:
-        return None
-    if _vosk_model is not None:
-        return _vosk_model
-    with _vosk_lock:
-        if _vosk_model is None:
-            if os.path.isdir(VOSK_MODEL_PATH):
-                try:
-                    from vosk import Model
-                    _vosk_model = Model(VOSK_MODEL_PATH)
-                    print("[Vosk] ✅ English STT model loaded")
-                except Exception as e:
-                    print(f"[Vosk] ⚠ Failed to load model: {e}")
-            else:
-                print(f"[Vosk] ⚠ Model not found at {VOSK_MODEL_PATH}")
-    return _vosk_model
 
 # ---------------------------------------------------------------------------
 # In-memory state  (lost on server restart — by design)
@@ -457,42 +391,20 @@ questions = [
 ]
 
 # ---------------------------------------------------------------------------
-# Database Setup — SQLite (local) / PostgreSQL (Supabase)
+# Database Setup — PostgreSQL (Supabase)
 # ---------------------------------------------------------------------------
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
-    if DB_BACKEND == "postgres" and _psycopg2_available:
-        return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
-    elif DB_BACKEND == "postgres" and not _psycopg2_available:
-        # Fallback to SQLite if psycopg2 unavailable (shouldn't reach here on Vercel)
-        _builtins._original_print("[DB] ⚠ psycopg2 unavailable; falling back to SQLite")
-        # Use a proper SQLite path, not the PostgreSQL connection string
-        if ON_VERCEL:
-            sqlite_path = "/tmp/reminders.db"
-        else:
-            sqlite_path = os.path.join(os.path.dirname(__file__), "reminders.db")
-        conn = sqlite3.connect(sqlite_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
-    # SQLite connection for local development
-    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
 
 
 def init_db() -> None:
-    """Initialize PostgreSQL/SQLite schema with all required tables and indexes."""
+    """Initialize PostgreSQL schema with all required tables and indexes."""
     conn = get_db()
     c = conn.cursor()
 
-    # Use database-appropriate syntax
-    if DB_BACKEND == "postgres":
-        id_type = "BIGSERIAL PRIMARY KEY"
-        id_ref = "BIGINT"
-    else:
-        # SQLite
-        id_type = "INTEGER PRIMARY KEY AUTOINCREMENT"
-        id_ref = "INTEGER"
+    id_type = "BIGSERIAL PRIMARY KEY"
+    id_ref = "BIGINT"
 
     # Users table
     c.execute(f"""
@@ -559,12 +471,35 @@ def init_db() -> None:
 
     conn.commit()
     conn.close()
-    backend_str = "PostgreSQL" if DB_BACKEND == "postgres" else "SQLite"
-    print(f"[DB] ✅ {backend_str} database initialized")
+    print("[DB] ✅ PostgreSQL database initialized")
 
 
-# Run once at import time to ensure tables exist
-init_db()
+_db_initialized = False
+_db_init_error: Optional[str] = None
+_db_init_lock = threading.Lock()
+
+
+def ensure_db_initialized(strict: bool = False) -> bool:
+    """Initialize DB schema once and cache the result for health checks."""
+    global _db_initialized, _db_init_error
+    if _db_initialized:
+        return True
+
+    with _db_init_lock:
+        if _db_initialized:
+            return True
+        try:
+            init_db()
+            _db_initialized = True
+            _db_init_error = None
+            return True
+        except Exception as e:
+            _db_initialized = False
+            _db_init_error = str(e)
+            _builtins._original_print(f"[DB] ❌ Initialization failed: {e}")
+            if strict:
+                raise
+            return False
 
 
 # ---------------------------------------------------------------------------
@@ -714,7 +649,7 @@ async def register_post(request: Request, email: str = Form(...), password: str 
 
     Validation steps:
       1. Confirm password == password (client-side + server-side check)
-      2. Email must be unique (SQLite UNIQUE constraint)
+            2. Email must be unique (PostgreSQL UNIQUE constraint)
       3. Password stored in plaintext (NOT production-safe; use bcrypt/Argon2 for real apps)
 
     On success: Inserts new user row with created_at timestamp, redirects to /login.
@@ -740,7 +675,7 @@ async def register_post(request: Request, email: str = Form(...), password: str 
         conn.commit()
         conn.close()
         return RedirectResponse(url="/login", status_code=303)
-    except (PgIntegrityError, sqlite3.IntegrityError) as e:
+    except PgIntegrityError:
         conn.close()
         return templates.TemplateResponse("register.html", tpl_context(request, error="Email already exists" if lang == 'en' else "電郵已存在"))
     except Exception as e:
@@ -989,65 +924,18 @@ async def get_response(request: Request, msg: str = Form(...)):
     return JSONResponse({"response": response})
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Voice Transcription — Vosk offline English STT
-#
-# The browser captures a mono 16 kHz PCM WAV blob and POSTs it here.
-# For Cantonese the client-side Web Speech API is used exclusively.
+# Voice Transcription — browser-only mode
 # ---------------------------------------------------------------------------
 @app.post("/transcribe")
-async def transcribe_audio(request: Request, audio: UploadFile = File(...)):
-    """Receive raw 16 kHz mono PCM WAV from browser, return transcribed text."""
-    audio_bytes = await audio.read()
-
-    # 1. Use OpenAI Whisper if API key is configured (Better for Cantonese/Accents)
-    if os.environ.get("OPENAI_API_KEY"):
-        try:
-            from openai import OpenAI
-            import io
-            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-            audio_file = io.BytesIO(audio_bytes)
-            audio_file.name = "audio.wav"
-            print(f"[Whisper] Transcribing with OpenAI Whisper...")
-            response = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language="zh"  # Setting to Chinese helps with Cantonese/Mandarin
-            )
-            return JSONResponse({"text": response.text.strip()})
-        except Exception as e:
-            print(f"[Whisper] Transcription error: {e}")
-            # Fall through to Vosk if Whisper fails
-
-    # 2. Fallback to Vosk offline English model
-    model = get_vosk_model()
-    if model is None:
-        return JSONResponse({"text": "", "error": "STT model not available"})
-
-    try:
-        from vosk import KaldiRecognizer
-        import wave, io
-
-        # Parse the WAV the browser sent
-        with wave.open(io.BytesIO(audio_bytes)) as wf:
-            if wf.getnchannels() != 1 or wf.getsampwidth() != 2:
-                return JSONResponse({"text": "", "error": "Expected mono 16-bit WAV"})
-            sample_rate = wf.getframerate()
-            frames = wf.readframes(wf.getnframes())
-
-        rec = KaldiRecognizer(model, sample_rate)
-        rec.SetWords(False)
-
-        CHUNK = 4000
-        for i in range(0, len(frames), CHUNK):
-            rec.AcceptWaveform(frames[i:i + CHUNK])
-
-        result = json.loads(rec.FinalResult())
-        text = result.get("text", "").strip()
-        return JSONResponse({"text": text})
-    except Exception as e:
-        print(f"[Vosk] Transcription error: {e}")
-        return JSONResponse({"text": "", "error": str(e)})
+async def transcribe_audio():
+    """Deprecated server STT endpoint kept for backward compatibility."""
+    return JSONResponse(
+        {
+            "text": "",
+            "error": "Server-side STT has been removed. Use browser Web Speech API.",
+        },
+        status_code=410,
+    )
 
 # ---------------------------------------------------------------------------
 # Reminder Management endpoints (AJAX)
@@ -1121,15 +1009,30 @@ async def health_db():
     
     Useful for monitoring Vercel deployments. Returns {"ok": true} if DB is reachable.
     """
+    initialized = ensure_db_initialized(strict=False)
     conn = None
     try:
         conn = get_db()
         c = conn.cursor()
         c.execute("SELECT 1")
         _ = c.fetchone()
-        return JSONResponse({"ok": True, "backend": DB_BACKEND})
+        return JSONResponse({
+            "ok": True,
+            "backend": DB_BACKEND,
+            "db_initialized": initialized,
+            "db_init_error": _db_init_error,
+        })
     except Exception as e:
-        return JSONResponse({"ok": False, "backend": DB_BACKEND, "error": str(e)}, status_code=500)
+        return JSONResponse(
+            {
+                "ok": False,
+                "backend": DB_BACKEND,
+                "db_initialized": initialized,
+                "db_init_error": _db_init_error,
+                "error": str(e),
+            },
+            status_code=500,
+        )
     finally:
         if conn is not None:
             conn.close()
@@ -1138,7 +1041,15 @@ async def health_db():
 @app.get("/health")
 async def health():
     """Basic process-level health probe for uptime checks."""
-    return JSONResponse({"ok": True, "service": "the-listening-tree", "backend": DB_BACKEND})
+    return JSONResponse(
+        {
+            "ok": True,
+            "service": "the-listening-tree",
+            "backend": DB_BACKEND,
+            "db_initialized": _db_initialized,
+            "db_init_error": _db_init_error,
+        }
+    )
 
 # ---------------------------------------------------------------------------
 # HK Public Holidays 2025-2027
