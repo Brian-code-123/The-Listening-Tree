@@ -273,6 +273,34 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
+def validate_email(email: str) -> tuple[bool, str]:
+    """Validate email format per RFC 5322 basic pattern.
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    import re
+    # RFC 5322 basic email pattern (simplified but covers most cases)
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(pattern, email):
+        return False, "Invalid email format"
+    return True, ""
+
+
+def validate_password_strength(password: str) -> tuple[bool, str]:
+    """Validate password meets minimum strength requirements.
+    
+    Requirements:
+    - Minimum 8 characters
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters"
+    return True, ""
+
+
 # ---------------------------------------------------------------------------
 # In-memory state  (lost on server restart — by design)
 # ---------------------------------------------------------------------------
@@ -709,9 +737,11 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     """Create a new user account (registration).
 
     Validation steps:
-      1. Confirm password == password (client-side + server-side check)
-        2. Email must be unique (PostgreSQL UNIQUE constraint)
-        3. Password stored with PBKDF2-HMAC-SHA256
+      1. Email format validation (RFC 5322 basic pattern)
+      2. Password strength validation (min 8 characters)
+      3. Confirm password == password (client-side + server-side check)
+      4. Email must be unique (PostgreSQL UNIQUE constraint)
+      5. Password stored with PBKDF2-HMAC-SHA256
 
     On success: Inserts new user row with created_at timestamp, redirects to /login.
     On failure: Returns register.html with localized error message.
@@ -719,7 +749,7 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     Args:
         request: HTTP request object
         email: Email address (must not exist in users table)
-        password: Password in plaintext
+        password: Password in plaintext (min 8 chars)
         confirm_password: Confirmation password (must == password)
 
     Returns:
@@ -729,13 +759,26 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     email = email.strip().lower()
     password = password.strip()
     confirm_password = confirm_password.strip()
+    
+    # Validate email format
+    is_valid_email, email_error = validate_email(email)
+    if not is_valid_email:
+        return templates.TemplateResponse("register.html", tpl_context(request, error="Invalid email format" if lang == 'en' else "電郵格式無效"))
+    
+    # Validate password strength
+    is_valid_password, password_error = validate_password_strength(password)
+    if not is_valid_password:
+        return templates.TemplateResponse("register.html", tpl_context(request, error="Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元"))
+    
+    # Validate password confirmation
     if password != confirm_password:
         return templates.TemplateResponse("register.html", tpl_context(request, error="Passwords do not match" if lang == 'en' else "密碼唔一致"))
+    
     conn = get_db()
     c = conn.cursor()
     try:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
+        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (%s, %s, %s)", (email, hash_password(password), ts))
         conn.commit()
         conn.close()
         return RedirectResponse(url="/login", status_code=303)
