@@ -57,7 +57,7 @@ env_path = Path(__file__).parent / '.env'
 load_dotenv(env_path, override=False)
 env_local_path = Path(__file__).parent / '.env.local'
 if env_local_path.exists():
-    load_dotenv(env_local_path, override=not bool(os.environ.get("DATABASE_URL")))
+    load_dotenv(env_local_path, override=True)
 
 # ---------------------------------------------------------------------------
 # Minimal startup output
