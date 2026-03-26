@@ -64,3 +64,11 @@ Thumbs.db
 *.swo
 out.txt
 patch*.py
+
+# Test files and test artifacts
+tests/
+test_*.py
+*_test.py
+tests/*.log
+tests/*.out
+tests/tmp/
