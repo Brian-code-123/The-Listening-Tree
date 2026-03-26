@@ -21,6 +21,11 @@ htmlcov/
 .env
 .env.local
 .env*.local
+.env.vercel*
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Node / frontend artifacts
 node_modules/
@@ -59,6 +64,3 @@ Thumbs.db
 *.swo
 out.txt
 patch*.py
-
-# Local-only tests sandbox
-tests/

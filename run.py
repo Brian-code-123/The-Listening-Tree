@@ -26,6 +26,8 @@ import asyncio
 import secrets
 import random
 import threading
+import hashlib
+import hmac
 import builtins as _builtins
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -226,6 +228,49 @@ def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, 
         """,
         (user_id, key, value, ts),
     )
+
+
+PBKDF2_ITERATIONS = 390000
+PBKDF2_SCHEME = "pbkdf2_sha256"
+
+
+def hash_password(password: str) -> str:
+    """Hash password using PBKDF2-HMAC-SHA256 with per-user random salt."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PBKDF2_ITERATIONS,
+    ).hex()
+    return f"{PBKDF2_SCHEME}${PBKDF2_ITERATIONS}${salt}${digest}"
+
+
+def is_password_hashed(stored: str) -> bool:
+    return isinstance(stored, str) and stored.startswith(f"{PBKDF2_SCHEME}$")
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Verify a plaintext password against hashed or legacy plaintext storage."""
+    if not stored:
+        return False
+    if not is_password_hashed(stored):
+        return hmac.compare_digest(password, stored)
+
+    try:
+        scheme, iter_str, salt, expected = stored.split("$", 3)
+        if scheme != PBKDF2_SCHEME:
+            return False
+        iterations = int(iter_str)
+        computed = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            iterations,
+        ).hex()
+        return hmac.compare_digest(computed, expected)
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -634,9 +679,12 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
     password = password.strip()
     conn = get_db()
     c = conn.cursor()
-    db_execute(c, "SELECT id, email FROM users WHERE LOWER(email) = LOWER(?) AND password = ?", (email, password))
+    db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
     user = c.fetchone()
-    if user:
+    if user and verify_password(password, user["password"]):
+        if not is_password_hashed(user["password"]):
+            # Transparent migration for legacy plaintext rows.
+            db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
         conn.commit()
@@ -662,8 +710,8 @@ async def register_post(request: Request, email: str = Form(...), password: str 
 
     Validation steps:
       1. Confirm password == password (client-side + server-side check)
-            2. Email must be unique (PostgreSQL UNIQUE constraint)
-      3. Password stored in plaintext (NOT production-safe; use bcrypt/Argon2 for real apps)
+        2. Email must be unique (PostgreSQL UNIQUE constraint)
+        3. Password stored with PBKDF2-HMAC-SHA256
 
     On success: Inserts new user row with created_at timestamp, redirects to /login.
     On failure: Returns register.html with localized error message.
@@ -687,7 +735,7 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     c = conn.cursor()
     try:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, password, ts))
+        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
         conn.commit()
         conn.close()
         return RedirectResponse(url="/login", status_code=303)
