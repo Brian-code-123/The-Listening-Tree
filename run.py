@@ -277,11 +277,13 @@ def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
     existing_query = dict(parse_qsl(parts.query, keep_blank_values=True))
 
     username_variants = {
-        username,
-        f"{username}.{project_ref}",
+        os.environ.get("SUPABASE_POOLER_USER", "").strip(),
         f"postgres.{project_ref}",
+        f"{username}.{project_ref}",
+        username,
         project_ref,
     }
+    username_variants = {u for u in username_variants if u}
     # If username already contains a tenant suffix, also try the bare prefix.
     if "." in username:
         username_variants.add(username.split(".", 1)[0])
@@ -292,17 +294,19 @@ def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
         "ap-southeast-1,ap-northeast-1,us-east-1,us-west-1,eu-west-1,eu-central-1,ap-south-1",
     )
     pooler_hosts = []
-    if pooler_host_override:
-        pooler_hosts.append(pooler_host_override)
-    else:
-        for region in [r.strip() for r in region_candidates.split(",") if r.strip()]:
-            pooler_hosts.append(f"aws-0-{region}.pooler.supabase.com")
+    preferred_host = pooler_host_override or "aws-0-ap-southeast-1.pooler.supabase.com"
+    pooler_hosts.append(preferred_host)
+    for region in [r.strip() for r in region_candidates.split(",") if r.strip()]:
+        host = f"aws-0-{region}.pooler.supabase.com"
+        if host not in pooler_hosts:
+            pooler_hosts.append(host)
 
     pooler_ports = [p.strip() for p in os.environ.get("SUPABASE_POOLER_PORTS", "6543,5432").split(",") if p.strip()]
     option_variants = [None, f"project={project_ref}"]
+    ordered_users = sorted(username_variants, key=lambda u: (0 if u.startswith("postgres.") else 1, len(u), u))
     for pooler_host in pooler_hosts:
         for pooler_port in pooler_ports:
-            for user_variant in sorted(username_variants):
+            for user_variant in ordered_users:
                 for extra_option in option_variants:
                     query = dict(existing_query)
                     if extra_option:
@@ -644,9 +648,10 @@ def get_db():
     ordered_indices = [_DB_ACTIVE_CANDIDATE_INDEX] + [
         idx for idx in range(len(_DB_CONNECTION_CANDIDATES)) if idx != _DB_ACTIVE_CANDIDATE_INDEX
     ]
-    max_candidates = int(os.environ.get("MAX_DB_CANDIDATES", "24"))
+    max_candidates = int(os.environ.get("MAX_DB_CANDIDATES", "12"))
 
     last_error = None
+    last_error_label = None
     for idx in ordered_indices[:max_candidates]:
         candidate = _DB_CONNECTION_CANDIDATES[idx]
         options = _connection_options_from_url(candidate["url"], candidate["force_hostaddr"])
@@ -662,12 +667,14 @@ def get_db():
             return conn
         except Exception as e:
             last_error = e
+            last_error_label = candidate["label"]
 
     if last_error is not None:
         retry_after = int(os.environ.get("PG_RETRY_INTERVAL_SEC", "5"))
         _DB_NEXT_PG_RETRY_TS = now_ts + retry_after
-        _DB_LAST_PG_ERROR = str(last_error)
-        raise RuntimeError(f"PostgreSQL connection failed; retry in {retry_after}s: {last_error}")
+        label = last_error_label or "unknown-candidate"
+        _DB_LAST_PG_ERROR = f"[{label}] {last_error}"
+        raise RuntimeError(f"PostgreSQL connection failed on {label}; retry in {retry_after}s: {last_error}")
     raise RuntimeError("No database connection candidates are available.")
 
 
