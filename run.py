@@ -472,8 +472,9 @@ user_game_states: dict = {}
 # Per-(user, lang) conversation context sent to the LLM
 user_api_histories: dict = {}
 
-# Messages older than this are soft-deleted from chat_history
-CHAT_HISTORY_RETENTION_MINUTES = 30
+# Keep only the most recent chat messages per user/language.
+# Older rows are soft-deleted to bound table growth while preserving continuity.
+CHAT_HISTORY_MAX_MESSAGES_PER_LANG = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES_PER_LANG", "200"))
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -797,25 +798,59 @@ def ensure_db_initialized(strict: bool = False) -> bool:
 # ---------------------------------------------------------------------------
 
 def cleanup_old_chat_history() -> None:
-    """Soft-delete chat messages older than *CHAT_HISTORY_RETENTION_MINUTES*.
-
-    Sets ``is_deleted = TRUE`` instead of physically removing rows so that
-    analytics or audit queries can still access the data if needed.
-    """
+    """Soft-delete oldest chat rows beyond the per-user/language cap."""
     conn = get_db()
     c = conn.cursor()
-    cutoff_time = datetime.now().timestamp() - (CHAT_HISTORY_RETENTION_MINUTES * 60)
-    cutoff_datetime = datetime.fromtimestamp(cutoff_time).strftime("%Y-%m-%d %H:%M:%S")
-    db_execute(
-        c,
-        "UPDATE chat_history SET is_deleted = TRUE WHERE timestamp < ? AND is_deleted = FALSE",
-        (cutoff_datetime,),
+    c.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY user_id, lang
+                    ORDER BY timestamp DESC, id DESC
+                ) AS rn
+            FROM chat_history
+            WHERE is_deleted = FALSE
+        )
+        UPDATE chat_history AS ch
+        SET is_deleted = TRUE
+        FROM ranked
+        WHERE ch.id = ranked.id
+          AND ranked.rn > %s
+        """,
+        (CHAT_HISTORY_MAX_MESSAGES_PER_LANG,),
     )
     deleted_count = c.rowcount
     conn.commit()
     conn.close()
     if deleted_count > 0:
-        print(f"[CLEANUP] 🗑️  Marked {deleted_count} old messages as deleted")
+        print(f"[CLEANUP] 🗑️  Marked {deleted_count} old chat rows as deleted")
+
+
+def prune_user_chat_history(cursor, user_id: int, lang: str) -> None:
+    """Prune oldest rows for one user/language after inserting new messages."""
+    c = cursor
+    c.execute(
+        """
+        WITH keep_ids AS (
+            SELECT id
+            FROM chat_history
+            WHERE user_id = %s
+              AND lang = %s
+              AND is_deleted = FALSE
+            ORDER BY timestamp DESC, id DESC
+            LIMIT %s
+        )
+        UPDATE chat_history
+        SET is_deleted = TRUE
+        WHERE user_id = %s
+          AND lang = %s
+          AND is_deleted = FALSE
+          AND id NOT IN (SELECT id FROM keep_ids)
+        """,
+        (user_id, lang, CHAT_HISTORY_MAX_MESSAGES_PER_LANG, user_id, lang),
+    )
 
 
 def auto_expire_old_reminders() -> None:
@@ -994,7 +1029,17 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     except Exception as e:
         conn.close()
         _builtins._original_print(f"[ERROR] Registration failed: {e}")
-        return templates.TemplateResponse("register.html", tpl_context(request, error="Registration failed" if lang == 'en' else "註冊失敗"))
+        return templates.TemplateResponse(
+            "register.html",
+            tpl_context(
+                request,
+                error=(
+                    "Service temporarily unavailable. Your account data remains in database; please try again."
+                    if lang == 'en'
+                    else "服務暫時不可用。帳號資料會保留喺資料庫，請稍後再試。"
+                ),
+            ),
+        )
 
 @app.get("/forgot_password")
 async def forgot_password(request: Request):
@@ -1231,6 +1276,9 @@ async def get_response(request: Request, msg: str = Form(...)):
         "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
         (uid, lang, timestamp, response),
     )
+
+    # Keep recent history stable across Vercel/local/mobile by pruning oldest rows.
+    prune_user_chat_history(c, uid, lang)
     conn.commit()
     conn.close()
 
