@@ -35,7 +35,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote
 
 # ---------------------------------------------------------------------------
 # Third-party imports
@@ -309,7 +309,9 @@ def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
                         query["options"] = extra_option
                     query_string = urlencode(query)
 
-                    netloc = f"{user_variant}:{password}@{pooler_host}:{pooler_port}"
+                    encoded_user = quote(user_variant, safe="")
+                    encoded_password = quote(password, safe="")
+                    netloc = f"{encoded_user}:{encoded_password}@{pooler_host}:{pooler_port}"
                     pooler_url = urlunsplit((parts.scheme, netloc, database, query_string, parts.fragment))
                     option_suffix = "" if not extra_option else ":opt_project"
                     candidates.append(
@@ -662,7 +664,7 @@ def get_db():
             last_error = e
 
     if last_error is not None:
-        retry_after = int(os.environ.get("PG_RETRY_INTERVAL_SEC", "20"))
+        retry_after = int(os.environ.get("PG_RETRY_INTERVAL_SEC", "5"))
         _DB_NEXT_PG_RETRY_TS = now_ts + retry_after
         _DB_LAST_PG_ERROR = str(last_error)
         raise RuntimeError(f"PostgreSQL connection failed; retry in {retry_after}s: {last_error}")
