@@ -29,6 +29,8 @@ import threading
 import hashlib
 import hmac
 import socket
+import sqlite3
+import time as _time
 import builtins as _builtins
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -211,6 +213,13 @@ if not _DATABASE_URL:
 
 DB_BACKEND = "postgres"
 _DB_URL_SOURCE = "pooler_url" if _POOLER_DATABASE_URL else "database_url"
+_RUNTIME_DB_BACKEND = DB_BACKEND
+_SQLITE_FALLBACK_ENABLED = os.environ.get("ENABLE_SQLITE_FALLBACK", "1") == "1"
+_SQLITE_FALLBACK_PATH = os.environ.get(
+    "SQLITE_FALLBACK_PATH",
+    "/tmp/listening_tree_fallback.db" if ON_VERCEL else str(Path(__file__).parent / "reminders_fallback.db"),
+)
+_DB_NEXT_PG_RETRY_TS = 0.0
 
 
 def _normalize_db_url(raw_url: str) -> str:
@@ -360,21 +369,35 @@ def _db_param_placeholder(query: str) -> str:
 
 
 def db_execute(cursor, query: str, params: tuple = ()) -> None:
-    """Execute a query with PostgreSQL placeholder conversion."""
-    cursor.execute(_db_param_placeholder(query), params)
+    """Execute a query using the active backend placeholder style."""
+    if _RUNTIME_DB_BACKEND == "sqlite_fallback":
+        cursor.execute(query, params)
+    else:
+        cursor.execute(_db_param_placeholder(query), params)
 
 
 def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, ts: str) -> None:
     """Insert or update user preference using PostgreSQL UPSERT syntax."""
-    cursor.execute(
-        """
-        INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT (user_id, pref_key)
-        DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
-        """,
-        (user_id, key, value, ts),
-    )
+    if _RUNTIME_DB_BACKEND == "sqlite_fallback":
+        cursor.execute(
+            """
+            INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, pref_key)
+            DO UPDATE SET pref_value = excluded.pref_value, updated_at = excluded.updated_at
+            """,
+            (user_id, key, value, ts),
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id, pref_key)
+            DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
+            """,
+            (user_id, key, value, ts),
+        )
 
 
 PBKDF2_ITERATIONS = 390000
@@ -626,14 +649,22 @@ questions = [
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
     global _DB_ACTIVE_CANDIDATE_INDEX, _DB_HOSTNAME, _DB_HOSTADDR, _DB_RUNTIME_LABEL
+    global _RUNTIME_DB_BACKEND, _DB_NEXT_PG_RETRY_TS
+
+    now_ts = _time.monotonic()
+    if _RUNTIME_DB_BACKEND == "sqlite_fallback" and now_ts < _DB_NEXT_PG_RETRY_TS:
+        conn = sqlite3.connect(_SQLITE_FALLBACK_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     # Try the last successful candidate first, then fall back to others.
     ordered_indices = [_DB_ACTIVE_CANDIDATE_INDEX] + [
         idx for idx in range(len(_DB_CONNECTION_CANDIDATES)) if idx != _DB_ACTIVE_CANDIDATE_INDEX
     ]
+    max_candidates = int(os.environ.get("MAX_DB_CANDIDATES", "24"))
 
     last_error = None
-    for idx in ordered_indices:
+    for idx in ordered_indices[:max_candidates]:
         candidate = _DB_CONNECTION_CANDIDATES[idx]
         options = _connection_options_from_url(candidate["url"], candidate["force_hostaddr"])
         try:
@@ -642,9 +673,21 @@ def get_db():
             _DB_RUNTIME_LABEL = candidate["label"]
             _DB_HOSTNAME = urlsplit(candidate["url"]).hostname
             _DB_HOSTADDR = options.get("hostaddr")
+            _RUNTIME_DB_BACKEND = "postgres"
             return conn
         except Exception as e:
             last_error = e
+
+    if _SQLITE_FALLBACK_ENABLED:
+        retry_after = int(os.environ.get("PG_RETRY_INTERVAL_SEC", "120"))
+        _DB_NEXT_PG_RETRY_TS = now_ts + retry_after
+        _RUNTIME_DB_BACKEND = "sqlite_fallback"
+        _DB_RUNTIME_LABEL = "sqlite_fallback"
+        _DB_HOSTNAME = "sqlite-local"
+        _DB_HOSTADDR = None
+        conn = sqlite3.connect(_SQLITE_FALLBACK_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     if last_error is not None:
         raise last_error
@@ -655,6 +698,74 @@ def init_db() -> None:
     """Initialize PostgreSQL schema with all required tables and indexes."""
     conn = get_db()
     c = conn.cursor()
+
+    if _RUNTIME_DB_BACKEND == "sqlite_fallback":
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                username TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_login TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+            """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                reminder_time TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                repeat_type TEXT DEFAULT 'once',
+                priority TEXT DEFAULT 'normal',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                lang TEXT DEFAULT 'en',
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                is_bot INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                is_deleted INTEGER DEFAULT 0,
+                token_count INTEGER
+            )
+            """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                pref_key TEXT NOT NULL,
+                pref_value TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, pref_key)
+            )
+            """
+        )
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users (email)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)")
+        conn.commit()
+        conn.close()
+        _builtins._original_print("[DB] ⚠ SQLite fallback database initialized")
+        return
 
     id_type = "BIGSERIAL PRIMARY KEY"
     id_ref = "BIGINT"
@@ -948,7 +1059,7 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     c = conn.cursor()
     try:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (%s, %s, %s)", (email, hash_password(password), ts))
+        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
         conn.commit()
         conn.close()
         return RedirectResponse(url="/login", status_code=303)
@@ -1295,7 +1406,8 @@ async def health_db():
         _ = c.fetchone()
         return JSONResponse({
             "ok": True,
-            "backend": DB_BACKEND,
+            "backend": _RUNTIME_DB_BACKEND,
+            "configured_backend": DB_BACKEND,
             "db_initialized": initialized,
             "db_init_error": _db_init_error,
             "db_url_source": _DB_URL_SOURCE,
@@ -1307,7 +1419,8 @@ async def health_db():
         return JSONResponse(
             {
                 "ok": False,
-                "backend": DB_BACKEND,
+                "backend": _RUNTIME_DB_BACKEND,
+                "configured_backend": DB_BACKEND,
                 "db_initialized": initialized,
                 "db_init_error": _db_init_error,
                 "db_url_source": _DB_URL_SOURCE,
@@ -1330,7 +1443,8 @@ async def health():
         {
             "ok": True,
             "service": "the-listening-tree",
-            "backend": DB_BACKEND,
+            "backend": _RUNTIME_DB_BACKEND,
+            "configured_backend": DB_BACKEND,
             "db_initialized": _db_initialized,
             "db_init_error": _db_init_error,
             "db_url_source": _DB_URL_SOURCE,
