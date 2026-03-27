@@ -105,7 +105,7 @@ async def run_periodic_tasks():
             query = (
                 "SELECT u.email, r.label, r.reminder_time FROM reminders r "
                 "JOIN users u ON r.user_id = u.id "
-                "WHERE r.is_active = 1 AND DATE(r.created_at) = ?"
+                "WHERE r.is_active = TRUE AND DATE(r.created_at) = ?"
             )
             db_execute(c, query, (today,))
             for row in c.fetchall():
@@ -799,7 +799,7 @@ def ensure_db_initialized(strict: bool = False) -> bool:
 def cleanup_old_chat_history() -> None:
     """Soft-delete chat messages older than *CHAT_HISTORY_RETENTION_MINUTES*.
 
-    Sets ``is_deleted = 1`` instead of physically removing rows so that
+    Sets ``is_deleted = TRUE`` instead of physically removing rows so that
     analytics or audit queries can still access the data if needed.
     """
     conn = get_db()
@@ -808,7 +808,7 @@ def cleanup_old_chat_history() -> None:
     cutoff_datetime = datetime.fromtimestamp(cutoff_time).strftime("%Y-%m-%d %H:%M:%S")
     db_execute(
         c,
-        "UPDATE chat_history SET is_deleted = 1 WHERE timestamp < ? AND is_deleted = 0",
+        "UPDATE chat_history SET is_deleted = TRUE WHERE timestamp < ? AND is_deleted = FALSE",
         (cutoff_datetime,),
     )
     deleted_count = c.rowcount
@@ -829,8 +829,8 @@ def auto_expire_old_reminders() -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db_execute(
         c,
-        "UPDATE reminders SET is_active = 0, updated_at = ? "
-        "WHERE DATE(created_at) < ? AND is_active = 1",
+        "UPDATE reminders SET is_active = FALSE, updated_at = ? "
+        "WHERE DATE(created_at) < ? AND is_active = TRUE",
         (ts, today),
     )
     expired = c.rowcount
@@ -1064,7 +1064,7 @@ async def get_response(request: Request, msg: str = Form(...)):
     # Store user message
     db_execute(
         c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, FALSE, ?, FALSE)",
         (uid, lang, timestamp, user_input_original),
     )
     conn.commit()
@@ -1107,7 +1107,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[1:-1])
             else:
                 response = "格式：設置提醒 [活動] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)", (uid, lang, timestamp, response))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
         else:
@@ -1117,7 +1117,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[2:-1])
             else:
                 response = "Usage: set reminder [activity] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)", (uid, lang, timestamp, response))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
 
@@ -1128,7 +1128,7 @@ async def get_response(request: Request, msg: str = Form(...)):
             if 0 <= h <= 23 and 0 <= m <= 59:
                 db_execute(
                     c,
-                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
+                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, TRUE, ?)",
                     (uid, label, time_str, timestamp),
                 )
                 conn.commit()
@@ -1228,7 +1228,7 @@ async def get_response(request: Request, msg: str = Form(...)):
     # Store bot response
     db_execute(
         c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
         (uid, lang, timestamp, response),
     )
     conn.commit()
@@ -1275,7 +1275,7 @@ async def deactivate_reminder(request: Request, label: str = Form(...)):
     conn = get_db()
     c = conn.cursor()
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    db_execute(c, "UPDATE reminders SET is_active = 0, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
+    db_execute(c, "UPDATE reminders SET is_active = FALSE, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
     conn.commit()
     conn.close()
     return JSONResponse({"success": True})
@@ -1308,7 +1308,7 @@ async def get_chat_history(request: Request):
     c = conn.cursor()
     db_execute(
         c,
-        "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = 0 ORDER BY timestamp",
+        "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
         (uid, lang),
     )
     history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
