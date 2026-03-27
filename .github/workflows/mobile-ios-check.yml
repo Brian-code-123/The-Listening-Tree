@@ -1,0 +1,29 @@
+name: Mobile iOS Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios-sync:
+    name: iOS Capacitor Sync
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: CocoaPods install
+        run: |
+          cd ios/App
+          pod install
+
+      - name: Capacitor iOS sync check
+        run: npm run ci:mobile:ios
