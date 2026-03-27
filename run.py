@@ -247,7 +247,7 @@ def _connection_options_from_url(db_url: str, force_hostaddr: bool = True) -> di
     options = {
         "dsn": normalized_url,
         "cursor_factory": RealDictCursor,
-        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "3")),
+        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "1")),
         "application_name": "the-listening-tree",
     }
 
@@ -294,17 +294,21 @@ def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
         "SUPABASE_POOLER_REGIONS",
         "ap-southeast-1,ap-northeast-1,us-east-1,us-west-1,eu-west-1,eu-central-1,ap-south-1",
     )
+    host_prefixes = [p.strip() for p in os.environ.get("SUPABASE_POOLER_HOST_PREFIXES", "aws-0,aws-1").split(",") if p.strip()]
     pooler_hosts = []
     preferred_host = pooler_host_override or "aws-0-ap-southeast-1.pooler.supabase.com"
     pooler_hosts.append(preferred_host)
     for region in [r.strip() for r in region_candidates.split(",") if r.strip()]:
-        host = f"aws-0-{region}.pooler.supabase.com"
-        if host not in pooler_hosts:
-            pooler_hosts.append(host)
+        for prefix in host_prefixes:
+            host = f"{prefix}-{region}.pooler.supabase.com"
+            if host not in pooler_hosts:
+                pooler_hosts.append(host)
 
     pooler_ports = [p.strip() for p in os.environ.get("SUPABASE_POOLER_PORTS", "6543,5432").split(",") if p.strip()]
-    option_variants = [None, f"project={project_ref}"]
-    ordered_users = sorted(username_variants, key=lambda u: (0 if u.startswith("postgres.") else 1, len(u), u))
+    option_variants = [None]
+    if os.environ.get("SUPABASE_POOLER_TRY_PROJECT_OPTION", "0") == "1":
+        option_variants.append(f"project={project_ref}")
+    ordered_users = sorted(username_variants, key=lambda u: (0 if u.startswith("postgres.") else 1, len(u), u))[:3]
     for pooler_host in pooler_hosts:
         for pooler_port in pooler_ports:
             for user_variant in ordered_users:
@@ -649,7 +653,7 @@ def get_db():
     ordered_indices = [_DB_ACTIVE_CANDIDATE_INDEX] + [
         idx for idx in range(len(_DB_CONNECTION_CANDIDATES)) if idx != _DB_ACTIVE_CANDIDATE_INDEX
     ]
-    max_candidates = int(os.environ.get("MAX_DB_CANDIDATES", "12"))
+    max_candidates = int(os.environ.get("MAX_DB_CANDIDATES", "20"))
 
     last_error = None
     last_error_label = None
