@@ -235,11 +235,10 @@ def _resolve_ipv4_hostaddr(hostname: str) -> Optional[str]:
     return None
 
 
-def _build_db_connect_options(raw_url: str) -> dict:
-    """Build psycopg2 connection options with resilient defaults."""
-    normalized_url = _normalize_db_url(raw_url)
+def _connection_options_from_url(db_url: str, force_hostaddr: bool = True) -> dict:
+    """Build psycopg2 options from a URL with stable defaults."""
+    normalized_url = _normalize_db_url(db_url)
     parts = urlsplit(normalized_url)
-
     options = {
         "dsn": normalized_url,
         "cursor_factory": RealDictCursor,
@@ -247,22 +246,94 @@ def _build_db_connect_options(raw_url: str) -> dict:
         "application_name": "the-listening-tree",
     }
 
-    # Prefer explicit hostaddr override first; otherwise resolve IPv4 automatically.
-    hostaddr_override = os.environ.get("PGHOSTADDR")
-    if hostaddr_override:
-        options["hostaddr"] = hostaddr_override
-    elif parts.hostname:
-        resolved = _resolve_ipv4_hostaddr(parts.hostname)
-        if resolved:
-            options["hostaddr"] = resolved
+    if force_hostaddr:
+        hostaddr_override = os.environ.get("PGHOSTADDR")
+        if hostaddr_override:
+            options["hostaddr"] = hostaddr_override
+        elif parts.hostname:
+            resolved = _resolve_ipv4_hostaddr(parts.hostname)
+            if resolved:
+                options["hostaddr"] = resolved
 
     return options
 
 
+def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
+    """Build candidate Supabase pooler URLs for IPv6-only direct hosts."""
+    candidates: List[dict] = []
+    parts = urlsplit(base_url)
+    hostname = parts.hostname or ""
+    if not hostname.startswith("db.") or not hostname.endswith(".supabase.co"):
+        return candidates
+
+    project_ref = hostname.split(".")[1]
+    username = parts.username or "postgres"
+    password = parts.password or ""
+    database = parts.path or "/postgres"
+
+    username_variants = [username]
+    ref_user = f"{username}.{project_ref}"
+    if ref_user not in username_variants:
+        username_variants.append(ref_user)
+
+    pooler_host_override = os.environ.get("SUPABASE_POOLER_HOST")
+    region_candidates = os.environ.get(
+        "SUPABASE_POOLER_REGIONS",
+        "ap-southeast-1,ap-northeast-1,us-east-1,us-west-1,eu-west-1,eu-central-1,ap-south-1",
+    )
+    pooler_hosts = []
+    if pooler_host_override:
+        pooler_hosts.append(pooler_host_override)
+    else:
+        for region in [r.strip() for r in region_candidates.split(",") if r.strip()]:
+            pooler_hosts.append(f"aws-0-{region}.pooler.supabase.com")
+
+    pooler_port = os.environ.get("SUPABASE_POOLER_PORT", "6543")
+    for pooler_host in pooler_hosts:
+        for user_variant in username_variants:
+            netloc = f"{user_variant}:{password}@{pooler_host}:{pooler_port}"
+            pooler_url = urlunsplit((parts.scheme, netloc, database, parts.query, parts.fragment))
+            candidates.append(
+                {
+                    "label": f"pooler:{pooler_host}:{pooler_port}:{user_variant}",
+                    "url": _normalize_db_url(pooler_url),
+                    "force_hostaddr": False,
+                }
+            )
+    return candidates
+
+
+def _build_db_connection_candidates(raw_url: str) -> List[dict]:
+    """Create an ordered list of DB connection candidates."""
+    base_url = _normalize_db_url(raw_url)
+    candidates = [
+        {
+            "label": "primary",
+            "url": base_url,
+            "force_hostaddr": True,
+        }
+    ]
+
+    if _DB_URL_SOURCE == "database_url":
+        candidates.extend(_build_supabase_pooler_candidates(base_url))
+
+    return candidates
+
+
 _DB_PATH = _normalize_db_url(_DATABASE_URL)
-_DB_CONNECT_OPTIONS = _build_db_connect_options(_DATABASE_URL)
-_DB_HOSTNAME = urlsplit(_DB_PATH).hostname
-_DB_HOSTADDR = _DB_CONNECT_OPTIONS.get("hostaddr")
+_DB_CONNECTION_CANDIDATES = _build_db_connection_candidates(_DATABASE_URL)
+_DB_ACTIVE_CANDIDATE_INDEX = 0
+
+
+def _active_db_parts():
+    current = _DB_CONNECTION_CANDIDATES[_DB_ACTIVE_CANDIDATE_INDEX]
+    return current, urlsplit(current["url"]), _connection_options_from_url(current["url"], current["force_hostaddr"])
+
+
+_db_current, _db_parts, _db_options = _active_db_parts()
+_DB_HOSTNAME = _db_parts.hostname
+_DB_HOSTADDR = _db_options.get("hostaddr")
+_DB_RUNTIME_LABEL = _db_current["label"]
 
 if psycopg2 is None:
     raise RuntimeError("psycopg2 is required for PostgreSQL connection but is not installed.")
@@ -539,7 +610,30 @@ questions = [
 # ---------------------------------------------------------------------------
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
-    return psycopg2.connect(**_DB_CONNECT_OPTIONS)
+    global _DB_ACTIVE_CANDIDATE_INDEX, _DB_HOSTNAME, _DB_HOSTADDR, _DB_RUNTIME_LABEL
+
+    # Try the last successful candidate first, then fall back to others.
+    ordered_indices = [_DB_ACTIVE_CANDIDATE_INDEX] + [
+        idx for idx in range(len(_DB_CONNECTION_CANDIDATES)) if idx != _DB_ACTIVE_CANDIDATE_INDEX
+    ]
+
+    last_error = None
+    for idx in ordered_indices:
+        candidate = _DB_CONNECTION_CANDIDATES[idx]
+        options = _connection_options_from_url(candidate["url"], candidate["force_hostaddr"])
+        try:
+            conn = psycopg2.connect(**options)
+            _DB_ACTIVE_CANDIDATE_INDEX = idx
+            _DB_RUNTIME_LABEL = candidate["label"]
+            _DB_HOSTNAME = urlsplit(candidate["url"]).hostname
+            _DB_HOSTADDR = options.get("hostaddr")
+            return conn
+        except Exception as e:
+            last_error = e
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("No database connection candidates are available.")
 
 
 def init_db() -> None:
@@ -1190,6 +1284,7 @@ async def health_db():
             "db_initialized": initialized,
             "db_init_error": _db_init_error,
             "db_url_source": _DB_URL_SOURCE,
+            "db_runtime_label": _DB_RUNTIME_LABEL,
             "db_hostname": _DB_HOSTNAME,
             "db_hostaddr": _DB_HOSTADDR,
         })
@@ -1201,6 +1296,7 @@ async def health_db():
                 "db_initialized": initialized,
                 "db_init_error": _db_init_error,
                 "db_url_source": _DB_URL_SOURCE,
+                "db_runtime_label": _DB_RUNTIME_LABEL,
                 "db_hostname": _DB_HOSTNAME,
                 "db_hostaddr": _DB_HOSTADDR,
                 "error": str(e),
@@ -1223,6 +1319,7 @@ async def health():
             "db_initialized": _db_initialized,
             "db_init_error": _db_init_error,
             "db_url_source": _DB_URL_SOURCE,
+            "db_runtime_label": _DB_RUNTIME_LABEL,
             "db_hostname": _DB_HOSTNAME,
             "db_hostaddr": _DB_HOSTADDR,
         }
