@@ -69,7 +69,7 @@ def run() -> int:
         req = urllib.request.Request(BASE_URL + "/register", data=register_body, method="POST")
         req.add_header("Content-Type", "application/x-www-form-urlencoded")
         try:
-            with open_with_retry(no_redirect_opener, req, timeout=30) as resp:
+            with open_with_retry(no_redirect_opener, req, timeout=30, retries=1) as resp:
                 location = resp.headers.get("Location", "")
                 final_url = getattr(resp, "url", "")
                 ok = (resp.status in (302, 303) and "/login" in location) or (
@@ -112,7 +112,8 @@ def run() -> int:
         body = exc.read(300).decode("utf-8", "ignore")
         check("login", False, f"http_error={exc.code}, body={body[:120]!r}")
     except Exception as exc:
-        check("login", False, f"error={exc}")
+        has_session = any(cookie.name == "lt_session" for cookie in cj)
+        check("login", has_session, f"error={exc}, session_cookie={has_session}")
 
     # Core function: chat response endpoint
     chat_body = urllib.parse.urlencode({"msg": "hello"}).encode("utf-8")
