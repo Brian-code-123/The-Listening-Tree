@@ -28,11 +28,13 @@ import random
 import threading
 import hashlib
 import hmac
+import socket
 import builtins as _builtins
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # ---------------------------------------------------------------------------
 # Third-party imports
@@ -196,12 +198,71 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 # ─────────────────────────────────────────────────────────────
 # Database: PostgreSQL (Supabase)
 # ─────────────────────────────────────────────────────────────
-_DATABASE_URL = os.environ.get("DATABASE_URL")
+_POOLER_DATABASE_URL = (
+    os.environ.get("SUPABASE_POOLER_URL")
+    or os.environ.get("POSTGRES_POOLER_URL")
+    or os.environ.get("DATABASE_POOLER_URL")
+)
+_DATABASE_URL = _POOLER_DATABASE_URL or os.environ.get("DATABASE_URL")
 if not _DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is required. Configure Supabase PostgreSQL URL in environment variables.")
+    raise RuntimeError(
+        "DATABASE_URL is required. Configure Supabase PostgreSQL URL in environment variables."
+    )
 
 DB_BACKEND = "postgres"
-_DB_PATH = _DATABASE_URL
+_DB_URL_SOURCE = "pooler_url" if _POOLER_DATABASE_URL else "database_url"
+
+
+def _normalize_db_url(raw_url: str) -> str:
+    """Ensure required DB URL query params exist for production-safe connections."""
+    parts = urlsplit(raw_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("sslmode", "require")
+    query_string = urlencode(query)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query_string, parts.fragment))
+
+
+def _resolve_ipv4_hostaddr(hostname: str) -> Optional[str]:
+    """Resolve a hostname to one IPv4 address for environments without IPv6 routing."""
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
+    except Exception:
+        return None
+
+    for _family, _socktype, _proto, _canonname, sockaddr in infos:
+        if sockaddr and sockaddr[0]:
+            return sockaddr[0]
+    return None
+
+
+def _build_db_connect_options(raw_url: str) -> dict:
+    """Build psycopg2 connection options with resilient defaults."""
+    normalized_url = _normalize_db_url(raw_url)
+    parts = urlsplit(normalized_url)
+
+    options = {
+        "dsn": normalized_url,
+        "cursor_factory": RealDictCursor,
+        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "10")),
+        "application_name": "the-listening-tree",
+    }
+
+    # Prefer explicit hostaddr override first; otherwise resolve IPv4 automatically.
+    hostaddr_override = os.environ.get("PGHOSTADDR")
+    if hostaddr_override:
+        options["hostaddr"] = hostaddr_override
+    elif parts.hostname:
+        resolved = _resolve_ipv4_hostaddr(parts.hostname)
+        if resolved:
+            options["hostaddr"] = resolved
+
+    return options
+
+
+_DB_PATH = _normalize_db_url(_DATABASE_URL)
+_DB_CONNECT_OPTIONS = _build_db_connect_options(_DATABASE_URL)
+_DB_HOSTNAME = urlsplit(_DB_PATH).hostname
+_DB_HOSTADDR = _DB_CONNECT_OPTIONS.get("hostaddr")
 
 if psycopg2 is None:
     raise RuntimeError("psycopg2 is required for PostgreSQL connection but is not installed.")
@@ -478,7 +539,7 @@ questions = [
 # ---------------------------------------------------------------------------
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
-    return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
+    return psycopg2.connect(**_DB_CONNECT_OPTIONS)
 
 
 def init_db() -> None:
@@ -1128,6 +1189,9 @@ async def health_db():
             "backend": DB_BACKEND,
             "db_initialized": initialized,
             "db_init_error": _db_init_error,
+            "db_url_source": _DB_URL_SOURCE,
+            "db_hostname": _DB_HOSTNAME,
+            "db_hostaddr": _DB_HOSTADDR,
         })
     except Exception as e:
         return JSONResponse(
@@ -1136,6 +1200,9 @@ async def health_db():
                 "backend": DB_BACKEND,
                 "db_initialized": initialized,
                 "db_init_error": _db_init_error,
+                "db_url_source": _DB_URL_SOURCE,
+                "db_hostname": _DB_HOSTNAME,
+                "db_hostaddr": _DB_HOSTADDR,
                 "error": str(e),
             },
             status_code=500,
@@ -1155,6 +1222,9 @@ async def health():
             "backend": DB_BACKEND,
             "db_initialized": _db_initialized,
             "db_init_error": _db_init_error,
+            "db_url_source": _DB_URL_SOURCE,
+            "db_hostname": _DB_HOSTNAME,
+            "db_hostaddr": _DB_HOSTADDR,
         }
     )
 
