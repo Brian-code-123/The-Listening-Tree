@@ -215,6 +215,7 @@ _DB_URL_SOURCE = "pooler_url" if _POOLER_DATABASE_URL else "database_url"
 _RUNTIME_DB_BACKEND = DB_BACKEND
 _DB_NEXT_PG_RETRY_TS = 0.0
 _DB_LAST_PG_ERROR: Optional[str] = None
+_DB_LAST_PG_ATTEMPTS: List[str] = []
 
 
 def _normalize_db_url(raw_url: str) -> str:
@@ -636,7 +637,7 @@ questions = [
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
     global _DB_ACTIVE_CANDIDATE_INDEX, _DB_HOSTNAME, _DB_HOSTADDR, _DB_RUNTIME_LABEL
-    global _RUNTIME_DB_BACKEND, _DB_NEXT_PG_RETRY_TS, _DB_LAST_PG_ERROR
+    global _RUNTIME_DB_BACKEND, _DB_NEXT_PG_RETRY_TS, _DB_LAST_PG_ERROR, _DB_LAST_PG_ATTEMPTS
 
     now_ts = _time.monotonic()
     if now_ts < _DB_NEXT_PG_RETRY_TS:
@@ -652,6 +653,7 @@ def get_db():
 
     last_error = None
     last_error_label = None
+    attempts: List[str] = []
     for idx in ordered_indices[:max_candidates]:
         candidate = _DB_CONNECTION_CANDIDATES[idx]
         options = _connection_options_from_url(candidate["url"], candidate["force_hostaddr"])
@@ -664,16 +666,19 @@ def get_db():
             _RUNTIME_DB_BACKEND = "postgres"
             _DB_NEXT_PG_RETRY_TS = 0.0
             _DB_LAST_PG_ERROR = None
+            _DB_LAST_PG_ATTEMPTS = []
             return conn
         except Exception as e:
             last_error = e
             last_error_label = candidate["label"]
+            attempts.append(f"{candidate['label']} => {str(e).splitlines()[0][:160]}")
 
     if last_error is not None:
         retry_after = int(os.environ.get("PG_RETRY_INTERVAL_SEC", "5"))
         _DB_NEXT_PG_RETRY_TS = now_ts + retry_after
         label = last_error_label or "unknown-candidate"
         _DB_LAST_PG_ERROR = f"[{label}] {last_error}"
+        _DB_LAST_PG_ATTEMPTS = attempts[:12]
         raise RuntimeError(f"PostgreSQL connection failed on {label}; retry in {retry_after}s: {last_error}")
     raise RuntimeError("No database connection candidates are available.")
 
@@ -1330,6 +1335,7 @@ async def health_db():
             "db_runtime_label": _DB_RUNTIME_LABEL,
             "db_hostname": _DB_HOSTNAME,
             "db_hostaddr": _DB_HOSTADDR,
+            "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
         })
     except Exception as e:
         return JSONResponse(
@@ -1343,6 +1349,7 @@ async def health_db():
                 "db_runtime_label": _DB_RUNTIME_LABEL,
                 "db_hostname": _DB_HOSTNAME,
                 "db_hostaddr": _DB_HOSTADDR,
+                "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
                 "error": str(e),
             },
             status_code=500,
@@ -1367,6 +1374,7 @@ async def health():
             "db_runtime_label": _DB_RUNTIME_LABEL,
             "db_hostname": _DB_HOSTNAME,
             "db_hostaddr": _DB_HOSTADDR,
+            "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
         }
     )
 
