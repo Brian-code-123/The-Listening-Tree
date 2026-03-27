@@ -242,7 +242,7 @@ def _connection_options_from_url(db_url: str, force_hostaddr: bool = True) -> di
     options = {
         "dsn": normalized_url,
         "cursor_factory": RealDictCursor,
-        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "10")),
+        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "3")),
         "application_name": "the-listening-tree",
     }
 
@@ -270,11 +270,17 @@ def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
     username = parts.username or "postgres"
     password = parts.password or ""
     database = parts.path or "/postgres"
+    existing_query = dict(parse_qsl(parts.query, keep_blank_values=True))
 
-    username_variants = [username]
-    ref_user = f"{username}.{project_ref}"
-    if ref_user not in username_variants:
-        username_variants.append(ref_user)
+    username_variants = {
+        username,
+        f"{username}.{project_ref}",
+        f"postgres.{project_ref}",
+        project_ref,
+    }
+    # If username already contains a tenant suffix, also try the bare prefix.
+    if "." in username:
+        username_variants.add(username.split(".", 1)[0])
 
     pooler_host_override = os.environ.get("SUPABASE_POOLER_HOST")
     region_candidates = os.environ.get(
@@ -288,18 +294,27 @@ def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
         for region in [r.strip() for r in region_candidates.split(",") if r.strip()]:
             pooler_hosts.append(f"aws-0-{region}.pooler.supabase.com")
 
-    pooler_port = os.environ.get("SUPABASE_POOLER_PORT", "6543")
+    pooler_ports = [p.strip() for p in os.environ.get("SUPABASE_POOLER_PORTS", "6543,5432").split(",") if p.strip()]
+    option_variants = [None, f"project={project_ref}"]
     for pooler_host in pooler_hosts:
-        for user_variant in username_variants:
-            netloc = f"{user_variant}:{password}@{pooler_host}:{pooler_port}"
-            pooler_url = urlunsplit((parts.scheme, netloc, database, parts.query, parts.fragment))
-            candidates.append(
-                {
-                    "label": f"pooler:{pooler_host}:{pooler_port}:{user_variant}",
-                    "url": _normalize_db_url(pooler_url),
-                    "force_hostaddr": False,
-                }
-            )
+        for pooler_port in pooler_ports:
+            for user_variant in sorted(username_variants):
+                for extra_option in option_variants:
+                    query = dict(existing_query)
+                    if extra_option:
+                        query["options"] = extra_option
+                    query_string = urlencode(query)
+
+                    netloc = f"{user_variant}:{password}@{pooler_host}:{pooler_port}"
+                    pooler_url = urlunsplit((parts.scheme, netloc, database, query_string, parts.fragment))
+                    option_suffix = "" if not extra_option else ":opt_project"
+                    candidates.append(
+                        {
+                            "label": f"pooler:{pooler_host}:{pooler_port}:{user_variant}{option_suffix}",
+                            "url": _normalize_db_url(pooler_url),
+                            "force_hostaddr": False,
+                        }
+                    )
     return candidates
 
 
