@@ -9,7 +9,6 @@ jobs:
   deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    if: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -23,17 +22,36 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Precheck Vercel secrets
+        id: precheck
+        run: |
+          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+            echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+            echo "Vercel secrets detected. Proceeding with deploy."
+          else
+            echo "has_secrets=false" >> "$GITHUB_OUTPUT"
+            echo "Vercel secrets missing. Deploy steps will be skipped."
+          fi
+
       - name: Install dependencies
+        if: steps.precheck.outputs.has_secrets == 'true'
         run: npm install
 
       - name: Pull Vercel environment
+        if: steps.precheck.outputs.has_secrets == 'true'
         run: npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
 
       - name: Build on Vercel
+        if: steps.precheck.outputs.has_secrets == 'true'
         run: npx vercel build --prod --token "$VERCEL_TOKEN"
 
       - name: Deploy to Vercel production
+        if: steps.precheck.outputs.has_secrets == 'true'
         run: npx vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN"
+
+      - name: Skip deploy notice
+        if: steps.precheck.outputs.has_secrets != 'true'
+        run: echo "Skipping deployment because required Vercel secrets are not configured."
 
   verify-production:
     name: Verify Production Health
