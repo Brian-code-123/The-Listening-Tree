@@ -156,7 +156,8 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         # Normal cancellation during shutdown.
-        pass
+        # Re-raise CancelledError after cleanup code (PEP 492)
+        raise
 
 # ---------------------------------------------------------------------------
 # Application initialisation
