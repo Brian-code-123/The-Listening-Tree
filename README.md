@@ -12,6 +12,12 @@ A bilingual (English + Cantonese) conversational chatbot designed to reduce lone
 
 ---
 
+## DevOps & CI/CD
+
+Operational runbook and pipeline setup are documented in `DEVOPS_CICD_RUNBOOK.md`.
+
+---
+
 ## Table of Contents
 
 1. [Introduction](#introduction)

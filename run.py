@@ -26,11 +26,16 @@ import asyncio
 import secrets
 import random
 import threading
+import hashlib
+import hmac
+import socket
+import time as _time
 import builtins as _builtins
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote
 
 # ---------------------------------------------------------------------------
 # Third-party imports
@@ -79,6 +84,17 @@ if _MINIMAL_STARTUP:
 # ---------------------------------------------------------------------------
 from translations import get_text, get_all_translations, TRANSLATIONS
 
+
+def _safe_rowcount(cursor) -> int:
+    """Return cursor rowcount if available; otherwise fall back to 0.
+
+    Some DB-API implementations and test fakes do not expose ``rowcount``.
+    """
+    rc = getattr(cursor, "rowcount", None)
+    if isinstance(rc, int) and rc >= 0:
+        return rc
+    return 0
+
 # ---------------------------------------------------------------------------
 # Background Periodic Task Manager (Async Replacement for Daemon Thread)
 # ---------------------------------------------------------------------------
@@ -100,7 +116,7 @@ async def run_periodic_tasks():
             query = (
                 "SELECT u.email, r.label, r.reminder_time FROM reminders r "
                 "JOIN users u ON r.user_id = u.id "
-                "WHERE r.is_active = 1 AND DATE(r.created_at) = ?"
+                "WHERE r.is_active = TRUE AND DATE(r.created_at) = ?"
             )
             db_execute(c, query, (today,))
             for row in c.fetchall():
@@ -119,6 +135,10 @@ async def run_periodic_tasks():
             # 3. Clean Chat History (Every 10 minutes)
             if now.minute % 10 == 0:
                 cleanup_old_chat_history()
+
+        except asyncio.CancelledError:
+            # Allow graceful shutdown to stop this task immediately.
+            raise
 
         except Exception as e:
             _builtins._original_print(f"[ERROR] periodic_tasks: {e}")
@@ -162,17 +182,6 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan
 )
-# Session secret: prefer explicit environment variable for production stability.
-# If not provided, fall back to a generated ephemeral key (NOT recommended).
-_SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET") or secrets.token_hex(16)
-if _SECRET_KEY and len(_SECRET_KEY) >= 16:
-    print("[SECURITY] 🔑 SECRET_KEY is set")
-else:
-    print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
-app.add_middleware(SessionMiddleware, secret_key=_SECRET_KEY)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
-templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # Detect Vercel environment (serverless — no persistent filesystem)
 ON_VERCEL = bool(os.environ.get("VERCEL"))
@@ -180,16 +189,196 @@ ON_VERCEL = bool(os.environ.get("VERCEL"))
 # Production environment detection
 IN_PRODUCTION = ON_VERCEL or os.environ.get("ENVIRONMENT") == "production"
 
+# Session secret: prefer explicit environment variable for production stability.
+# If not provided, fall back to a generated ephemeral key (NOT recommended).
+_SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET") or secrets.token_hex(16)
+if IN_PRODUCTION and not (os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET")):
+    raise RuntimeError("SECRET_KEY (or SESSION_SECRET/FASTAPI_SECRET) is required in production to prevent session loss across restarts.")
+if _SECRET_KEY and len(_SECRET_KEY) >= 16:
+    print("[SECURITY] 🔑 SECRET_KEY is set")
+else:
+    print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_SECRET_KEY,
+    session_cookie="lt_session",
+    max_age=60 * 60 * 24 * 30,
+    same_site="lax",
+    https_only=IN_PRODUCTION,
+)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
 
 # ─────────────────────────────────────────────────────────────
 # Database: PostgreSQL (Supabase)
 # ─────────────────────────────────────────────────────────────
-_DATABASE_URL = os.environ.get("DATABASE_URL")
+_POOLER_DATABASE_URL = (
+    os.environ.get("SUPABASE_POOLER_URL")
+    or os.environ.get("POSTGRES_POOLER_URL")
+    or os.environ.get("DATABASE_POOLER_URL")
+)
+_DATABASE_URL = _POOLER_DATABASE_URL or os.environ.get("DATABASE_URL")
 if not _DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is required. Configure Supabase PostgreSQL URL in environment variables.")
+    raise RuntimeError(
+        "DATABASE_URL is required. Configure Supabase PostgreSQL URL in environment variables."
+    )
 
 DB_BACKEND = "postgres"
-_DB_PATH = _DATABASE_URL
+_DB_URL_SOURCE = "pooler_url" if _POOLER_DATABASE_URL else "database_url"
+_RUNTIME_DB_BACKEND = DB_BACKEND
+_DB_NEXT_PG_RETRY_TS = 0.0
+_DB_LAST_PG_ERROR: Optional[str] = None
+_DB_LAST_PG_ATTEMPTS: List[str] = []
+
+
+def _normalize_db_url(raw_url: str) -> str:
+    """Ensure required DB URL query params exist for production-safe connections."""
+    parts = urlsplit(raw_url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.setdefault("sslmode", "require")
+    query_string = urlencode(query)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query_string, parts.fragment))
+
+
+def _resolve_ipv4_hostaddr(hostname: str) -> Optional[str]:
+    """Resolve a hostname to one IPv4 address for environments without IPv6 routing."""
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
+    except Exception:
+        return None
+
+    for _family, _socktype, _proto, _canonname, sockaddr in infos:
+        if sockaddr and sockaddr[0]:
+            return sockaddr[0]
+    return None
+
+
+def _connection_options_from_url(db_url: str, force_hostaddr: bool = True) -> dict:
+    """Build psycopg2 options from a URL with stable defaults."""
+    normalized_url = _normalize_db_url(db_url)
+    parts = urlsplit(normalized_url)
+    options = {
+        "dsn": normalized_url,
+        "cursor_factory": RealDictCursor,
+        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "1")),
+        "application_name": "the-listening-tree",
+    }
+
+    if force_hostaddr:
+        hostaddr_override = os.environ.get("PGHOSTADDR")
+        if hostaddr_override:
+            options["hostaddr"] = hostaddr_override
+        elif parts.hostname:
+            resolved = _resolve_ipv4_hostaddr(parts.hostname)
+            if resolved:
+                options["hostaddr"] = resolved
+
+    return options
+
+
+def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
+    """Build candidate Supabase pooler URLs for IPv6-only direct hosts."""
+    candidates: List[dict] = []
+    parts = urlsplit(base_url)
+    hostname = parts.hostname or ""
+    if not hostname.startswith("db.") or not hostname.endswith(".supabase.co"):
+        return candidates
+
+    project_ref = hostname.split(".")[1]
+    username = parts.username or "postgres"
+    password = parts.password or ""
+    database = parts.path or "/postgres"
+    existing_query = dict(parse_qsl(parts.query, keep_blank_values=True))
+
+    username_variants = {
+        os.environ.get("SUPABASE_POOLER_USER", "").strip(),
+        f"postgres.{project_ref}",
+        f"{username}.{project_ref}",
+        username,
+        project_ref,
+    }
+    username_variants = {u for u in username_variants if u}
+    # If username already contains a tenant suffix, also try the bare prefix.
+    if "." in username:
+        username_variants.add(username.split(".", 1)[0])
+
+    pooler_host_override = os.environ.get("SUPABASE_POOLER_HOST")
+    region_candidates = os.environ.get(
+        "SUPABASE_POOLER_REGIONS",
+        "ap-southeast-1,ap-northeast-1,us-east-1,us-west-1,eu-west-1,eu-central-1,ap-south-1",
+    )
+    host_prefixes = [p.strip() for p in os.environ.get("SUPABASE_POOLER_HOST_PREFIXES", "aws-0,aws-1").split(",") if p.strip()]
+    pooler_hosts = []
+    preferred_host = pooler_host_override or "aws-0-ap-southeast-1.pooler.supabase.com"
+    pooler_hosts.append(preferred_host)
+    for region in [r.strip() for r in region_candidates.split(",") if r.strip()]:
+        for prefix in host_prefixes:
+            host = f"{prefix}-{region}.pooler.supabase.com"
+            if host not in pooler_hosts:
+                pooler_hosts.append(host)
+
+    pooler_ports = [p.strip() for p in os.environ.get("SUPABASE_POOLER_PORTS", "6543,5432").split(",") if p.strip()]
+    option_variants = [None]
+    if os.environ.get("SUPABASE_POOLER_TRY_PROJECT_OPTION", "0") == "1":
+        option_variants.append(f"project={project_ref}")
+    ordered_users = sorted(username_variants, key=lambda u: (0 if u.startswith("postgres.") else 1, len(u), u))[:3]
+    for pooler_host in pooler_hosts:
+        for pooler_port in pooler_ports:
+            for user_variant in ordered_users:
+                for extra_option in option_variants:
+                    query = dict(existing_query)
+                    if extra_option:
+                        query["options"] = extra_option
+                    query_string = urlencode(query)
+
+                    encoded_user = quote(user_variant, safe="")
+                    encoded_password = quote(password, safe="")
+                    netloc = f"{encoded_user}:{encoded_password}@{pooler_host}:{pooler_port}"
+                    pooler_url = urlunsplit((parts.scheme, netloc, database, query_string, parts.fragment))
+                    option_suffix = "" if not extra_option else ":opt_project"
+                    candidates.append(
+                        {
+                            "label": f"pooler:{pooler_host}:{pooler_port}:{user_variant}{option_suffix}",
+                            "url": _normalize_db_url(pooler_url),
+                            "force_hostaddr": False,
+                        }
+                    )
+    return candidates
+
+
+def _build_db_connection_candidates(raw_url: str) -> List[dict]:
+    """Create an ordered list of DB connection candidates."""
+    base_url = _normalize_db_url(raw_url)
+    candidates = [
+        {
+            "label": "primary",
+            "url": base_url,
+            "force_hostaddr": True,
+        }
+    ]
+
+    if _DB_URL_SOURCE == "database_url":
+        candidates.extend(_build_supabase_pooler_candidates(base_url))
+
+    return candidates
+
+
+_DB_PATH = _normalize_db_url(_DATABASE_URL)
+_DB_CONNECTION_CANDIDATES = _build_db_connection_candidates(_DATABASE_URL)
+_DB_ACTIVE_CANDIDATE_INDEX = 0
+
+
+def _active_db_parts():
+    current = _DB_CONNECTION_CANDIDATES[_DB_ACTIVE_CANDIDATE_INDEX]
+    return current, urlsplit(current["url"]), _connection_options_from_url(current["url"], current["force_hostaddr"])
+
+
+_db_current, _db_parts, _db_options = _active_db_parts()
+_DB_HOSTNAME = _db_parts.hostname
+_DB_HOSTADDR = _db_options.get("hostaddr")
+_DB_RUNTIME_LABEL = _db_current["label"]
 
 if psycopg2 is None:
     raise RuntimeError("psycopg2 is required for PostgreSQL connection but is not installed.")
@@ -201,7 +390,7 @@ def _db_param_placeholder(query: str) -> str:
 
 
 def db_execute(cursor, query: str, params: tuple = ()) -> None:
-    """Execute a query with PostgreSQL placeholder conversion."""
+    """Execute a query using PostgreSQL placeholder style."""
     cursor.execute(_db_param_placeholder(query), params)
 
 
@@ -218,6 +407,77 @@ def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, 
     )
 
 
+PBKDF2_ITERATIONS = 390000
+PBKDF2_SCHEME = "pbkdf2_sha256"
+
+
+def hash_password(password: str) -> str:
+    """Hash password using PBKDF2-HMAC-SHA256 with per-user random salt."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PBKDF2_ITERATIONS,
+    ).hex()
+    return f"{PBKDF2_SCHEME}${PBKDF2_ITERATIONS}${salt}${digest}"
+
+
+def is_password_hashed(stored: str) -> bool:
+    return isinstance(stored, str) and stored.startswith(f"{PBKDF2_SCHEME}$")
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Verify a plaintext password against hashed or legacy plaintext storage."""
+    if not stored:
+        return False
+    if not is_password_hashed(stored):
+        return hmac.compare_digest(password, stored)
+
+    try:
+        scheme, iter_str, salt, expected = stored.split("$", 3)
+        if scheme != PBKDF2_SCHEME:
+            return False
+        iterations = int(iter_str)
+        computed = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt.encode("utf-8"),
+            iterations,
+        ).hex()
+        return hmac.compare_digest(computed, expected)
+    except Exception:
+        return False
+
+
+def validate_email(email: str) -> tuple[bool, str]:
+    """Validate email format per RFC 5322 basic pattern.
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    import re
+    # RFC 5322 basic email pattern (simplified but covers most cases)
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(pattern, email):
+        return False, "Invalid email format"
+    return True, ""
+
+
+def validate_password_strength(password: str) -> tuple[bool, str]:
+    """Validate password meets minimum strength requirements.
+    
+    Requirements:
+    - Minimum 8 characters
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters"
+    return True, ""
+
+
 # ---------------------------------------------------------------------------
 # In-memory state  (lost on server restart — by design)
 # ---------------------------------------------------------------------------
@@ -227,8 +487,9 @@ user_game_states: dict = {}
 # Per-(user, lang) conversation context sent to the LLM
 user_api_histories: dict = {}
 
-# Messages older than this are soft-deleted from chat_history
-CHAT_HISTORY_RETENTION_MINUTES = 30
+# Keep only the most recent chat messages per user/language.
+# Older rows are soft-deleted to bound table growth while preserving continuity.
+CHAT_HISTORY_MAX_MESSAGES_PER_LANG = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES_PER_LANG", "200"))
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -395,7 +656,51 @@ questions = [
 # ---------------------------------------------------------------------------
 def get_db():
     """Open a PostgreSQL connection with dict-like row access."""
-    return psycopg2.connect(_DB_PATH, cursor_factory=RealDictCursor)
+    global _DB_ACTIVE_CANDIDATE_INDEX, _DB_HOSTNAME, _DB_HOSTADDR, _DB_RUNTIME_LABEL
+    global _RUNTIME_DB_BACKEND, _DB_NEXT_PG_RETRY_TS, _DB_LAST_PG_ERROR, _DB_LAST_PG_ATTEMPTS
+
+    now_ts = _time.monotonic()
+    if now_ts < _DB_NEXT_PG_RETRY_TS:
+        wait_seconds = max(1, int(_DB_NEXT_PG_RETRY_TS - now_ts))
+        error_hint = _DB_LAST_PG_ERROR or "PostgreSQL connection retry is currently throttled"
+        raise RuntimeError(f"PostgreSQL retry throttled for {wait_seconds}s: {error_hint}")
+
+    # Try the last successful candidate first, then fall back to others.
+    ordered_indices = [_DB_ACTIVE_CANDIDATE_INDEX] + [
+        idx for idx in range(len(_DB_CONNECTION_CANDIDATES)) if idx != _DB_ACTIVE_CANDIDATE_INDEX
+    ]
+    max_candidates = int(os.environ.get("MAX_DB_CANDIDATES", "20"))
+
+    last_error = None
+    last_error_label = None
+    attempts: List[str] = []
+    for idx in ordered_indices[:max_candidates]:
+        candidate = _DB_CONNECTION_CANDIDATES[idx]
+        options = _connection_options_from_url(candidate["url"], candidate["force_hostaddr"])
+        try:
+            conn = psycopg2.connect(**options)
+            _DB_ACTIVE_CANDIDATE_INDEX = idx
+            _DB_RUNTIME_LABEL = candidate["label"]
+            _DB_HOSTNAME = urlsplit(candidate["url"]).hostname
+            _DB_HOSTADDR = options.get("hostaddr")
+            _RUNTIME_DB_BACKEND = "postgres"
+            _DB_NEXT_PG_RETRY_TS = 0.0
+            _DB_LAST_PG_ERROR = None
+            _DB_LAST_PG_ATTEMPTS = []
+            return conn
+        except Exception as e:
+            last_error = e
+            last_error_label = candidate["label"]
+            attempts.append(f"{candidate['label']} => {str(e).splitlines()[0][:160]}")
+
+    if last_error is not None:
+        retry_after = int(os.environ.get("PG_RETRY_INTERVAL_SEC", "5"))
+        _DB_NEXT_PG_RETRY_TS = now_ts + retry_after
+        label = last_error_label or "unknown-candidate"
+        _DB_LAST_PG_ERROR = f"[{label}] {last_error}"
+        _DB_LAST_PG_ATTEMPTS = attempts[:12]
+        raise RuntimeError(f"PostgreSQL connection failed on {label}; retry in {retry_after}s: {last_error}")
+    raise RuntimeError("No database connection candidates are available.")
 
 
 def init_db() -> None:
@@ -462,6 +767,7 @@ def init_db() -> None:
     """)
     
     # Create indexes
+    c.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
@@ -507,25 +813,59 @@ def ensure_db_initialized(strict: bool = False) -> bool:
 # ---------------------------------------------------------------------------
 
 def cleanup_old_chat_history() -> None:
-    """Soft-delete chat messages older than *CHAT_HISTORY_RETENTION_MINUTES*.
-
-    Sets ``is_deleted = 1`` instead of physically removing rows so that
-    analytics or audit queries can still access the data if needed.
-    """
+    """Soft-delete oldest chat rows beyond the per-user/language cap."""
     conn = get_db()
     c = conn.cursor()
-    cutoff_time = datetime.now().timestamp() - (CHAT_HISTORY_RETENTION_MINUTES * 60)
-    cutoff_datetime = datetime.fromtimestamp(cutoff_time).strftime("%Y-%m-%d %H:%M:%S")
-    db_execute(
-        c,
-        "UPDATE chat_history SET is_deleted = 1 WHERE timestamp < ? AND is_deleted = 0",
-        (cutoff_datetime,),
+    c.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY user_id, lang
+                    ORDER BY timestamp DESC, id DESC
+                ) AS rn
+            FROM chat_history
+            WHERE is_deleted = FALSE
+        )
+        UPDATE chat_history AS ch
+        SET is_deleted = TRUE
+        FROM ranked
+        WHERE ch.id = ranked.id
+          AND ranked.rn > %s
+        """,
+        (CHAT_HISTORY_MAX_MESSAGES_PER_LANG,),
     )
-    deleted_count = c.rowcount
+    deleted_count = _safe_rowcount(c)
     conn.commit()
     conn.close()
     if deleted_count > 0:
-        print(f"[CLEANUP] 🗑️  Marked {deleted_count} old messages as deleted")
+        print(f"[CLEANUP] 🗑️  Marked {deleted_count} old chat rows as deleted")
+
+
+def prune_user_chat_history(cursor, user_id: int, lang: str) -> None:
+    """Prune oldest rows for one user/language after inserting new messages."""
+    c = cursor
+    c.execute(
+        """
+        WITH keep_ids AS (
+            SELECT id
+            FROM chat_history
+            WHERE user_id = %s
+              AND lang = %s
+              AND is_deleted = FALSE
+            ORDER BY timestamp DESC, id DESC
+            LIMIT %s
+        )
+        UPDATE chat_history
+        SET is_deleted = TRUE
+        WHERE user_id = %s
+          AND lang = %s
+          AND is_deleted = FALSE
+          AND id NOT IN (SELECT id FROM keep_ids)
+        """,
+        (user_id, lang, CHAT_HISTORY_MAX_MESSAGES_PER_LANG, user_id, lang),
+    )
 
 
 def auto_expire_old_reminders() -> None:
@@ -539,11 +879,11 @@ def auto_expire_old_reminders() -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db_execute(
         c,
-        "UPDATE reminders SET is_active = 0, updated_at = ? "
-        "WHERE DATE(created_at) < ? AND is_active = 1",
+        "UPDATE reminders SET is_active = FALSE, updated_at = ? "
+        "WHERE DATE(created_at) < ? AND is_active = TRUE",
         (ts, today),
     )
-    expired = c.rowcount
+    expired = _safe_rowcount(c)
     conn.commit()
     conn.close()
     if expired > 0:
@@ -619,11 +959,16 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
         HTMLResponse: Redirect to / (home) on success, or login.html with error message on failure
     """
     lang = get_lang(request)
+    email = email.strip().lower()
+    password = password.strip()
     conn = get_db()
     c = conn.cursor()
-    db_execute(c, "SELECT id, email FROM users WHERE email = ? AND password = ?", (email, password))
+    db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
     user = c.fetchone()
-    if user:
+    if user and verify_password(password, user["password"]):
+        if not is_password_hashed(user["password"]):
+            # Transparent migration for legacy plaintext rows.
+            db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
         conn.commit()
@@ -648,9 +993,11 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     """Create a new user account (registration).
 
     Validation steps:
-      1. Confirm password == password (client-side + server-side check)
-            2. Email must be unique (PostgreSQL UNIQUE constraint)
-      3. Password stored in plaintext (NOT production-safe; use bcrypt/Argon2 for real apps)
+      1. Email format validation (RFC 5322 basic pattern)
+      2. Password strength validation (min 8 characters)
+      3. Confirm password == password (client-side + server-side check)
+      4. Email must be unique (PostgreSQL UNIQUE constraint)
+      5. Password stored with PBKDF2-HMAC-SHA256
 
     On success: Inserts new user row with created_at timestamp, redirects to /login.
     On failure: Returns register.html with localized error message.
@@ -658,20 +1005,36 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     Args:
         request: HTTP request object
         email: Email address (must not exist in users table)
-        password: Password in plaintext
+        password: Password in plaintext (min 8 chars)
         confirm_password: Confirmation password (must == password)
 
     Returns:
         HTMLResponse: Redirect to /login on success, or register.html with error on failure
     """
     lang = get_lang(request)
+    email = email.strip().lower()
+    password = password.strip()
+    confirm_password = confirm_password.strip()
+    
+    # Validate email format
+    is_valid_email, email_error = validate_email(email)
+    if not is_valid_email:
+        return templates.TemplateResponse("register.html", tpl_context(request, error="Invalid email format" if lang == 'en' else "電郵格式無效"))
+    
+    # Validate password strength
+    is_valid_password, password_error = validate_password_strength(password)
+    if not is_valid_password:
+        return templates.TemplateResponse("register.html", tpl_context(request, error="Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元"))
+    
+    # Validate password confirmation
     if password != confirm_password:
         return templates.TemplateResponse("register.html", tpl_context(request, error="Passwords do not match" if lang == 'en' else "密碼唔一致"))
+    
     conn = get_db()
     c = conn.cursor()
     try:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, password, ts))
+        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
         conn.commit()
         conn.close()
         return RedirectResponse(url="/login", status_code=303)
@@ -681,7 +1044,17 @@ async def register_post(request: Request, email: str = Form(...), password: str 
     except Exception as e:
         conn.close()
         _builtins._original_print(f"[ERROR] Registration failed: {e}")
-        return templates.TemplateResponse("register.html", tpl_context(request, error="Registration failed" if lang == 'en' else "註冊失敗"))
+        return templates.TemplateResponse(
+            "register.html",
+            tpl_context(
+                request,
+                error=(
+                    "Service temporarily unavailable. Your account data remains in database; please try again."
+                    if lang == 'en'
+                    else "服務暫時不可用。帳號資料會保留喺資料庫，請稍後再試。"
+                ),
+            ),
+        )
 
 @app.get("/forgot_password")
 async def forgot_password(request: Request):
@@ -751,7 +1124,7 @@ async def get_response(request: Request, msg: str = Form(...)):
     # Store user message
     db_execute(
         c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 0, ?, 0)",
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, FALSE, ?, FALSE)",
         (uid, lang, timestamp, user_input_original),
     )
     conn.commit()
@@ -794,7 +1167,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[1:-1])
             else:
                 response = "格式：設置提醒 [活動] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)", (uid, lang, timestamp, response))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
         else:
@@ -804,7 +1177,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[2:-1])
             else:
                 response = "Usage: set reminder [activity] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)", (uid, lang, timestamp, response))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
 
@@ -815,7 +1188,7 @@ async def get_response(request: Request, msg: str = Form(...)):
             if 0 <= h <= 23 and 0 <= m <= 59:
                 db_execute(
                     c,
-                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
+                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, TRUE, ?)",
                     (uid, label, time_str, timestamp),
                 )
                 conn.commit()
@@ -835,7 +1208,7 @@ async def get_response(request: Request, msg: str = Form(...)):
             label = parts[2] if len(parts) == 3 else None
         if label:
             db_execute(c, "DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
-            if c.rowcount > 0:
+            if _safe_rowcount(c) > 0:
                 response = f"已刪除提醒：{label}" if lang == 'zh-HK' else f"Deleted reminder: {label}"
             else:
                 response = "搵唔到呢個提醒。" if lang == 'zh-HK' else "No reminder found with that name."
@@ -915,9 +1288,12 @@ async def get_response(request: Request, msg: str = Form(...)):
     # Store bot response
     db_execute(
         c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, 1, ?, 0)",
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
         (uid, lang, timestamp, response),
     )
+
+    # Keep recent history stable across Vercel/local/mobile by pruning oldest rows.
+    prune_user_chat_history(c, uid, lang)
     conn.commit()
     conn.close()
 
@@ -962,7 +1338,7 @@ async def deactivate_reminder(request: Request, label: str = Form(...)):
     conn = get_db()
     c = conn.cursor()
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    db_execute(c, "UPDATE reminders SET is_active = 0, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
+    db_execute(c, "UPDATE reminders SET is_active = FALSE, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
     conn.commit()
     conn.close()
     return JSONResponse({"success": True})
@@ -995,7 +1371,7 @@ async def get_chat_history(request: Request):
     c = conn.cursor()
     db_execute(
         c,
-        "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = 0 ORDER BY timestamp",
+        "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
         (uid, lang),
     )
     history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
@@ -1018,17 +1394,29 @@ async def health_db():
         _ = c.fetchone()
         return JSONResponse({
             "ok": True,
-            "backend": DB_BACKEND,
+            "backend": _RUNTIME_DB_BACKEND,
+            "configured_backend": DB_BACKEND,
             "db_initialized": initialized,
             "db_init_error": _db_init_error,
+            "db_url_source": _DB_URL_SOURCE,
+            "db_runtime_label": _DB_RUNTIME_LABEL,
+            "db_hostname": _DB_HOSTNAME,
+            "db_hostaddr": _DB_HOSTADDR,
+            "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
         })
     except Exception as e:
         return JSONResponse(
             {
                 "ok": False,
-                "backend": DB_BACKEND,
+                "backend": _RUNTIME_DB_BACKEND,
+                "configured_backend": DB_BACKEND,
                 "db_initialized": initialized,
                 "db_init_error": _db_init_error,
+                "db_url_source": _DB_URL_SOURCE,
+                "db_runtime_label": _DB_RUNTIME_LABEL,
+                "db_hostname": _DB_HOSTNAME,
+                "db_hostaddr": _DB_HOSTADDR,
+                "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
                 "error": str(e),
             },
             status_code=500,
@@ -1045,9 +1433,15 @@ async def health():
         {
             "ok": True,
             "service": "the-listening-tree",
-            "backend": DB_BACKEND,
+            "backend": _RUNTIME_DB_BACKEND,
+            "configured_backend": DB_BACKEND,
             "db_initialized": _db_initialized,
             "db_init_error": _db_init_error,
+            "db_url_source": _DB_URL_SOURCE,
+            "db_runtime_label": _DB_RUNTIME_LABEL,
+            "db_hostname": _DB_HOSTNAME,
+            "db_hostaddr": _DB_HOSTADDR,
+            "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
         }
     )
 

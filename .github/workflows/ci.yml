@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres@localhost:5432/ci_db?sslmode=disable
+      SECRET_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-session-key-0123456789
+      ZHIPU_API_KEY: ""
+      MINIMAL_STARTUP: "1"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ci_db
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run unit and core flow tests
+        run: |
+          PYTHONPATH=. pytest -q tests/test_basic.py tests/test_core_flows.py tests/test_session_persistence_unit.py
+
+      - name: Python smoke compile
+        run: |
+          python -m compileall -q run.py api scripts
+
+  capacitor-check:
+    name: Capacitor Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Capacitor doctor
+        run: npx cap doctor
+
+      - name: Capacitor Android sync check
+        run: npm run ci:mobile

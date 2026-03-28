@@ -21,6 +21,11 @@ htmlcov/
 .env
 .env.local
 .env*.local
+.env.vercel*
+*.pem
+*.key
+*.p12
+*.pfx
 
 # Node / frontend artifacts
 node_modules/
@@ -60,5 +65,25 @@ Thumbs.db
 out.txt
 patch*.py
 
-# Local-only tests sandbox
+# Test files and test artifacts
 tests/
+test_*.py
+*_test.py
+tests/*.log
+tests/*.out
+tests/tmp/
+
+# Added by Spec Kitty CLI (auto-managed)
+.claude/
+.codex/
+.opencode/
+.windsurf/
+.gemini/
+.cursor/
+.qwen/
+.kilocode/
+.augment/
+.roo/
+.amazonq/
+.github/copilot/
+.kittify/.dashboard
