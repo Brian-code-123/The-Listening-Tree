@@ -48,6 +48,9 @@ class _FakeCursor:
     def fetchone(self):
         return self._last
 
+    def fetchall(self):
+        return []
+
 
 class _FakeConn:
     def __init__(self, state):
