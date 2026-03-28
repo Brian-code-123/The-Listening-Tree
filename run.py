@@ -84,6 +84,17 @@ if _MINIMAL_STARTUP:
 # ---------------------------------------------------------------------------
 from translations import get_text, get_all_translations, TRANSLATIONS
 
+
+def _safe_rowcount(cursor) -> int:
+    """Return cursor rowcount if available; otherwise fall back to 0.
+
+    Some DB-API implementations and test fakes do not expose ``rowcount``.
+    """
+    rc = getattr(cursor, "rowcount", None)
+    if isinstance(rc, int) and rc >= 0:
+        return rc
+    return 0
+
 # ---------------------------------------------------------------------------
 # Background Periodic Task Manager (Async Replacement for Daemon Thread)
 # ---------------------------------------------------------------------------
@@ -125,6 +136,10 @@ async def run_periodic_tasks():
             if now.minute % 10 == 0:
                 cleanup_old_chat_history()
 
+        except asyncio.CancelledError:
+            # Allow graceful shutdown to stop this task immediately.
+            raise
+
         except Exception as e:
             _builtins._original_print(f"[ERROR] periodic_tasks: {e}")
 
@@ -156,8 +171,7 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         # Normal cancellation during shutdown.
-        # Re-raise CancelledError after cleanup code (PEP 492)
-        raise
+        pass
 
 # ---------------------------------------------------------------------------
 # Application initialisation
@@ -822,7 +836,7 @@ def cleanup_old_chat_history() -> None:
         """,
         (CHAT_HISTORY_MAX_MESSAGES_PER_LANG,),
     )
-    deleted_count = c.rowcount
+    deleted_count = _safe_rowcount(c)
     conn.commit()
     conn.close()
     if deleted_count > 0:
@@ -869,7 +883,7 @@ def auto_expire_old_reminders() -> None:
         "WHERE DATE(created_at) < ? AND is_active = TRUE",
         (ts, today),
     )
-    expired = c.rowcount
+    expired = _safe_rowcount(c)
     conn.commit()
     conn.close()
     if expired > 0:
@@ -1194,7 +1208,7 @@ async def get_response(request: Request, msg: str = Form(...)):
             label = parts[2] if len(parts) == 3 else None
         if label:
             db_execute(c, "DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
-            if c.rowcount > 0:
+            if _safe_rowcount(c) > 0:
                 response = f"已刪除提醒：{label}" if lang == 'zh-HK' else f"Deleted reminder: {label}"
             else:
                 response = "搵唔到呢個提醒。" if lang == 'zh-HK' else "No reminder found with that name."
