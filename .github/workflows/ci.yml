@@ -45,7 +45,7 @@ jobs:
 
       - name: Run unit and core flow tests
         run: |
-          pytest -q tests/test_basic.py tests/test_core_flows.py tests/test_session_persistence_unit.py
+          PYTHONPATH=. pytest -q tests/test_basic.py tests/test_core_flows.py tests/test_session_persistence_unit.py
 
       - name: Python smoke compile
         run: |
