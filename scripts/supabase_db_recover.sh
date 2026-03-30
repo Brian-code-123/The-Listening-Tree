@@ -32,11 +32,18 @@ echo "[2/4] Starting Supabase Postgres (db-only)..."
 supabase db start --debug
 
 echo "[3/4] Verifying DB container health..."
-if ! docker ps --format '{{.Names}} {{.Status}}' | grep -q '^supabase_db_.*(healthy)$'; then
-  echo "ERROR: Supabase DB container is not healthy."
-  docker ps --format 'table {{.Names}}\t{{.Status}}' | grep supabase_db_ || true
-  exit 1
-fi
+for i in {1..30}; do
+  if docker ps --format '{{.Names}} {{.Status}}' | grep -q '^supabase_db_.*(healthy)$'; then
+    echo "Supabase DB container is healthy."
+    break
+  fi
+  if [[ "$i" -eq 30 ]]; then
+    echo "ERROR: Supabase DB container did not become healthy in time."
+    docker ps --format 'table {{.Names}}\t{{.Status}}' | grep supabase_db_ || true
+    exit 1
+  fi
+  sleep 2
+done
 
 echo "[4/4] Running DB smoke query..."
 CONTAINER_NAME="$(docker ps --format '{{.Names}}' | grep '^supabase_db_' | head -n 1)"
