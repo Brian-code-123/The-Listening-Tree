@@ -83,7 +83,7 @@ def test_existing_user_can_login_without_reregister(monkeypatch):
             follow_redirects=False,
         )
         assert register_resp.status_code == 303
-        assert register_resp.headers.get("location") == "/login"
+        assert register_resp.headers.get("location") == "/"
 
         client.get("/logout", follow_redirects=False)
 

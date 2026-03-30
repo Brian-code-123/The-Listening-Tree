@@ -938,7 +938,8 @@ def tpl_context(request: Request, **kwargs) -> dict:
 # ---------------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    lang = get_lang(request)
+    if get_user(request) is not None:
+        return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse("login.html", tpl_context(request))
 
 @app.post("/login", response_class=HTMLResponse)
@@ -986,6 +987,8 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
+    if get_user(request) is not None:
+        return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse("register.html", tpl_context(request))
 
 @app.post("/register", response_class=HTMLResponse)
@@ -999,7 +1002,7 @@ async def register_post(request: Request, email: str = Form(...), password: str 
       4. Email must be unique (PostgreSQL UNIQUE constraint)
       5. Password stored with PBKDF2-HMAC-SHA256
 
-    On success: Inserts new user row with created_at timestamp, redirects to /login.
+    On success: Inserts new user row, creates authenticated session, redirects to /.
     On failure: Returns register.html with localized error message.
 
     Args:
@@ -1036,8 +1039,13 @@ async def register_post(request: Request, email: str = Form(...), password: str 
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
         conn.commit()
+        db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+        created_user = c.fetchone()
+        if created_user:
+            request.session['user_email'] = created_user["email"]
+            request.session['user_id'] = created_user["id"]
         conn.close()
-        return RedirectResponse(url="/login", status_code=303)
+        return RedirectResponse(url="/", status_code=303)
     except PgIntegrityError:
         conn.close()
         return templates.TemplateResponse("register.html", tpl_context(request, error="Email already exists" if lang == 'en' else "電郵已存在"))

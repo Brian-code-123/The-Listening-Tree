@@ -234,13 +234,13 @@ body {
 @media (max-width: 480px) {
     .guide-panel { width: calc(100vw - 32px); right: 16px; bottom: 80px; }
     
-    /* Mobile: Move guide FAB to sidebar or collapse it inside nav */
+    /* Mobile: Keep guide FAB at bottom-right for thumb reach */
     #guideFab {
         position: fixed;
-        bottom: auto;
-        right: auto;
-        left: 16px;
-        top: 16px;
+        bottom: calc(16px + env(safe-area-inset-bottom));
+        right: calc(16px + env(safe-area-inset-right));
+        left: auto;
+        top: auto;
         width: 44px;
         height: 44px;
         z-index: 1000;
@@ -257,13 +257,13 @@ body {
     }
     #guideFab:hover { transform: scale(1.1); box-shadow: 0 4px 12px rgba(91, 154, 125, 0.4); }
     
-    /* On mobile, position guide panel below the FAB */
+    /* On mobile, open panel above the FAB near bottom edge */
     .guide-panel { 
         width: calc(100vw - 32px); 
         right: 16px; 
-        left: 16px;
-        bottom: auto;
-        top: 70px;
+        left: auto;
+        bottom: calc(70px + env(safe-area-inset-bottom));
+        top: auto;
         max-height: calc(80vh - 120px);
     }
 }
