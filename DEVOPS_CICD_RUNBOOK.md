@@ -97,6 +97,18 @@ If register/login fail in production:
 3. Validate `SECRET_KEY` exists and is stable.
 4. Re-run `scripts/vercel_e2e_check.py`.
 
+If local Supabase DB cannot start:
+1. Confirm Docker daemon is running:
+   - `docker info`
+2. If daemon is not running, start Docker Desktop and retry.
+3. Start DB-only service first to isolate database issues:
+   - `supabase db start --debug`
+4. Verify Postgres container is healthy:
+   - `docker ps --format 'table {{.Names}}\t{{.Status}}' | grep supabase_db_`
+5. Verify DB query response:
+   - `docker exec supabase_db_The-Listening-Tree psql -U postgres -d postgres -c 'select 1;'`
+6. If full `supabase start` fails due non-DB service health (for example storage), continue local backend work with DB-only mode.
+
 If session is unstable:
 1. Confirm production has fixed `SECRET_KEY`.
 2. Ensure HTTPS is used.
