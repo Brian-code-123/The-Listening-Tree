@@ -98,6 +98,8 @@ If register/login fail in production:
 4. Re-run `scripts/vercel_e2e_check.py`.
 
 If local Supabase DB cannot start:
+0. Use automated recovery script:
+   - `bash scripts/supabase_db_recover.sh`
 1. Confirm Docker daemon is running:
    - `docker info`
 2. If daemon is not running, start Docker Desktop and retry.
