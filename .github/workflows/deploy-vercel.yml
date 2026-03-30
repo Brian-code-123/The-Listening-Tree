@@ -66,9 +66,23 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
+
+      - name: Install Playwright browsers
+        run: playwright install chromium
+
       - name: Run production E2E checks
         env:
           VERCEL_PRODUCTION_URL: ${{ secrets.VERCEL_PRODUCTION_URL }}
         run: |
           export VERCEL_E2E_BASE_URL="${VERCEL_PRODUCTION_URL:-https://the-listening-tree.vercel.app}"
           python3 scripts/vercel_e2e_check.py
+
+      - name: Run mobile FAB position E2E test
+        env:
+          TEST_BASE_URL: ${{ secrets.VERCEL_PRODUCTION_URL || 'https://the-listening-tree.vercel.app' }}/login
+        run: |
+          python3 tests/test_mobile_fab_position.py
