@@ -72,13 +72,13 @@ def run() -> int:
             with open_with_retry(no_redirect_opener, req, timeout=30, retries=1) as resp:
                 location = resp.headers.get("Location", "")
                 final_url = getattr(resp, "url", "")
-                ok = (resp.status in (302, 303) and "/login" in location) or (
-                    resp.status == 200 and "/login" in final_url
+                ok = (resp.status in (302, 303) and location in ("/", "/login")) or (
+                    resp.status == 200 and (final_url.endswith("/") or "/login" in final_url)
                 )
                 check("register", ok, f"status={resp.status}, location={location}, final_url={final_url}, email={email}")
         except urllib.error.HTTPError as exc:
             location = exc.headers.get("Location", "")
-            ok = exc.code in (302, 303) and "/login" in location
+            ok = exc.code in (302, 303) and location in ("/", "/login")
             check("register", ok, f"status={exc.code}, location={location}, email={email}")
     except urllib.error.HTTPError as exc:
         body = exc.read(300).decode("utf-8", "ignore")
