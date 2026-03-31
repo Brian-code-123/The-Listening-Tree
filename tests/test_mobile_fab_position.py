@@ -1,7 +1,10 @@
 """
-E2E Test: Mobile FAB (Floating Action Button) Position
-Tests that the `?` helper button is positioned at the bottom-right corner
-on mobile viewports (max-width: 480px) to prevent CSS regression.
+E2E Test: Mobile guide helper button position.
+
+Current UX requirement:
+- The `?` helper button (`#guideFab`) must stay inline in the chat header controls
+    next to sidebar toggle/logout buttons.
+- It must NOT be fixed at bottom-right as a floating button.
 """
 
 import os
@@ -9,17 +12,10 @@ import asyncio
 from playwright.async_api import async_playwright, ViewportSize
 
 
-async def test_mobile_fab_bottom_right_position():
+async def test_mobile_guide_button_inline_in_header():
     """
-    Verify that the guide FAB (#guideFab) is positioned at bottom-right
-    on mobile viewport (480x800) to ensure accessible thumb reach.
-    
-    CSS Expected (from style.css @media max-width: 480px):
-    - position: fixed
-    - bottom: calc(16px + env(safe-area-inset-bottom))
-    - right: calc(16px + env(safe-area-inset-right))
-    - width: 44px
-    - height: 44px
+    Verify that the guide button (#guideFab) is inline in the top header row
+    and does not overlap adjacent controls on mobile viewport (480x800).
     """
     
     # Get base URL from environment or use production
@@ -40,12 +36,12 @@ async def test_mobile_fab_bottom_right_position():
             # Navigate to chat page (requires auth in production, but FAB is still present)
             await page.goto(f"{BASE_URL}/", wait_until="load")
             
-            # Wait for FAB element to be visible
+            # Wait for guide button element to be visible
             fab = page.locator("#guideFab")
             
             # Check if element is visible
             is_visible = await fab.is_visible(timeout=5000)
-            assert is_visible, "Guide FAB (#guideFab) should be visible on mobile viewport"
+            assert is_visible, "Guide button (#guideFab) should be visible on mobile viewport"
             
             # Get bounding box (position and size)
             bounding_box = await fab.bounding_box()
@@ -62,53 +58,53 @@ async def test_mobile_fab_bottom_right_position():
             right_value = await fab.evaluate("el => window.getComputedStyle(el).right")
             
             # Assertions
-            print(f"✓ FAB Position: {position}")
-            print(f"✓ FAB Bottom CSS: {bottom_value}")
-            print(f"✓ FAB Right CSS: {right_value}")
-            print(f"✓ Bounding Box: x={x}, y={y}, width={width}, height={height}")
-            
-            # Verify position is fixed
-            assert position == "fixed", f"FAB position should be 'fixed' but got '{position}'"
-            
-            # Verify bottom value contains expected pattern (16px + safe-area)
-            assert (
-                "16px" in bottom_value or "auto" in bottom_value
-            ), f"FAB bottom should contain '16px' but got '{bottom_value}'"
-            
-            # Verify right value contains expected pattern (16px + safe-area)
-            assert (
-                "16px" in right_value or "auto" in right_value
-            ), f"FAB right should contain '16px' but got '{right_value}'"
-            
-            # Verify it's in the bottom-right corner
-            # For 480px width viewport, FAB should be in right half and bottom area
-            viewport_width = 480
-            viewport_height = 800
-            
-            # FAB center should be significantly to the right (allow 20px margin for safe area)
-            fab_center_x = x + width / 2
-            assert fab_center_x > (
-                viewport_width - 80
-            ), f"FAB should be in right corner (center x={fab_center_x} > {viewport_width - 80})"
-            
-            # FAB center should be near bottom (allow 120px margin for safe area + overlay)
-            fab_center_y = y + height / 2
-            assert fab_center_y > (
-                viewport_height - 150
-            ), f"FAB should be in bottom corner (center y={fab_center_y} > {viewport_height - 150})"
-            
-            print("✓ All position assertions passed!")
-            print(f"✓ FAB is correctly positioned at bottom-right for mobile viewport")
+            print(f"✓ Guide Button Position: {position}")
+            print(f"✓ Guide Button Bottom CSS: {bottom_value}")
+            print(f"✓ Guide Button Right CSS: {right_value}")
+            print(f"✓ Guide Button Bounding Box: x={x}, y={y}, width={width}, height={height}")
+
+            # New UX: button must be inline (not fixed floating)
+            assert position != "fixed", f"Guide button should not be fixed; got '{position}'"
+
+            # Guide button should stay in header area near top
+            assert y < 180, f"Guide button should stay near header top area, got y={y}"
+
+            # Verify no overlap with logout button
+            logout_btn = page.locator('a[href="/logout"]')
+            logout_visible = await logout_btn.is_visible(timeout=5000)
+            assert logout_visible, "Logout button should be visible on mobile viewport"
+            logout_box = await logout_btn.bounding_box()
+            assert logout_box is not None, "Logout button bounding box could not be determined"
+
+            def overlaps(a, b):
+                return not (
+                    a["x"] + a["width"] <= b["x"]
+                    or b["x"] + b["width"] <= a["x"]
+                    or a["y"] + a["height"] <= b["y"]
+                    or b["y"] + b["height"] <= a["y"]
+                )
+
+            guide_box = {"x": x, "y": y, "width": width, "height": height}
+            assert not overlaps(guide_box, logout_box), "Guide button must not overlap logout button"
+
+            # Verify it is close to the mobile sidebar toggle button (book/columns icon)
+            toggle_btn = page.locator('#sidebarToggleHeader')
+            if await toggle_btn.is_visible(timeout=3000):
+                toggle_box = await toggle_btn.bounding_box()
+                assert toggle_box is not None, "Sidebar toggle bounding box could not be determined"
+                gap = abs((toggle_box["x"] + toggle_box["width"]) - x)
+                assert gap < 80, f"Guide button should be near sidebar toggle; horizontal gap={gap}px"
+
+            print("✓ All mobile inline-header assertions passed!")
             
         finally:
             await context.close()
             await browser.close()
 
 
-async def test_mobile_fab_hidden_on_desktop():
+async def test_guide_button_desktop_header_position():
     """
-    Verify that the desktop .guide-fab class properties (bottom: 24px, right: 24px)
-    don't apply on mobile (480px viewport), ensuring CSS media query override works.
+    Verify the guide button also remains non-floating on desktop viewport.
     """
     
     BASE_URL = os.getenv("TEST_BASE_URL", "https://the-listening-tree.vercel.app")
@@ -129,21 +125,13 @@ async def test_mobile_fab_hidden_on_desktop():
             fab = page.locator("#guideFab")
             is_visible = await fab.is_visible(timeout=5000)
             
-            # On desktop, FAB might have different positioning
+            # On desktop, it should still not be fixed floating.
             if is_visible:
                 bounding_box = await fab.bounding_box()
                 if bounding_box:
-                    x = bounding_box["x"]
-                    width = bounding_box["width"]
-                    viewport_width = 1024
-                    
-                    fab_center_x = x + width / 2
-                    # Desktop: right edge should be around 24px from right
-                    assert fab_center_x > (
-                        viewport_width - 100
-                    ), f"Desktop FAB should still be right-aligned (center x={fab_center_x} > {viewport_width - 100})"
-                    
-                    print("✓ Desktop viewport FAB position verified")
+                    position = await fab.evaluate("el => window.getComputedStyle(el).position")
+                    assert position != "fixed", f"Desktop guide button should not be fixed; got '{position}'"
+                    print("✓ Desktop guide button non-floating position verified")
         
         finally:
             await context.close()
@@ -153,33 +141,33 @@ async def test_mobile_fab_hidden_on_desktop():
 async def run_all_tests():
     """Run all mobile FAB position tests."""
     print("=" * 60)
-    print("Mobile FAB Position E2E Tests")
+    print("Guide Button Position E2E Tests")
     print("=" * 60)
     
     try:
-        print("\n[Test 1] Mobile FAB Bottom-Right Position (480x800)")
-        await test_mobile_fab_bottom_right_position()
-        print("✅ PASS | Mobile FAB position test\n")
+        print("\n[Test 1] Mobile Guide Button Inline Header Position (480x800)")
+        await test_mobile_guide_button_inline_in_header()
+        print("✅ PASS | Mobile guide button position test\n")
     except AssertionError as e:
-        print(f"❌ FAIL | Mobile FAB position test: {e}\n")
+        print(f"❌ FAIL | Mobile guide button position test: {e}\n")
         return False
     except Exception as e:
-        print(f"❌ ERROR | Mobile FAB position test: {e}\n")
+        print(f"❌ ERROR | Mobile guide button position test: {e}\n")
         return False
     
     try:
-        print("[Test 2] Desktop FAB Position (1024x768)")
-        await test_mobile_fab_hidden_on_desktop()
-        print("✅ PASS | Desktop FAB position test\n")
+        print("[Test 2] Desktop Guide Button Position (1024x768)")
+        await test_guide_button_desktop_header_position()
+        print("✅ PASS | Desktop guide button position test\n")
     except AssertionError as e:
-        print(f"❌ FAIL | Desktop FAB position test: {e}\n")
+        print(f"❌ FAIL | Desktop guide button position test: {e}\n")
         return False
     except Exception as e:
-        print(f"❌ ERROR | Desktop FAB position test: {e}\n")
+        print(f"❌ ERROR | Desktop guide button position test: {e}\n")
         return False
     
     print("=" * 60)
-    print("✅ All mobile FAB position tests passed!")
+    print("✅ All guide button position tests passed!")
     print("=" * 60)
     return True
 
