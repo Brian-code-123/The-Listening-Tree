@@ -1375,28 +1375,37 @@ async def get_chat_history(request: Request):
     if uid is None:
         return JSONResponse({"history": []})
     lang = get_lang(request)
-    conn = get_db()
-    c = conn.cursor()
-    db_execute(
-        c,
-        "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
-        (uid, lang),
-    )
-    history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
-
-    if not history:
-        welcome_msg = get_text("welcome_chat", lang)
-        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
         db_execute(
             c,
-            "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
-            (uid, lang, ts, welcome_msg),
+            "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
+            (uid, lang),
         )
-        conn.commit()
-        history = [{"timestamp": ts, "sender": "bot", "message": welcome_msg}]
+        history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
 
-    conn.close()
-    return JSONResponse({"history": history})
+        if not history:
+            welcome_msg = get_text("welcome_chat", lang)
+            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            db_execute(
+                c,
+                "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
+                (uid, lang, ts, welcome_msg),
+            )
+            conn.commit()
+            history = [{"timestamp": ts, "sender": "bot", "message": welcome_msg}]
+
+        return JSONResponse({"history": history})
+    except Exception as e:
+        # Graceful degradation for transient DB/network failures.
+        _builtins._original_print(f"[CHAT_HISTORY] fallback due to DB error: {e}")
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return JSONResponse({"history": [{"timestamp": ts, "sender": "bot", "message": get_text("welcome_chat", lang)}], "degraded": True})
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.get("/health/db")

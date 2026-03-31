@@ -32,11 +32,14 @@
         {% endif %}
 
 
-    <!-- Vercel Analytics -->
-    <script>
-      window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
-    </script>
-    <script defer src="/_vercel/insights/script.js"></script>
+        <!-- Vercel Analytics (only inject on Vercel-hosted domains to avoid localhost 404 noise) -->
+        {% set _host = request.url.hostname if request and request.url else '' %}
+        {% if _host and ('vercel.app' in _host or _host == 'the-listening-tree.vercel.app') %}
+        <script>
+            window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+        </script>
+        <script defer src="/_vercel/insights/script.js"></script>
+        {% endif %}
 </head>
 <body class="page-chat" data-theme="light">
 
@@ -341,21 +344,40 @@
                     const welcomeMsg = '{{ translations.welcome_chat if translations else "Hello! I am your friendly companion. How are you today? 😊" }}';
                     appendMessage('bot', welcomeMsg, time);
                 }
+            }).fail(function(xhr) {
+                console.error('Failed to load chat history:', xhr.status, xhr.responseText);
+                // Graceful fallback: still show localized welcome so chat remains usable.
+                const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const welcomeMsg = '{{ translations.welcome_chat if translations else "Hello! I am your friendly companion. How are you today? 😊" }}';
+                appendMessage('bot', welcomeMsg, time);
             });
         }
         loadChatHistory();
 
-        // Network Status Support
-        function updateNetworkStatus() {
-            if (navigator.onLine) {
-                $('#offlineBanner').addClass('d-none');
-            } else {
+        // Network/Backend Status Support
+        async function updateNetworkStatus() {
+            // If browser is clearly offline, show banner immediately.
+            if (!navigator.onLine) {
+                $('#offlineBanner').removeClass('d-none');
+                return;
+            }
+
+            // Verify backend health to avoid false "online" when API/DB is unreachable.
+            try {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 2500);
+                const resp = await fetch('/health/db', { method: 'GET', cache: 'no-store', signal: controller.signal });
+                clearTimeout(timer);
+                if (resp.ok) $('#offlineBanner').addClass('d-none');
+                else $('#offlineBanner').removeClass('d-none');
+            } catch (_) {
                 $('#offlineBanner').removeClass('d-none');
             }
         }
-        window.addEventListener('online', updateNetworkStatus);
-        window.addEventListener('offline', updateNetworkStatus);
+        window.addEventListener('online', () => { updateNetworkStatus(); });
+        window.addEventListener('offline', () => { updateNetworkStatus(); });
         updateNetworkStatus();
+        setInterval(updateNetworkStatus, 30000);
 
         // Handle message submit
         $('#messageArea').on('submit', function(event) {
