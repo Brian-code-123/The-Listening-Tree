@@ -71,6 +71,9 @@
                             <button class="btn btn-sm btn-outline-light d-lg-none" id="sidebarToggleHeader" type="button">
                                 <i class="fas fa-columns"></i>
                             </button>
+                            <button class="btn btn-sm btn-outline-light" id="guideFab" type="button" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
                             <a href="/logout" class="btn btn-sm btn-danger">{{ translations.logout if translations else 'Logout' }}</a>
                         </div>
                     </div>
@@ -86,8 +89,6 @@
                         <i class="fas fa-volume-up" id="ttsIcon"></i>
                         <span id="ttsLabel">{{ translations.voice_on if translations else '🔊 AI Voice: ON' }}</span>
                     </button>
-
-                    <button type="button" class="chat-nav-btn nav-icon" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}"><i class="fas fa-question-circle"></i></button>
                                 </div>
 
                 <!-- Chat Messages -->

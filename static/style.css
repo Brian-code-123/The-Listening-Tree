@@ -233,31 +233,8 @@ body {
 
 @media (max-width: 480px) {
     .guide-panel { width: calc(100vw - 32px); right: 16px; bottom: 80px; }
-    
-    /* Mobile: Keep guide FAB at bottom-right for thumb reach */
-    #guideFab {
-        position: fixed;
-        bottom: calc(16px + env(safe-area-inset-bottom));
-        right: calc(16px + env(safe-area-inset-right));
-        left: auto;
-        top: auto;
-        width: 44px;
-        height: 44px;
-        z-index: 1000;
-        background: var(--primary);
-        color: white;
-        border: none;
-        border-radius: 50%;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.2rem;
-        box-shadow: 0 2px 8px rgba(91, 154, 125, 0.3);
-    }
-    #guideFab:hover { transform: scale(1.1); box-shadow: 0 4px 12px rgba(91, 154, 125, 0.4); }
-    
-    /* On mobile, open panel above the FAB near bottom edge */
+
+    /* On mobile, open panel above the header controls */
     .guide-panel { 
         width: calc(100vw - 32px); 
         right: 16px; 
@@ -357,6 +334,14 @@ body {
 .page-chat .chat-nav-btn.nav-tts { margin-left: auto; font-size: 0.8rem; }
 .page-chat .chat-nav-btn.tts-on { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
 .page-chat .chat-nav-btn.tts-off { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
+
+/* Header guide button: keep inline with sidebar toggle/logout buttons */
+.page-chat .msg_head #guideFab {
+    border-radius: 8px;
+    min-width: 34px;
+    height: 31px;
+    padding: 4px 8px;
+}
 
 /* Feature Buttons Row */
 .page-chat .chat-feature-bar {

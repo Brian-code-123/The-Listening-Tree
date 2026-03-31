@@ -1383,6 +1383,18 @@ async def get_chat_history(request: Request):
         (uid, lang),
     )
     history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
+
+    if not history:
+        welcome_msg = get_text("welcome_chat", lang)
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        db_execute(
+            c,
+            "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
+            (uid, lang, ts, welcome_msg),
+        )
+        conn.commit()
+        history = [{"timestamp": ts, "sender": "bot", "message": welcome_msg}]
+
     conn.close()
     return JSONResponse({"history": history})
 
