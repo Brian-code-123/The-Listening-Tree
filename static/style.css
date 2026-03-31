@@ -336,6 +336,15 @@ body {
 .page-chat .chat-nav-btn.tts-off { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 
 /* Header guide button: keep inline with sidebar toggle/logout buttons */
+.page-chat #guideFab {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    margin: 0 !important;
+}
+
 .page-chat .msg_head #guideFab {
     border-radius: 8px;
     min-width: 34px;
