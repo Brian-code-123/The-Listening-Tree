@@ -219,14 +219,38 @@ _POOLER_DATABASE_URL = (
     or os.environ.get("POSTGRES_POOLER_URL")
     or os.environ.get("DATABASE_POOLER_URL")
 )
-_DATABASE_URL = _POOLER_DATABASE_URL or os.environ.get("DATABASE_URL")
+
+
+def _tcp_port_open(host: str, port: int, timeout: float = 0.4) -> bool:
+    """Fast local port probe used to detect local Supabase availability."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+_REMOTE_DATABASE_URL = _POOLER_DATABASE_URL or os.environ.get("DATABASE_URL")
+_LOCAL_DATABASE_URL = os.environ.get(
+    "LOCAL_DATABASE_URL",
+    "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+)
+
+# Local-first strategy (non-Vercel): if local Supabase DB is up, prefer it to
+# avoid internet/pooler jitter impacting chat/STT flows during development.
+if not ON_VERCEL and os.environ.get("PREFER_LOCAL_SUPABASE", "1") == "1" and _tcp_port_open("127.0.0.1", 54322):
+    _DATABASE_URL = _LOCAL_DATABASE_URL
+    _DB_URL_SOURCE = "local_supabase"
+else:
+    _DATABASE_URL = _REMOTE_DATABASE_URL
+    _DB_URL_SOURCE = "pooler_url" if _POOLER_DATABASE_URL else "database_url"
+
 if not _DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL is required. Configure Supabase PostgreSQL URL in environment variables."
     )
 
 DB_BACKEND = "postgres"
-_DB_URL_SOURCE = "pooler_url" if _POOLER_DATABASE_URL else "database_url"
 _RUNTIME_DB_BACKEND = DB_BACKEND
 _DB_NEXT_PG_RETRY_TS = 0.0
 _DB_LAST_PG_ERROR: Optional[str] = None
@@ -351,15 +375,41 @@ def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
 def _build_db_connection_candidates(raw_url: str) -> List[dict]:
     """Create an ordered list of DB connection candidates."""
     base_url = _normalize_db_url(raw_url)
-    candidates = [
+    candidates: List[dict] = []
+
+    prefer_local = (not ON_VERCEL) and os.environ.get("PREFER_LOCAL_SUPABASE", "1") == "1"
+    local_url = _normalize_db_url(_LOCAL_DATABASE_URL) if _LOCAL_DATABASE_URL else None
+    remote_url = _normalize_db_url(_REMOTE_DATABASE_URL) if _REMOTE_DATABASE_URL else None
+
+    # In local development, prefer local Supabase first when enabled.
+    if prefer_local and local_url and local_url != base_url:
+        candidates.append(
+            {
+                "label": "local_supabase",
+                "url": local_url,
+                "force_hostaddr": False,
+            }
+        )
+
+    candidates.append(
         {
             "label": "primary",
             "url": base_url,
             "force_hostaddr": True,
         }
-    ]
+    )
 
-    if _DB_URL_SOURCE == "database_url":
+    # If running on local DB as primary, still keep remote as fallback.
+    if _DB_URL_SOURCE == "local_supabase" and remote_url and remote_url != base_url:
+        candidates.append(
+            {
+                "label": "remote_fallback",
+                "url": remote_url,
+                "force_hostaddr": True,
+            }
+        )
+
+    if _DB_URL_SOURCE in ("database_url", "pooler_url"):
         candidates.extend(_build_supabase_pooler_candidates(base_url))
 
     return candidates
@@ -476,6 +526,13 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     if len(password) < 8:
         return False, "Password must be at least 8 characters"
     return True, ""
+
+
+def _json_safe_timestamp(value) -> str:
+    """Normalize DB timestamp values to JSON-safe strings."""
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return str(value) if value is not None else ""
 
 
 # ---------------------------------------------------------------------------
@@ -904,13 +961,6 @@ def get_user(request: Request) -> int | None:
 def get_lang(request: Request) -> str:
     """Return the current UI language code ('en' or 'zh-HK')."""
     return request.session.get("language", "en")
-
-
-def _json_timestamp(value) -> str:
-    """Return a JSON-safe timestamp string for DB datetime/text values."""
-    if isinstance(value, datetime):
-        return value.strftime('%Y-%m-%d %H:%M:%S')
-    return str(value)
 
 
 def require_login(request: Request) -> int:
@@ -1384,39 +1434,58 @@ async def get_chat_history(request: Request):
     lang = get_lang(request)
     conn = None
     try:
-        conn = get_db()
-        c = conn.cursor()
-        db_execute(
-            c,
-            "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
-            (uid, lang),
-        )
-        history = [
-            {
-                "timestamp": _json_timestamp(r["timestamp"]),
-                "sender": "bot" if r["is_bot"] else "user",
-                "message": r["message"],
-            }
-            for r in c.fetchall()
-        ]
+        last_error = None
+        for attempt in range(2):
+            try:
+                conn = get_db()
+                c = conn.cursor()
+                db_execute(
+                    c,
+                    "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
+                    (uid, lang),
+                )
+                history = [
+                    {
+                        "timestamp": _json_safe_timestamp(r["timestamp"]),
+                        "sender": "bot" if r["is_bot"] else "user",
+                        "message": r["message"],
+                    }
+                    for r in c.fetchall()
+                ]
 
-        if not history:
-            welcome_msg = get_text("welcome_chat", lang)
-            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            db_execute(
-                c,
-                "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
-                (uid, lang, ts, welcome_msg),
-            )
-            conn.commit()
-            history = [{"timestamp": ts, "sender": "bot", "message": welcome_msg}]
+                if not history:
+                    welcome_msg = get_text("welcome_chat", lang)
+                    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    db_execute(
+                        c,
+                        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
+                        (uid, lang, ts, welcome_msg),
+                    )
+                    conn.commit()
+                    history = [{"timestamp": ts, "sender": "bot", "message": welcome_msg}]
 
-        return JSONResponse({"history": history})
+                return JSONResponse({"history": history})
+            except Exception as e:
+                last_error = e
+                if conn is not None:
+                    conn.close()
+                    conn = None
+                if attempt == 0:
+                    # Retry once for transient PG throttling/network jitter.
+                    await asyncio.sleep(0.3)
+                    continue
+                raise last_error
     except Exception as e:
         # Graceful degradation for transient DB/network failures.
         _builtins._original_print(f"[CHAT_HISTORY] fallback due to DB error: {e}")
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        return JSONResponse({"history": [{"timestamp": ts, "sender": "bot", "message": get_text("welcome_chat", lang)}], "degraded": True})
+        payload = {
+            "history": [{"timestamp": ts, "sender": "bot", "message": get_text("welcome_chat", lang)}],
+            "degraded": True,
+        }
+        if not IN_PRODUCTION:
+            payload["error"] = str(e)
+        return JSONResponse(payload)
     finally:
         if conn is not None:
             conn.close()
