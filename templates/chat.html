@@ -412,6 +412,11 @@
 
         let _recognition = null;
         let _isRecording = false;
+        let _recordingMode = null; // 'webspeech' | 'fallback'
+        let _fallbackStream = null;
+        let _fallbackRecorder = null;
+        let _fallbackChunks = [];
+        let _fallbackMimeType = '';
 
         // Localised placeholder strings (set by Jinja)
         const PLACEHOLDER_IDLE    = '{{ translations.type_message   | default("Type your message...") }}';
@@ -422,16 +427,184 @@
          * Gracefully stop any active recording session.
          * Resets the mic button state and placeholder text.
          */
-        function stopRecording() {
+        function resetMicUi() {
             _isRecording = false;
+            _recordingMode = null;
             $('#micBtn')
                 .removeClass('recording-active pulse-recording')
                 .find('i').removeClass('fa-stop').addClass('fa-microphone');
             $('#text').attr('placeholder', PLACEHOLDER_IDLE);
+        }
+
+        function stopRecording() {
+            if (_recordingMode === 'fallback' && _fallbackRecorder && _fallbackRecorder.state !== 'inactive') {
+                _isRecording = false;
+                $('#micBtn')
+                    .removeClass('recording-active pulse-recording')
+                    .find('i').removeClass('fa-stop').addClass('fa-microphone');
+                $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
+                try { _fallbackRecorder.stop(); } catch (e) { /* already stopped */ }
+                return;
+            }
 
             if (_recognition) {
                 try { _recognition.stop(); } catch (e) { /* already stopped */ }
                 _recognition = null;
+            }
+            if (_fallbackStream) {
+                _fallbackStream.getTracks().forEach(track => track.stop());
+                _fallbackStream = null;
+            }
+            _fallbackRecorder = null;
+            _fallbackChunks = [];
+            _fallbackMimeType = '';
+            resetMicUi();
+        }
+
+        function encodeWavFromAudioBuffer(audioBuffer) {
+            const channelCount = audioBuffer.numberOfChannels;
+            const sampleRate = audioBuffer.sampleRate;
+            const length = audioBuffer.length;
+            const mixed = new Float32Array(length);
+
+            for (let c = 0; c < channelCount; c++) {
+                const channel = audioBuffer.getChannelData(c);
+                for (let i = 0; i < length; i++) mixed[i] += channel[i] / channelCount;
+            }
+
+            const bytesPerSample = 2;
+            const blockAlign = bytesPerSample;
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = mixed.length * bytesPerSample;
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            let offset = 0;
+            const writeString = (s) => { for (let i = 0; i < s.length; i++) view.setUint8(offset++, s.charCodeAt(i)); };
+
+            writeString('RIFF');
+            view.setUint32(offset, 36 + dataSize, true); offset += 4;
+            writeString('WAVE');
+            writeString('fmt ');
+            view.setUint32(offset, 16, true); offset += 4;
+            view.setUint16(offset, 1, true); offset += 2; // PCM
+            view.setUint16(offset, 1, true); offset += 2; // mono
+            view.setUint32(offset, sampleRate, true); offset += 4;
+            view.setUint32(offset, byteRate, true); offset += 4;
+            view.setUint16(offset, blockAlign, true); offset += 2;
+            view.setUint16(offset, 16, true); offset += 2;
+            writeString('data');
+            view.setUint32(offset, dataSize, true); offset += 4;
+
+            for (let i = 0; i < mixed.length; i++, offset += 2) {
+                const s = Math.max(-1, Math.min(1, mixed[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        async function convertRecordedBlobToWav(blob) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) throw new Error('AudioContext not available');
+            const ctx = new AudioCtx();
+            try {
+                const arr = await blob.arrayBuffer();
+                const decoded = await ctx.decodeAudioData(arr.slice(0));
+                return encodeWavFromAudioBuffer(decoded);
+            } finally {
+                try { await ctx.close(); } catch (_) {}
+            }
+        }
+
+        async function transcribeFallbackChunks() {
+            if (!_fallbackChunks.length) {
+                showVoiceToast(currentLang === 'zh-HK' ? '🎤 聽唔到語音。請再試一次。' : '🎤 No speech captured. Please try again.');
+                return;
+            }
+
+            try {
+                $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
+                const recordedBlob = new Blob(_fallbackChunks, { type: _fallbackMimeType || 'audio/webm' });
+                const wavBlob = await convertRecordedBlobToWav(recordedBlob);
+                const form = new FormData();
+                form.append('audio', wavBlob, 'speech.wav');
+                form.append('lang', currentLang);
+
+                const resp = await fetch('/transcribe', { method: 'POST', body: form });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    throw new Error(data.error || 'STT request failed');
+                }
+
+                const text = (data.text || '').trim();
+                if (!text) {
+                    showVoiceToast(currentLang === 'zh-HK' ? '🎤 聽唔到語音。請講得清楚啲。' : '🎤 No speech recognized. Please speak clearly.');
+                    return;
+                }
+
+                $('#text').val(text);
+                setTimeout(() => $('#messageArea').submit(), 120);
+            } catch (e) {
+                console.error('[STT fallback] error:', e);
+                showVoiceToast(currentLang === 'zh-HK'
+                    ? '⚠️ 語音轉文字暫時失敗，請檢查網絡後再試。'
+                    : '⚠️ Speech-to-text failed. Please check your network and try again.');
+            }
+        }
+
+        async function startFallbackRecording() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showVoiceToast(currentLang === 'zh-HK'
+                    ? '你嘅瀏覽器唔支援錄音。請用 Chrome、Edge 或 Safari。'
+                    : 'Your browser does not support recording. Please use Chrome, Edge, or Safari.');
+                stopRecording();
+                return;
+            }
+
+            const mimeCandidates = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/mp4',
+                'audio/ogg;codecs=opus'
+            ];
+
+            try {
+                _fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                _fallbackMimeType = '';
+                if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
+                    _fallbackMimeType = mimeCandidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+                }
+                _fallbackRecorder = _fallbackMimeType
+                    ? new MediaRecorder(_fallbackStream, { mimeType: _fallbackMimeType })
+                    : new MediaRecorder(_fallbackStream);
+
+                _fallbackChunks = [];
+                _recordingMode = 'fallback';
+
+                _fallbackRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) _fallbackChunks.push(e.data);
+                };
+
+                _fallbackRecorder.onstop = async () => {
+                    if (_fallbackStream) {
+                        _fallbackStream.getTracks().forEach(track => track.stop());
+                        _fallbackStream = null;
+                    }
+                    await transcribeFallbackChunks();
+                    _fallbackRecorder = null;
+                    _fallbackChunks = [];
+                    _fallbackMimeType = '';
+                    resetMicUi();
+                };
+
+                _fallbackRecorder.start(200);
+                console.log('[STT fallback] recording started');
+            } catch (e) {
+                console.error('[STT fallback] start error:', e);
+                showVoiceToast(currentLang === 'zh-HK'
+                    ? '❌ 無法啟動麥克風，請檢查權限。'
+                    : '❌ Unable to start microphone. Please check permissions.');
+                stopRecording();
             }
         }
 
@@ -460,6 +633,7 @@
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
+                _recordingMode = 'webspeech';
                 _recognition = new SpeechRecognition();
                 _recognition.lang = (currentLang === 'zh-HK') ? 'zh-HK' : 'en-US';
                 _recognition.interimResults = true;
@@ -479,6 +653,7 @@
 
                 _recognition.addEventListener('error', function (event) {
                     console.warn('[STT] error:', event.error);
+                    // Stop current recognition session but keep graceful fallback available.
                     stopRecording();
                     
                     // Friendly error messages for elderly users
@@ -509,7 +684,8 @@
                 });
 
                 _recognition.addEventListener('end', function () {
-                    stopRecording();
+                    resetMicUi();
+                    _recognition = null;
                     const transcript = $('#text').val().trim();
                     // Auto-submit if we got text
                     if (transcript) {
@@ -529,10 +705,8 @@
                 }
                 return;  // done — Web Speech API handles everything
             }
-            stopRecording();
-            showVoiceToast(currentLang === 'zh-HK'
-                ? '你嘅瀏覽器唔支援語音辨識，請用 Chrome、Edge 或 Safari。'
-                : 'Speech recognition not supported. Please use Chrome, Edge, or Safari.');
+            // Browser has no Web Speech API: switch to recorder + server fallback.
+            await startFallbackRecording();
         }
 
         // Mic button: toggle recording on/off

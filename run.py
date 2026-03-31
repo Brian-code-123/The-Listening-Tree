@@ -26,6 +26,7 @@ import asyncio
 import secrets
 import random
 import threading
+import io
 import hashlib
 import hmac
 import socket
@@ -40,7 +41,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote
 # ---------------------------------------------------------------------------
 # Third-party imports
 # ---------------------------------------------------------------------------
-from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -56,6 +57,11 @@ except ImportError:
     class PgIntegrityError(Exception):
         pass
 from dotenv import load_dotenv
+
+try:
+    import speech_recognition as sr
+except ImportError:
+    sr = None
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / '.env'
@@ -1320,15 +1326,69 @@ async def get_response(request: Request, msg: str = Form(...)):
 # Voice Transcription — browser-only mode
 # ---------------------------------------------------------------------------
 @app.post("/transcribe")
-async def transcribe_audio():
-    """Deprecated server STT endpoint kept for backward compatibility."""
-    return JSONResponse(
-        {
-            "text": "",
-            "error": "Server-side STT has been removed. Use browser Web Speech API.",
-        },
-        status_code=410,
-    )
+async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang: str = Form("en-US")):
+    """Server-side STT fallback for browsers/environments without Web Speech API.
+
+    Input: WAV audio blob posted from frontend fallback recorder.
+    Engine: SpeechRecognition + Google Web Speech backend.
+    """
+    if sr is None:
+        return JSONResponse(
+            {
+                "text": "",
+                "error": "Server STT dependency missing (SpeechRecognition).",
+            },
+            status_code=503,
+        )
+
+    language = (lang or get_lang(request) or "en").strip()
+    lang_map = {
+        "en": "en-US",
+        "en-us": "en-US",
+        "zh": "zh-HK",
+        "zh-hk": "zh-HK",
+        "zh_HK": "zh-HK",
+    }
+    language = lang_map.get(language.lower(), language)
+
+    try:
+        content = await audio.read()
+        if not content:
+            return JSONResponse({"text": "", "error": "Empty audio payload."}, status_code=400)
+
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(io.BytesIO(content)) as source:
+            audio_data = recognizer.record(source)
+
+        text = recognizer.recognize_google(audio_data, language=language)
+        return JSONResponse({"text": text.strip(), "engine": "google-web-speech"})
+
+    except sr.UnknownValueError:
+        return JSONResponse(
+            {
+                "text": "",
+                "error": get_text("no_speech_detected", get_lang(request)),
+            },
+            status_code=422,
+        )
+    except sr.RequestError as e:
+        _builtins._original_print(f"[STT] upstream request error: {e}")
+        return JSONResponse(
+            {
+                "text": "",
+                "error": get_text("error_network", get_lang(request)),
+            },
+            status_code=503,
+        )
+    except Exception as e:
+        _builtins._original_print(f"[STT] transcribe error: {e}")
+        return JSONResponse(
+            {
+                "text": "",
+                "error": get_text("error_voice", get_lang(request)),
+            },
+            status_code=500,
+        )
 
 # ---------------------------------------------------------------------------
 # Reminder Management endpoints (AJAX)

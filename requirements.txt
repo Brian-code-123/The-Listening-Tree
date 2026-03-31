@@ -13,3 +13,4 @@ gunicorn==23.0.0
 python-dotenv==1.0.0
 psycopg2-binary==2.9.10
 playwright==1.50.0
+SpeechRecognition==3.10.4

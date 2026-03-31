@@ -14,7 +14,7 @@ A bilingual (English + Cantonese) conversational chatbot designed to reduce lone
 
 ## DevOps & CI/CD
 
-Operational runbook and pipeline setup are documented in `DEVOPS_CICD_RUNBOOK.md`.
+Operational pipeline setup is managed via GitHub Actions workflows under `.github/workflows/`.
 
 ---
 
