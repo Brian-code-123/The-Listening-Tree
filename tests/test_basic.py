@@ -50,7 +50,7 @@ def test_register_login_chat_and_reminders_flow():
             follow_redirects=False,
         )
         assert register_resp.status_code == 303
-        assert register_resp.headers["location"] == "/login"
+        assert register_resp.headers["location"] == "/"
 
         login_resp = c.post(
             "/login",

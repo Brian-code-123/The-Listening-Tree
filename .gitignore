@@ -87,3 +87,4 @@ tests/tmp/
 .amazonq/
 .github/copilot/
 .kittify/.dashboard
+.vercel

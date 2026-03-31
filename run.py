@@ -26,6 +26,7 @@ import asyncio
 import secrets
 import random
 import threading
+import io
 import hashlib
 import hmac
 import socket
@@ -40,7 +41,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote
 # ---------------------------------------------------------------------------
 # Third-party imports
 # ---------------------------------------------------------------------------
-from fastapi import FastAPI, Request, Form, HTTPException
+from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -56,6 +57,11 @@ except ImportError:
     class PgIntegrityError(Exception):
         pass
 from dotenv import load_dotenv
+
+try:
+    import speech_recognition as sr
+except ImportError:
+    sr = None
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / '.env'
@@ -94,6 +100,15 @@ def _safe_rowcount(cursor) -> int:
     if isinstance(rc, int) and rc >= 0:
         return rc
     return 0
+
+
+def _json_timestamp(value) -> str:
+    """Normalize timestamp-like values into JSON-safe strings."""
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    if value is None:
+        return ""
+    return str(value)
 
 # ---------------------------------------------------------------------------
 # Background Periodic Task Manager (Async Replacement for Daemon Thread)
@@ -938,7 +953,8 @@ def tpl_context(request: Request, **kwargs) -> dict:
 # ---------------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    lang = get_lang(request)
+    if get_user(request) is not None:
+        return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse("login.html", tpl_context(request))
 
 @app.post("/login", response_class=HTMLResponse)
@@ -986,6 +1002,8 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
+    if get_user(request) is not None:
+        return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse("register.html", tpl_context(request))
 
 @app.post("/register", response_class=HTMLResponse)
@@ -999,7 +1017,7 @@ async def register_post(request: Request, email: str = Form(...), password: str 
       4. Email must be unique (PostgreSQL UNIQUE constraint)
       5. Password stored with PBKDF2-HMAC-SHA256
 
-    On success: Inserts new user row with created_at timestamp, redirects to /login.
+    On success: Inserts new user row, creates authenticated session, redirects to /.
     On failure: Returns register.html with localized error message.
 
     Args:
@@ -1036,8 +1054,13 @@ async def register_post(request: Request, email: str = Form(...), password: str 
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
         conn.commit()
+        db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+        created_user = c.fetchone()
+        if created_user:
+            request.session['user_email'] = created_user["email"]
+            request.session['user_id'] = created_user["id"]
         conn.close()
-        return RedirectResponse(url="/login", status_code=303)
+        return RedirectResponse(url="/", status_code=303)
     except PgIntegrityError:
         conn.close()
         return templates.TemplateResponse("register.html", tpl_context(request, error="Email already exists" if lang == 'en' else "電郵已存在"))
@@ -1303,15 +1326,69 @@ async def get_response(request: Request, msg: str = Form(...)):
 # Voice Transcription — browser-only mode
 # ---------------------------------------------------------------------------
 @app.post("/transcribe")
-async def transcribe_audio():
-    """Deprecated server STT endpoint kept for backward compatibility."""
-    return JSONResponse(
-        {
-            "text": "",
-            "error": "Server-side STT has been removed. Use browser Web Speech API.",
-        },
-        status_code=410,
-    )
+async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang: str = Form("en-US")):
+    """Server-side STT fallback for browsers/environments without Web Speech API.
+
+    Input: WAV audio blob posted from frontend fallback recorder.
+    Engine: SpeechRecognition + Google Web Speech backend.
+    """
+    if sr is None:
+        return JSONResponse(
+            {
+                "text": "",
+                "error": "Server STT dependency missing (SpeechRecognition).",
+            },
+            status_code=503,
+        )
+
+    language = (lang or get_lang(request) or "en").strip()
+    lang_map = {
+        "en": "en-US",
+        "en-us": "en-US",
+        "zh": "zh-HK",
+        "zh-hk": "zh-HK",
+        "zh_HK": "zh-HK",
+    }
+    language = lang_map.get(language.lower(), language)
+
+    try:
+        content = await audio.read()
+        if not content:
+            return JSONResponse({"text": "", "error": "Empty audio payload."}, status_code=400)
+
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(io.BytesIO(content)) as source:
+            audio_data = recognizer.record(source)
+
+        text = recognizer.recognize_google(audio_data, language=language)
+        return JSONResponse({"text": text.strip(), "engine": "google-web-speech"})
+
+    except sr.UnknownValueError:
+        return JSONResponse(
+            {
+                "text": "",
+                "error": get_text("no_speech_detected", get_lang(request)),
+            },
+            status_code=422,
+        )
+    except sr.RequestError as e:
+        _builtins._original_print(f"[STT] upstream request error: {e}")
+        return JSONResponse(
+            {
+                "text": "",
+                "error": get_text("error_network", get_lang(request)),
+            },
+            status_code=503,
+        )
+    except Exception as e:
+        _builtins._original_print(f"[STT] transcribe error: {e}")
+        return JSONResponse(
+            {
+                "text": "",
+                "error": get_text("error_voice", get_lang(request)),
+            },
+            status_code=500,
+        )
 
 # ---------------------------------------------------------------------------
 # Reminder Management endpoints (AJAX)
@@ -1367,16 +1444,44 @@ async def get_chat_history(request: Request):
     if uid is None:
         return JSONResponse({"history": []})
     lang = get_lang(request)
-    conn = get_db()
-    c = conn.cursor()
-    db_execute(
-        c,
-        "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
-        (uid, lang),
-    )
-    history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
-    conn.close()
-    return JSONResponse({"history": history})
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        db_execute(
+            c,
+            "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
+            (uid, lang),
+        )
+        history = [
+            {
+                "timestamp": _json_timestamp(r["timestamp"]),
+                "sender": "bot" if r["is_bot"] else "user",
+                "message": r["message"],
+            }
+            for r in c.fetchall()
+        ]
+
+        if not history:
+            welcome_msg = get_text("welcome_chat", lang)
+            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            db_execute(
+                c,
+                "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
+                (uid, lang, ts, welcome_msg),
+            )
+            conn.commit()
+            history = [{"timestamp": ts, "sender": "bot", "message": welcome_msg}]
+
+        return JSONResponse({"history": history})
+    except Exception as e:
+        # Graceful degradation for transient DB/network failures.
+        _builtins._original_print(f"[CHAT_HISTORY] fallback due to DB error: {e}")
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return JSONResponse({"history": [{"timestamp": ts, "sender": "bot", "message": get_text("welcome_chat", lang)}], "degraded": True})
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.get("/health/db")

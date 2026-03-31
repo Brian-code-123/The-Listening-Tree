@@ -18,6 +18,8 @@
     "cap:open:android": "npx cap open android",
     "mobile:ios": "npm run cap:sync && npm run cap:open:ios",
     "mobile:android": "npm run cap:sync && npm run cap:open:android",
+    "dev:ios": "bash scripts/mobile-dev.sh ios",
+    "dev:android": "bash scripts/mobile-dev.sh android",
     "cap:copy": "npx cap copy",
     "build": "npm run cap:sync",
     "build-and-sync": "npm run cap:sync && npx cap copy ios && npx cap copy android",

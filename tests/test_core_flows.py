@@ -38,7 +38,7 @@ def test_register_login_chat_and_reminders_flow():
             follow_redirects=False,
         )
         assert register_resp.status_code == 303
-        assert register_resp.headers["location"] == "/login"
+        assert register_resp.headers["location"] == "/"
 
         login_resp = client.post(
             "/login",
@@ -127,6 +127,7 @@ def test_existing_user_can_login_without_reregister():
             follow_redirects=False,
         )
         assert first_register.status_code == 303
+        assert first_register.headers["location"] == "/"
 
         duplicate_register = client.post(
             "/register",

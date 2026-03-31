@@ -14,7 +14,7 @@ A bilingual (English + Cantonese) conversational chatbot designed to reduce lone
 
 ## DevOps & CI/CD
 
-Operational runbook and pipeline setup are documented in `DEVOPS_CICD_RUNBOOK.md`.
+Operational pipeline setup is managed via GitHub Actions workflows under `.github/workflows/`.
 
 ---
 
@@ -681,30 +681,3 @@ Commit: `git commit -m "feat: add custom reminder pattern"`
 To request commercial license, contact the creator.
 
 ---
-
-## Contact
-
-**Creator:** [Brian Hong](https://github.com/Brian-code-123)
-
-**Get in Touch:**
-- 🐙 GitHub: [@Brian-code-123](https://github.com/Brian-code-123)
-- 💬 Email: brian.code.123@gmail.com
-- 📚 Project Wiki: [GitHub Wiki](https://github.com/Brian-code-123/The-Listening-Tree/wiki)
-
-**Report Bugs:** [GitHub Issues](https://github.com/Brian-code-123/The-Listening-Tree/issues)
-
----
-
-## Acknowledgments
-
-- **Zhipu AI** (GLM-4) for LLM inference
-- **FastAPI** and **Uvicorn** for async web framework
-- **PostgreSQL** + **Supabase** for reliable data persistence
-- **Bootstrap 5** for responsive UI
-- **FullCalendar.js** for calendar widget
-- **Capacitor** for cross-platform mobile support
-
----
-
-**Made with ❤️ for elderly wellness | 2025–2026**
-# Fix deployed at: Thu Mar 26 01:38:42 HKT 2026
