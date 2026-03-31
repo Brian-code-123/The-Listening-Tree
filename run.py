@@ -906,6 +906,13 @@ def get_lang(request: Request) -> str:
     return request.session.get("language", "en")
 
 
+def _json_timestamp(value) -> str:
+    """Return a JSON-safe timestamp string for DB datetime/text values."""
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return str(value)
+
+
 def require_login(request: Request) -> int:
     """Return user id or redirect to /login via 303 See Other."""
     uid = get_user(request)
@@ -1384,7 +1391,14 @@ async def get_chat_history(request: Request):
             "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
             (uid, lang),
         )
-        history = [{"timestamp": r["timestamp"], "sender": "bot" if r["is_bot"] else "user", "message": r["message"]} for r in c.fetchall()]
+        history = [
+            {
+                "timestamp": _json_timestamp(r["timestamp"]),
+                "sender": "bot" if r["is_bot"] else "user",
+                "message": r["message"],
+            }
+            for r in c.fetchall()
+        ]
 
         if not history:
             welcome_msg = get_text("welcome_chat", lang)
