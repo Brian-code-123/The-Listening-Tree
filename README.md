@@ -324,9 +324,9 @@ EOF
 
 ```bash
 # Start backend
-npm run dev:5001
+npm run dev
 # or
-PORT=5000 python run.py
+python run.py
 
 # Open browser
 # http://localhost:5000
