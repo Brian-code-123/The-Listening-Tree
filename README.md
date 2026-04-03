@@ -60,9 +60,8 @@ A bilingual (English + Cantonese) conversational AI chatbot designed to reduce l
 
 10. [Troubleshooting & FAQ](#troubleshooting--faq)
 
-11. [Contributing](#contributing)
 
-12. [License](#license)
+11. [License](#license)
 
 ---
 
@@ -620,38 +619,6 @@ A: Add `organization_id` to all tables, filter queries by org_id.
 
 ---
 
-## Contributing
-
-### Report Issues
-
-Go to [GitHub Issues](https://github.com/Brian-code-123/The-Listening-Tree/issues) and include:
-- Title: `[Feature/Bug] Description`
-- Detailed steps to reproduce
-- Screenshots/videos
-- Environment (OS, Python, browser)
-
-### Submit Pull Request
-
-1. Fork repository
-2. Create feature branch: `git checkout -b feature/xyz`
-3. Code following standards above
-4. Test locally: `npm run test:backend`
-5. Commit: `git commit -m "feat: description"`
-6. Push: `git push origin feature/xyz`
-7. Open PR describing changes
-8. Request review from @Brian-code-123
-9. Address feedback
-10. Merge after approval
-
-### Code Review Checklist
-
-- [ ] Follows PEP 8 / Bootstrap conventions
-- [ ] Tests pass
-- [ ] No hardcoded secrets
-- [ ] Documentation updated
-- [ ] Meaningful commit messages
-
----
 
 ## License
 
