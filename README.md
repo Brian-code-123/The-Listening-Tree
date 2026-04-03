@@ -430,8 +430,7 @@ The-Listening-Tree/
 ├── scripts/                 # Deployment scripts
 │   ├── mobile-dev.sh        # iOS/Android live-reload
 │   ├── migrate_sqlite_to_postgres.py
-│   ├── verify_supabase_postgres.py
-│   └── verify-production.py
+│   └── verify_supabase_postgres.py
 │
 ├── tests/                   # Backend tests (pytest)
 │   ├── test_basic.py
