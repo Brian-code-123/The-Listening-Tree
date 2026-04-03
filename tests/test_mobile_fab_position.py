@@ -1,4 +1,15 @@
 """
+Mermaid sequence diagram:
+sequenceDiagram
+    participant Tester
+    participant Browser
+    participant Frontend
+    participant Layout
+    Tester->>Browser: open the app at mobile viewport
+    Browser->>Frontend: render chat header controls
+    Frontend->>Layout: place guide button inline
+    Layout-->>Tester: button position and overlap assertions
+
 E2E Test: Mobile guide helper button position.
 
 Current UX requirement:

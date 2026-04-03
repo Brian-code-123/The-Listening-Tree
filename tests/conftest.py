@@ -100,6 +100,16 @@ class _FakeCursor:
             self.rowcount = before - len(self.state["reminders"])
             return
 
+        if "update reminders set is_active = false" in normalized:
+            _ts, user_id, label = params
+            updated = 0
+            for reminder in self.state["reminders"]:
+                if reminder["user_id"] == user_id and reminder["label"] == label:
+                    reminder["is_active"] = False
+                    updated += 1
+            self.rowcount = updated
+            return
+
         if "select label, reminder_time, is_active from reminders" in normalized:
             user_id, _today = params
             self._rows = [

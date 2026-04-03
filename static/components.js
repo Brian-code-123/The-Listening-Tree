@@ -67,4 +67,10 @@ const UI = {
     }
 };
 
-window.UI = UI;
+if (typeof window !== 'undefined') {
+    window.UI = UI;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = UI;
+}

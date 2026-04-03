@@ -7,6 +7,10 @@
     "dev:backend": "python run.py",
     "dev": "npm run dev:5001",
     "test:backend": "pytest -q tests/test_basic.py tests/test_core_flows.py tests/test_session_persistence_unit.py",
+    "test:unit": "npx vitest run --config vitest.config.ts",
+    "test:integration": "PYTHONPATH=. pytest -q tests/integration",
+    "test:e2e": "playwright test",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "ci:python": "python -m compileall -q run.py api scripts && npm run test:backend",
     "ci:mobile": "npx cap doctor && ( [ -d android ] || npx cap add android ) && npx cap sync android",
     "ci:mobile:ios": "( [ -d ios ] || npx cap add ios ) && npx cap sync ios",
@@ -46,6 +50,9 @@
   "license": "MIT",
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
+    "@playwright/test": "^1.52.0",
+    "jsdom": "^26.1.0",
+    "vitest": "^4.1.2",
     "typescript": "^5.9.3"
   }
 }
