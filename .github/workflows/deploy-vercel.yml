@@ -33,37 +33,55 @@ jobs:
             echo "Vercel secrets missing. Deploy steps will be skipped."
           fi
 
-      - name: Setup Python
+      - name: Validate Vercel token
+        id: token_check
         if: steps.precheck.outputs.has_secrets == 'true'
+        continue-on-error: true
+        run: |
+          npx vercel whoami --token "$VERCEL_TOKEN"
+
+      - name: Mark token validity
+        if: steps.precheck.outputs.has_secrets == 'true'
+        run: |
+          if [ "${{ steps.token_check.outcome }}" = "success" ]; then
+            echo "token_valid=true" >> "$GITHUB_ENV"
+            echo "Vercel token is valid."
+          else
+            echo "token_valid=false" >> "$GITHUB_ENV"
+            echo "Vercel token is invalid. Deploy steps will be skipped."
+          fi
+
+      - name: Setup Python
+        if: steps.precheck.outputs.has_secrets == 'true' && env.token_valid == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install uv
-        if: steps.precheck.outputs.has_secrets == 'true'
+        if: steps.precheck.outputs.has_secrets == 'true' && env.token_valid == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install uv
 
       - name: Install dependencies
-        if: steps.precheck.outputs.has_secrets == 'true'
+        if: steps.precheck.outputs.has_secrets == 'true' && env.token_valid == 'true'
         run: npm install
 
       - name: Pull Vercel environment
-        if: steps.precheck.outputs.has_secrets == 'true'
+        if: steps.precheck.outputs.has_secrets == 'true' && env.token_valid == 'true'
         run: npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
 
       - name: Build on Vercel
-        if: steps.precheck.outputs.has_secrets == 'true'
+        if: steps.precheck.outputs.has_secrets == 'true' && env.token_valid == 'true'
         run: npx vercel build --prod --token "$VERCEL_TOKEN"
 
       - name: Deploy to Vercel production
-        if: steps.precheck.outputs.has_secrets == 'true'
+        if: steps.precheck.outputs.has_secrets == 'true' && env.token_valid == 'true'
         run: npx vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN"
 
       - name: Skip deploy notice
-        if: steps.precheck.outputs.has_secrets != 'true'
-        run: echo "Skipping deployment because required Vercel secrets are not configured."
+        if: steps.precheck.outputs.has_secrets != 'true' || env.token_valid != 'true'
+        run: echo "Skipping deployment because required Vercel secrets are missing or token is invalid."
 
   verify-production:
     name: Verify Production Health
