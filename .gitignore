@@ -30,7 +30,6 @@ htmlcov/
 # Node / frontend artifacts
 node_modules/
 npm-debug.log*
-package-lock.json
 
 # Build outputs
 dist/
@@ -65,10 +64,7 @@ Thumbs.db
 out.txt
 patch*.py
 
-# Test files and test artifacts
-tests/
-test_*.py
-*_test.py
+# Test artifacts
 tests/*.log
 tests/*.out
 tests/tmp/

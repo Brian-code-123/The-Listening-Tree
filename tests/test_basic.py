@@ -1,3 +1,16 @@
+"""
+Mermaid sequence diagram:
+sequenceDiagram
+    participant Tester
+    participant Browser
+    participant FastAPI
+    participant DB
+    Tester->>Browser: open /login or /
+    Browser->>FastAPI: request page or health endpoint
+    FastAPI->>DB: validate session / connectivity
+    FastAPI-->>Browser: HTML or JSON response
+"""
+
 import pytest
 import uuid
 from fastapi.testclient import TestClient

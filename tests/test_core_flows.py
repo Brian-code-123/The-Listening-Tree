@@ -1,3 +1,16 @@
+"""
+Mermaid sequence diagram:
+sequenceDiagram
+    participant Tester
+    participant API
+    participant DB
+    participant GameState
+    Tester->>API: register/login and send reminder/chat commands
+    API->>DB: create/read/update/delete reminder records
+    API->>GameState: start and advance quiz state
+    API-->>Tester: responses and state changes
+"""
+
 import uuid
 
 from fastapi.testclient import TestClient

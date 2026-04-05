@@ -1,3 +1,16 @@
+"""
+Mermaid sequence diagram:
+sequenceDiagram
+    participant Tester
+    participant Session
+    participant FastAPI
+    participant DB
+    Tester->>FastAPI: create account and login
+    FastAPI->>Session: persist lt_session cookie
+    FastAPI->>DB: read/write preference and chat history rows
+    FastAPI-->>Tester: preserved state across requests
+"""
+
 from fastapi.testclient import TestClient
 
 import run

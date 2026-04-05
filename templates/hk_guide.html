@@ -133,7 +133,7 @@
             renderItems();
         });
 
-        // TTS for items
+        // TTS for items — prefer young/gentle female voice similar to chat UI
         function speakText(text) {
             if (!('speechSynthesis' in window)) return;
             window.speechSynthesis.cancel();
@@ -141,7 +141,19 @@
             if (!clean) return;
             const u = new SpeechSynthesisUtterance(clean);
             u.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
-            u.rate = 0.85;
+            u.rate = 0.88;
+            u.pitch = 1.15;
+
+            const voices = window.speechSynthesis.getVoices();
+            const langPrefix = currentLang === 'zh-HK' ? 'zh' : 'en';
+            const femaleKeywords = ['Female','female','Samantha','Mei','Yuna','Anna','Zira','Google','Moira','Karen','Serena','Microsoft'];
+
+            let voice = voices.find(v => v.lang && v.lang.startsWith(langPrefix) && femaleKeywords.some(k => v.name && v.name.includes(k)));
+            if (!voice) voice = voices.find(v => v.lang && v.lang.startsWith(langPrefix) && /female/i.test(v.name || ''));
+            if (!voice) voice = voices.find(v => v.lang && v.lang.startsWith(langPrefix));
+            if (!voice && voices.length > 0) voice = voices[0];
+            if (voice) u.voice = voice;
+
             window.speechSynthesis.speak(u);
         }
 
