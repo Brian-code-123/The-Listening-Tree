@@ -1291,6 +1291,29 @@ async def get_response(request: Request, msg: str = Form(...)):
         answer_prefixes = ["answer ", "答案 ", "答案：", "答案:", "回答 ", "答 "]
         answer_only_tokens = {"answer", "答案", "回答", "答"}
 
+        # If the session lost game state but the last bot message was a quiz
+        # question (e.g., page reload or worker switch), detect it from the
+        # most recent bot message in chat_history and restore game mode.
+        if not game.get('is_game_mode'):
+            try:
+                c.execute(
+                    "SELECT message FROM chat_history WHERE user_id = ? AND lang = ? AND is_bot = TRUE ORDER BY timestamp DESC LIMIT 1",
+                    (uid, game_lang),
+                )
+                last_bot = c.fetchone()
+                last_text = (last_bot[0] if isinstance(last_bot, (list, tuple)) else (last_bot.get('message') if last_bot else '')) if last_bot else ''
+            except Exception:
+                last_text = ''
+            if last_text:
+                for idx, q in enumerate(active_questions):
+                    if q['question'] and q['question'] in last_text:
+                        game['is_game_mode'] = True
+                        game['current_index'] = idx
+                        game['current_question'] = q['question']
+                        game['correct_answer'] = q['answer']
+                        _persist_game_state()
+                        break
+
         if game_trigger and not game['is_game_mode']:
             game['is_game_mode'] = True
             game['current_index'] = 0
