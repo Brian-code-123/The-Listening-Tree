@@ -11,6 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+HK:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/speech.js"></script>
 
     <!-- Vercel Analytics -->
     <script>
@@ -351,26 +352,7 @@
         }
 
         function speakText(text) {
-            if (!('speechSynthesis' in window)) return;
-            window.speechSynthesis.cancel();
-            const clean = (text || '').replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
-            if (!clean) return;
-            const utterance = new SpeechSynthesisUtterance(clean);
-            utterance.lang = currentLang === 'zh-HK' ? 'zh-HK' : 'en-US';
-            utterance.rate = 0.88;
-            utterance.pitch = 1.15;
-
-            const voices = window.speechSynthesis.getVoices();
-            const langPrefix = currentLang === 'zh-HK' ? 'zh' : 'en';
-            const femaleKeywords = ['Female','female','Samantha','Mei','Yuna','Anna','Zira','Google','Moira','Karen','Serena','Microsoft'];
-
-            let voice = voices.find(v => v.lang && v.lang.startsWith(langPrefix) && femaleKeywords.some(k => v.name && v.name.includes(k)));
-            if (!voice) voice = voices.find(v => v.lang && v.lang.startsWith(langPrefix) && /female/i.test(v.name || ''));
-            if (!voice) voice = voices.find(v => v.lang && v.lang.startsWith(langPrefix));
-            if (!voice && voices.length > 0) voice = voices[0];
-            if (voice) utterance.voice = voice;
-
-            speechSynthesis.speak(utterance);
+            window.TLTSpeech && window.TLTSpeech.speak(text, currentLang, { enabled: ttsEnabled });
         }
 
         function showStatus(message, type) {

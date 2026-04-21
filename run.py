@@ -493,6 +493,16 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _normalize_quiz_answer(text: str) -> str:
+    """Normalize quiz answers for tolerant matching.
+
+    Strips spaces/punctuation and keeps letters/numbers/CJK characters only,
+    so minor formatting differences do not break answer checking.
+    """
+    raw = str(text or "").strip().lower()
+    return "".join(ch for ch in raw if ch.isalnum() or ('\u4e00' <= ch <= '\u9fff'))
+
+
 # ---------------------------------------------------------------------------
 # In-memory state  (lost on server restart — by design)
 # ---------------------------------------------------------------------------
@@ -1252,18 +1262,40 @@ async def get_response(request: Request, msg: str = Form(...)):
 
     # ---- Quiz Game ----
     else:
-        active_questions = questions_zh if lang == 'zh-HK' else questions
-        game = user_game_states.setdefault(uid, {
-            'is_game_mode': False, 'current_index': 0,
-            'current_question': None, 'correct_answer': None, 'score': 0
-        })
+        game_defaults = {
+            'is_game_mode': False,
+            'current_index': 0,
+            'current_question': None,
+            'correct_answer': None,
+            'score': 0,
+            'lang': lang,
+        }
+
+        # Session-backed game state is more reliable than process memory and
+        # avoids accidental mode loss across reloads or worker boundaries.
+        stored_game = request.session.get('game_state')
+        if isinstance(stored_game, dict):
+            game = {**game_defaults, **stored_game}
+        else:
+            game = {**game_defaults, **user_game_states.get(uid, {})}
+
+        game_lang = game.get('lang', lang)
+        active_questions = questions_zh if game_lang == 'zh-HK' else questions
+
+        def _persist_game_state() -> None:
+            request.session['game_state'] = game
+            user_game_states[uid] = game
+
         game_trigger = user_input_lower in ["play game", "玩遊戲", "玩游戏"]
         exit_trigger = user_input_lower in ["exit game", "退出遊戲", "退出游戏"]
+        answer_prefixes = ["answer ", "答案 ", "答案：", "答案:", "回答 ", "答 "]
+        answer_only_tokens = {"answer", "答案", "回答", "答"}
 
         if game_trigger and not game['is_game_mode']:
             game['is_game_mode'] = True
             game['current_index'] = 0
             game['score'] = 0
+            game['lang'] = lang
             q = active_questions[0]
             game['current_question'] = q["question"]
             game['correct_answer'] = q["answer"]
@@ -1271,6 +1303,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 response = f"開始玩喇！一共有{len(active_questions)}條問題。分數：0。第一條問題：{game['current_question']}"
             else:
                 response = f"Let's play! You have {len(active_questions)} questions. Current score: 0. First question: {game['current_question']}"
+            _persist_game_state()
 
         elif exit_trigger and game['is_game_mode']:
             game['is_game_mode'] = False
@@ -1278,9 +1311,24 @@ async def get_response(request: Request, msg: str = Form(...)):
                 response = f"遊戲結束！你答啱咗{game['score']}條（總共{game['current_index']}條）。"
             else:
                 response = f"Game stopped. You got {game['score']} out of {game['current_index']} correct so far!"
+            _persist_game_state()
 
         elif game['is_game_mode']:
-            if user_input_lower.strip() == game['correct_answer']:
+            answer_text = user_input_original.strip()
+            answer_text_lower = user_input_lower.strip()
+            for prefix in answer_prefixes:
+                if answer_text_lower.startswith(prefix):
+                    answer_text = answer_text[len(prefix):].strip()
+                    answer_text_lower = answer_text.lower()
+                    break
+
+            if answer_text_lower in answer_only_tokens or not answer_text:
+                if lang == 'zh-HK':
+                    response = f"請輸入答案內容先喔。呢條問題係：{game['current_question']}"
+                else:
+                    response = f"Please type your answer after 'answer'. Current question: {game['current_question']}"
+                _persist_game_state()
+            elif _normalize_quiz_answer(answer_text) == _normalize_quiz_answer(game['correct_answer']):
                 game['score'] += 1
                 response = f"啱咗！分數：{game['score']}" if lang == 'zh-HK' else f"Correct! Score: {game['score']}"
             else:
@@ -1288,21 +1336,29 @@ async def get_response(request: Request, msg: str = Form(...)):
                     response = f"唔啱呀，答案係{game['correct_answer']}。分數：{game['score']}"
                 else:
                     response = f"Incorrect. The answer was {game['correct_answer']}. Score: {game['score']}"
-            game['current_index'] += 1
-            if game['current_index'] == len(active_questions):
-                if lang == 'zh-HK':
-                    response += f"\n遊戲完成！你答啱咗{game['score']}條（總共{len(active_questions)}條）。叻叻！"
+            if answer_text_lower not in answer_only_tokens and answer_text:
+                game['current_index'] += 1
+                if game['current_index'] == len(active_questions):
+                    if lang == 'zh-HK':
+                        response += f"\n遊戲完成！你答啱咗{game['score']}條（總共{len(active_questions)}條）。叻叻！"
+                    else:
+                        response += f"\nGame over! You successfully answered {game['score']} out of {len(active_questions)} questions correctly."
+                    game['is_game_mode'] = False
                 else:
-                    response += f"\nGame over! You successfully answered {game['score']} out of {len(active_questions)} questions correctly."
-                game['is_game_mode'] = False
-            else:
-                q = active_questions[game['current_index']]
-                game['current_question'] = q["question"]
-                game['correct_answer'] = q["answer"]
-                if lang == 'zh-HK':
-                    response += f" 下一條問題：{q['question']}"
-                else:
-                    response += f" Next question: {q['question']}"
+                    q = active_questions[game['current_index']]
+                    game['current_question'] = q["question"]
+                    game['correct_answer'] = q["answer"]
+                    if lang == 'zh-HK':
+                        response += f" 下一條問題：{q['question']}"
+                    else:
+                        response += f" Next question: {q['question']}"
+                _persist_game_state()
+
+        elif user_input_lower.startswith("answer") or user_input_lower.startswith("答案") or user_input_lower.startswith("回答"):
+            response = (
+                "你未開始遊戲呀，請先輸入「玩遊戲」。" if lang == 'zh-HK'
+                else "You're not in a game yet. Type 'play game' first."
+            )
 
         # ---- Normal AI Chat ----
         else:
