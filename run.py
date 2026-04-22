@@ -1296,7 +1296,8 @@ async def get_response(request: Request, msg: str = Form(...)):
         # most recent bot message in chat_history and restore game mode.
         if not game.get('is_game_mode'):
             try:
-                c.execute(
+                db_execute(
+                    c,
                     "SELECT message FROM chat_history WHERE user_id = ? AND lang = ? AND is_bot = TRUE ORDER BY timestamp DESC LIMIT 1",
                     (uid, game_lang),
                 )
