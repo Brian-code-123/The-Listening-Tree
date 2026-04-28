@@ -206,7 +206,6 @@
 
             // Card click → detail
             $('.hk-guide-card').on('click', function() {
-                const cat = $(this).data('category');
                 const items = currentCategory === 'all' ? allItems : allItems.filter(i => i.category === currentCategory);
                 const idx = $(this).index();
                 if (items[idx]) showDetail(items[idx]);

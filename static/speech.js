@@ -58,7 +58,6 @@
     function pickVoice(voices, currentLang) {
         if (!Array.isArray(voices) || voices.length === 0) return null;
 
-        // Score all available voices and choose the best fit for the current language.
         const ranked = voices
             .map((voice) => ({ voice, score: scoreVoice(voice, currentLang, '') }))
             .sort((a, b) => b.score - a.score);
@@ -84,7 +83,9 @@
 
         const speakNow = () => {
             const voices = window.speechSynthesis.getVoices();
-            const voice = pickVoice(voices, currentLang);
+            const voice = voices
+                .map((v) => ({ voice: v, score: scoreVoice(v, currentLang, clean) }))
+                .sort((a, b) => b.score - a.score)[0]?.voice || null;
 
             if (voice) {
                 utterance.voice = voice;

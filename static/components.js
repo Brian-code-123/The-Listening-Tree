@@ -4,6 +4,7 @@
  * for the Capacitor environment.
  */
 
+// Basic HTML escaping for user-visible strings to avoid injection issues.
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -20,7 +21,7 @@ const UI = {
     MessageBubble: (sender, content, time, isImage = false) => {
         const isBot = (sender === 'bot');
         const containerClass = isBot ? 'justify-content-start' : 'justify-content-end';
-        const imgClass = 'img_cont_msg';
+        const imgClass = 'img_cont_msg'; // Same class for both bot and user
         const avatar = isBot ? '/static/Chatbot.png' : '/static/User.png';
         const msgContainerClass = isBot ? 'msg_cotainer' : 'msg_cotainer_send';
         const timeClass = 'msg_time';
