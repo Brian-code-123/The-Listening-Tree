@@ -68,6 +68,8 @@ patch*.py
 tests/*.log
 tests/*.out
 tests/tmp/
+playwright-report/
+test-results/
 
 # Added by Spec Kitty CLI (auto-managed)
 .claude/
