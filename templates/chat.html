@@ -37,7 +37,11 @@
         {% set _host = request.url.hostname if request and request.url else '' %}
         {% if _host and ('vercel.app' in _host or _host == 'the-listening-tree.vercel.app') %}
         <script>
-            window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+            // Queue analytics calls until the Vercel script finishes loading.
+            window.va = window.va || function () {
+                window.vaq = window.vaq || [];
+                window.vaq.push(arguments);
+            };
         </script>
         <script defer src="/_vercel/insights/script.js"></script>
         {% endif %}

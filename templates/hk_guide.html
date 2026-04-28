@@ -13,9 +13,13 @@
     <script src="/static/speech.js"></script>
 
     <!-- Vercel Analytics -->
-    <script>
-      window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
-    </script>
+        <script>
+            // Queue analytics calls until the Vercel script finishes loading.
+            window.va = window.va || function () {
+                window.vaq = window.vaq || [];
+                window.vaq.push(arguments);
+            };
+        </script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body class="page-hk-guide" data-theme="light">
@@ -202,6 +206,7 @@
 
             // Card click → detail
             $('.hk-guide-card').on('click', function() {
+                const cat = $(this).data('category');
                 const items = currentCategory === 'all' ? allItems : allItems.filter(i => i.category === currentCategory);
                 const idx = $(this).index();
                 if (items[idx]) showDetail(items[idx]);

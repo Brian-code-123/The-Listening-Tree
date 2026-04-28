@@ -39,6 +39,7 @@ build/
 android/
 ios/
 www/capacitor-bridge.js
+www/vendor/
 
 # Vercel local project metadata
 .vercel/

@@ -14,9 +14,13 @@
     <script src="/static/speech.js"></script>
 
     <!-- Vercel Analytics -->
-    <script>
-      window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
-    </script>
+        <script>
+            // Queue analytics calls until the Vercel script finishes loading.
+            window.va = window.va || function () {
+                window.vaq = window.vaq || [];
+                window.vaq.push(arguments);
+            };
+        </script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body class="page-accessibility" data-theme="light">
