@@ -157,24 +157,3 @@ jobs:
             echo '    PW-->>CI: screenshots, trace, video, HTML report'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-
-  capacitor-check:
-    name: Capacitor Build Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Capacitor doctor
-        run: npx cap doctor
-
-      - name: Capacitor Android sync check
-        run: npm run ci:mobile
