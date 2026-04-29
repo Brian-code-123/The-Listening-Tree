@@ -32,7 +32,7 @@ import hmac
 import socket
 import time as _time
 import builtins as _builtins
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -182,11 +182,8 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown: Clean up task
     task.cancel()
-    try:
+    with suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        # Propagate cancellation after shutdown cleanup so callers observe it.
-        raise
 
 # ---------------------------------------------------------------------------
 # Application initialisation
