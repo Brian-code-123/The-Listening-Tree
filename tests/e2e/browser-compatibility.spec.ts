@@ -48,4 +48,27 @@ test.describe('Browser test: cross-browser compatibility', () => {
     await expect(page.locator('#guideContent .hk-guide-card').first()).toBeVisible();
     await expect(page.locator('.hk-card-detail').first()).toBeVisible();
   });
+
+  test('chat page renders core controls and supports basic game command', async ({ page }) => {
+    test.setTimeout(60_000);
+
+    await registerAndLogin(page);
+    await page.goto('/');
+
+    await expect(page.locator('#messageArea')).toBeVisible();
+    await expect(page.locator('#text')).toBeVisible();
+    await expect(page.locator('#send')).toBeVisible();
+    await expect(page.locator('#micBtn')).toBeVisible();
+    await expect(page.locator('#reminderForm')).toBeVisible();
+    await expect(page.locator('#guideFab')).toBeVisible();
+
+    const botMessages = page.locator('.msg_cotainer');
+    const botCountBefore = await botMessages.count();
+
+    await page.locator('#text').fill('play game');
+    await page.locator('#send').click();
+    await expect(botMessages).toHaveCount(botCountBefore + 1, { timeout: 30000 });
+
+    await expect(botMessages.last()).toContainText("Let's play");
+  });
 });

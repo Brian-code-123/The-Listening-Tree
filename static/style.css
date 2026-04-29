@@ -658,10 +658,14 @@ body {
 }
 @media (max-width: 576px) {
     .page-chat .main-layout { padding: calc(8px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); gap: 10px; }
+    .page-chat .msg_head > div { flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+    .page-chat .msg_head .ms-auto { margin-left: 0 !important; width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+    .page-chat .msg_head .user_info { flex: 1 1 180px; min-width: 0; }
     .page-chat .msg_head { padding: 10px 14px; }
     .page-chat .chat-nav-bar { padding: 6px 10px; gap: 4px; }
     .page-chat .chat-nav-btn { padding: 4px 10px; font-size: 0.78rem; }
     .page-chat .chat-nav-btn.nav-tts { margin-left: 0; }
+    .page-chat .chat-nav-btn.nav-tts { width: 100%; justify-content: center; }
     .page-chat .chat-feature-bar { padding: 5px 10px; gap: 4px; }
     .page-chat .msg_cotainer, .page-chat .msg_cotainer_send { max-width: 85%; font-size: 1rem; }
     .page-chat .chat-footer { padding: 8px 10px; }

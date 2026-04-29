@@ -13,9 +13,13 @@
     <link rel="stylesheet" href="/static/style.css">
 
     <!-- Vercel Analytics -->
-    <script>
-      window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
-    </script>
+        <script>
+            // Queue analytics calls until the Vercel script finishes loading.
+            window.va = window.va || function () {
+                window.vaq = window.vaq || [];
+                window.vaq.push(arguments);
+            };
+        </script>
     <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body class="page-login" data-theme="light">

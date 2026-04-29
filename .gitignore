@@ -39,6 +39,7 @@ build/
 android/
 ios/
 www/capacitor-bridge.js
+www/vendor/
 
 # Vercel local project metadata
 .vercel/
@@ -68,6 +69,8 @@ patch*.py
 tests/*.log
 tests/*.out
 tests/tmp/
+playwright-report/
+test-results/
 
 # Added by Spec Kitty CLI (auto-managed)
 .claude/
