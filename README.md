@@ -101,12 +101,14 @@ A bilingual (English + Cantonese) conversational AI chatbot designed to reduce l
 | Metric | Value |
 |--------|-------|
 | **Supported Languages** | 2 (English, Cantonese/zh-HK) |
-| **Backend Routes** | 21 endpoints (auth, chat, reminders, health) |
-| **Frontend Templates** | 5 (login, register, chat, accessibility, guide) |
+| **Backend Lines** | 2,359 lines (run.py with full schema, LLM, reminders) |
+| **Backend Routes** | 21 endpoints (auth, chat, reminders, health, utilities) |
+| **Frontend Templates** | 5 (login, register, chat, accessibility, hk_guide) |
 | **Database Tables** | 4 (users, reminders, chat_history, preferences) |
+| **Database Indexes** | 7 (optimized for user, reminders, chat queries) |
 | **Speech Languages** | 2 (en-US, zh-HK) |
 | **Mobile Platforms** | 2 (iOS 13+, Android 6+) |
-| **Response Time** | 2–5 seconds (LLM inference) |
+| **Response Time** | 2–5 seconds (Zhipu LLM inference) |
 
 ---
 
@@ -144,43 +146,64 @@ A bilingual (English + Cantonese) conversational AI chatbot designed to reduce l
 ### Database Schema (PostgreSQL)
 
 ```sql
--- Users table
+-- Users table (authentication & profile)
 CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
+  id BIGSERIAL PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  username TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  language VARCHAR(10) DEFAULT 'en'
-);
-
--- Reminders table
-CREATE TABLE reminders (
-  id SERIAL PRIMARY KEY,
-  user_id INT NOT NULL REFERENCES users(id),
-  label VARCHAR(255) NOT NULL,
-  reminder_time TIME NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_login TIMESTAMP,
   is_active BOOLEAN DEFAULT TRUE
 );
 
--- Chat history table
-CREATE TABLE chat_history (
-  id SERIAL PRIMARY KEY,
-  user_id INT NOT NULL REFERENCES users(id),
-  message TEXT NOT NULL,
-  sender VARCHAR(50),  -- 'user' or 'bot'
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  language VARCHAR(10) DEFAULT 'en'
+-- Reminders table (medication, activity scheduling)
+CREATE TABLE reminders (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  label TEXT NOT NULL,                    -- "吃藥", "運動", etc.
+  reminder_time TEXT NOT NULL,            -- "09:00" format
+  is_active BOOLEAN DEFAULT TRUE,
+  repeat_type TEXT DEFAULT 'once',        -- 'once', 'daily', 'weekly'
+  priority TEXT DEFAULT 'normal',         -- 'low', 'normal', 'high'
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- User preferences table
-CREATE TABLE preferences (
-  id SERIAL PRIMARY KEY,
-  user_id INT UNIQUE NOT NULL REFERENCES users(id),
-  theme VARCHAR(50) DEFAULT 'light',
-  voice_enabled BOOLEAN DEFAULT TRUE
+-- Chat history table (conversation logs)
+CREATE TABLE chat_history (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  lang TEXT DEFAULT 'en',                 -- 'en' or 'zh-HK'
+  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_bot BOOLEAN NOT NULL,                -- TRUE if bot message
+  message TEXT NOT NULL,
+  is_deleted BOOLEAN DEFAULT FALSE,
+  token_count INTEGER                     -- For LLM context tracking
 );
+
+-- User preferences table (language, theme, settings)
+CREATE TABLE preferences (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  pref_key TEXT NOT NULL,                 -- 'language', 'theme', 'voice_enabled'
+  pref_value TEXT NOT NULL,               -- 'en', 'zh-HK', 'dark', 'light', 'true'
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, pref_key)
+);
+
+-- Indexes (performance optimization)
+CREATE INDEX idx_users_email_lower ON users ((LOWER(email)));
+CREATE INDEX idx_reminders_user ON reminders(user_id, is_active);
+CREATE INDEX idx_chat_user_time ON chat_history(user_id, timestamp);
+CREATE INDEX idx_chat_deleted ON chat_history(user_id, is_deleted);
+CREATE INDEX idx_pref_user ON preferences(user_id, pref_key);
+CREATE INDEX idx_reminders_date ON reminders(user_id, created_at);
+CREATE INDEX idx_chat_lang ON chat_history(user_id, lang);
 ```
+
+**Database Provider:** PostgreSQL 12+ (Supabase / Neon / Self-hosted)
 
 ---
 
@@ -293,46 +316,87 @@ npm install
 
 ### Configuration
 
-Create `.env` file:
+**Create `.env` file (copy from `.env.example`):**
 
 ```bash
-cat > .env << 'EOF'
-# Zhipu AI (required)
+# Zhipu AI API (required)
 ZHIPU_API_KEY="sk-..."
 ZHIPU_BASE_URL="https://open.bigmodel.cn/api/paas/v4"
 ZHIPU_MODEL="glm-4-flash"
 
-# Database (required)
-DATABASE_URL="postgresql://user:password@host:5432/listening_tree"
+# Database (required) — Use one:
+# Option 1: Supabase
+DATABASE_URL="postgresql://[user]:[password]@[host]:5432/[database]?sslmode=require"
+
+# Option 2: Self-hosted PostgreSQL
+DATABASE_URL="postgresql://user:password@localhost:5432/listening_tree"
 
 # Security (required)
 SECRET_KEY="<64-char-hex>"  # Generate: python -c "import secrets; print(secrets.token_hex(32))"
 
-# Optional
-NEWS_API_KEY="<your-newsapi-key>"
-PORT="5000"
-ENVIRONMENT="development"
-EOF
+# Optional services
+NEWS_API_KEY="<your-newsapi-key>"     # For news feed (fallback if missing)
+PORT="5000"                            # Server port
+ENVIRONMENT="development"              # or "production"
+MAX_DB_CANDIDATES=20                   # Fallback DB candidates (multi-region)
+PG_RETRY_INTERVAL_SEC=5                # PostgreSQL retry backoff
 ```
 
-**Database Options:**
-1. **Supabase** – Sign up at supabase.co, copy connection string
-2. **Docker** – `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=pwd postgres:15`
-3. **SQLite** – Auto-creates locally if `DATABASE_URL` not set
+**Environment Validation:**
+- 🔴 **DATABASE_URL is required** – App won't start without it
+- 🟡 **NEWS_API_KEY is optional** – News endpoint disabled without it
+- 🟢 **All other vars have safe defaults**
+
+**Setup Methods:**
+
+1. **Supabase (Recommended):**
+   - Sign up: https://supabase.co
+   - Create new project → Retrieve connection string → Add to `.env`
+   - Auto-migration: Run `python run.py` → creates tables
+
+2. **Docker PostgreSQL:**
+   ```bash
+   docker run -d -p 5432:5432 \
+     -e POSTGRES_DB=listening_tree \
+     -e POSTGRES_PASSWORD=secure_pwd \
+     postgres:15
+   # Then: DATABASE_URL="postgresql://postgres:secure_pwd@localhost:5432/listening_tree"
+   ```
+
+3. **Render / Railway / Railway:**
+   - Free PostgreSQL provided → Copy connection string
 
 ### Running Locally
 
+**Backend:**
 ```bash
-# Start backend
-npm run dev
-# or
+# Option 1: Direct Python
 python run.py
+# Server: http://localhost:5000
+# Logs: [DB] ✅ PostgreSQL initialized, [STT] ✅ Browser Web Speech API ready
 
-# Open browser
-# http://localhost:5000
+# Option 2: Via npm (if available)
+npm run dev
 
-# Register test account: test@example.com / test1234
+# Option 3: With Uvicorn directly
+uvicorn run:app --reload --host 0.0.0.0 --port 5000
 ```
+
+**Frontend:**
+- Automatically served by FastAPI at `http://localhost:5000`
+- Register test account: email: `test@example.com`, password: `test1234`
+- Chat page auto-loads after login
+
+**Health Check:**
+```bash
+curl http://localhost:5000/health
+curl http://localhost:5000/health/db
+```
+
+**Logs to Monitor:**
+- `[DB] ✅ PostgreSQL database initialized` — Schema created
+- `[STT] ✅ Browser Web Speech API ready` — Voice input ready
+- `[REMINDER] ⏰ Triggered: medication` — Reminder scheduler working
 
 ---
 
@@ -355,29 +419,62 @@ python run.py
 
 ### Reminders
 
-**Set:**
+**Set (English):**
 ```
 "set reminder take medicine 09:00"
 "set reminder exercise 14:30"
 ```
 
-**Delete:**
+**Set (Cantonese):**
+```
+"設置提醒 吃藥 09:00"
+"設置提醒 每日散步 18:30"
+```
+
+**Delete (English):**
 ```
 "delete reminder take medicine"
 ```
 
+**Delete (Cantonese):**
+```
+"刪除提醒 吃藥"
+```
+
 **View:** Click Reminders panel (right sidebar)
+
+**Time Format:** 24-hour format (HH:MM), e.g., `09:00`, `14:30`
 
 ### Games
 
-**Start:**
+**Start (English):**
 ```
 "play game"
 ```
 
-**Answer:**
+**Start (Cantonese):**
 ```
-"answer paris"  # Case-insensitive, partial match accepted
+"玩遊戲"
+```
+
+**Answer (Flexible Matching):**
+```
+"answer paris"           # Exact match
+"paris"                  # Auto-detected answer
+"answer 巴黎"           # Cantonese answers accepted
+"答 藍色"               # Cantonese format
+"每個月"                 # Substring match: matches "每個月都有至少28日"
+```
+
+**Answer Recognition:**
+- ✅ **Exact Match:** "paris" = "paris"
+- ✅ **Substring Match:** "每個月" matches "每個月都有至少28日" (min 2 chars)
+- ✅ **Case-Insensitive:** "PARIS" = "paris"
+- ✅ **Cantonese:** Full support for zh-HK answers
+
+**Exit Game:**
+```
+"exit game"  or  "退出遊戲"
 ```
 
 ### Calendar
@@ -397,7 +494,7 @@ python run.py
 
 ```
 The-Listening-Tree/
-├── run.py                    # FastAPI main app (372 lines, 21 routes)
+├── run.py                    # FastAPI main app (2,359 lines, 21 routes, full schema)
 ├── translations.py           # Bilingual i18n (EN + zh-HK)
 ├── requirements.txt          # Python dependencies
 ├── package.json              # Node.js dependencies
@@ -627,4 +724,11 @@ A: Add `organization_id` to all tables, filter queries by org_id.
 
 ---
 
-**Last Updated:** April 2026 | **Status:** Stable, Production-Ready | **Maintainer:** @Brian-code-123
+**Last Updated:** May 2026 | **Status:** Stable, Production-Ready | **Maintainer:** @Brian-code-123
+
+**Recent Updates (May 2026):**
+- ✨ Intelligent quiz answer matching: substring validation for flexible answers
+- 🐛 Fixed: zh-* language code support (zh, zh-CN, zh-HK)
+- 📊 Database: Full PostgreSQL/Supabase migration complete
+- 🔐 Security: RLS policies recommended, all secrets env-managed
+- 📈 Schema: 7 indexes for performance optimization
