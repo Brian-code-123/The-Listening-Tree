@@ -119,6 +119,7 @@ jobs:
 
       - name: Upload Playwright HTML report
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -126,12 +127,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Playwright trace/video/screenshot artifacts
+      - name: Upload Playwright video artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-test-results
-          path: test-results
+          name: playwright-videos
+          path: test-results/**/*.webm
           if-no-files-found: warn
           retention-days: 14
 
