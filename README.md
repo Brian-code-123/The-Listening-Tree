@@ -72,7 +72,7 @@ A bilingual (English + Cantonese) conversational AI chatbot designed to reduce l
 **The Listening Tree** is an AI-powered companion chatbot specifically designed for elderly populations to combat loneliness and improve mental wellness through daily conversation and activity engagement.
 
 **Core Capabilities:**
-- 🤖 **Conversational AI** – Daily warm dialogue via Zhipu AI GLM-4 LLM
+- 🤖 **Conversational AI** – Warm, bilingual dialogue via Zhipu AI GLM-4 LLM, guided by a curated persona prompt and short-turn conversational memory
 - 🎤 **Voice Interaction** – Browser-based Web Speech API for hands-free chat (English & Cantonese)
 - 📱 **Cross-Platform** – Web, iOS (native), Android (native) via Capacitor
 - 💊 **Smart Reminders** – Medicine schedules, activity tracking, social engagement prompts
@@ -90,7 +90,7 @@ A bilingual (English + Cantonese) conversational AI chatbot designed to reduce l
 - Existing chatbots use jargon, lack patience, and aren't tailored for elderly users
 
 **Solution:**
-- Patient, warm AI conversations available 24/7
+- Patient, context-aware AI conversations available 24/7
 - Simple voice-first interface requiring minimal technical skills
 - Medication & wellness reminders to maintain health routines
 - Cognitive games to slow mental decline
@@ -228,6 +228,18 @@ CREATE INDEX idx_chat_lang ON chat_history(user_id, lang);
 | POST | `/get_response` | Send message, get LLM response | 200 |
 | POST | `/transcribe` | Convert audio WAV to text | 200 |
 | GET | `/get_chat_history` | Load message history | 200 |
+
+### What Makes It Different
+
+The project is intentionally built to behave more like a consistent companion than a generic chatbot. The difference is not only in the model choice, but in the way the conversation stack is constrained and presented.
+
+- **Elderly-first persona design**: `run.py` does not rely on a default chatbot tone. It injects custom system prompts that require warmth, patience, simple wording, short replies, and culturally natural Cantonese or English.
+- **Language-specific memory**: Conversation history is stored separately by both `user_id` and `lang`, so the assistant keeps the right tone, vocabulary, and context for each language instead of mixing them together.
+- **Bounded context handling**: Only the most recent turns are sent to the LLM. This keeps replies coherent and personal without drifting into long, noisy, or overly formal responses.
+- **Graceful degradation**: If the model API is unavailable, the app falls back to curated supportive responses rather than exposing technical failures. The user still gets a calm, conversational experience.
+- **Companion-style delivery**: The frontend combines chat, voice input, text-to-speech, and gentle voice selection so the interaction feels more like a supportive conversation than a utility interface.
+
+In practice, this means the assistant is tuned for emotional continuity, accessibility, and trust. It is designed to remember enough to feel familiar, but not so much that the conversation becomes cluttered or unstable.
 
 ### Reminders Management
 

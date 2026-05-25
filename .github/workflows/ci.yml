@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://postgres@localhost:5432/ci_db?sslmode=disable
-      SECRET_KEY: ci-${{ github.run_id }}-${{ github.run_attempt }}-integration-session-key-0123456789
+      SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
       ZHIPU_API_KEY: ""
       MINIMAL_STARTUP: "1"
       RUN_LIVE_DB: "1"
