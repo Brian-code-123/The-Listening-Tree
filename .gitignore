@@ -87,3 +87,4 @@ test-results/
 .github/copilot/
 .kittify/.dashboard
 .vercel
+supabase/.temp

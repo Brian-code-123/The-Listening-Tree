@@ -500,6 +500,31 @@ def _normalize_quiz_answer(text: str) -> str:
     return "".join(ch for ch in raw if ch.isalnum() or ('\u4e00' <= ch <= '\u9fff'))
 
 
+def _is_quiz_answer_correct(user_answer: str, correct_answer: str) -> bool:
+    """Check if user answer is correct with intelligent substring matching.
+    
+    Accepts:
+    1. Exact match (case-insensitive, ignoring spaces/punctuation)
+    2. Substring match: user answer is a meaningful subset of correct answer
+       (e.g., "每個月" matches "每個月都有至少28日")
+    
+    Only accept substring matches if user answer is at least 2 characters
+    to avoid false positives.
+    """
+    norm_user = _normalize_quiz_answer(user_answer)
+    norm_correct = _normalize_quiz_answer(correct_answer)
+    
+    # Exact match
+    if norm_user == norm_correct:
+        return True
+    
+    # Substring match: user answer is contained in correct answer
+    if len(norm_user) >= 2 and norm_user in norm_correct:
+        return True
+    
+    return False
+
+
 # ---------------------------------------------------------------------------
 # In-memory state  (lost on server restart — by design)
 # ---------------------------------------------------------------------------
@@ -1277,7 +1302,9 @@ async def get_response(request: Request, msg: str = Form(...)):
             game = {**game_defaults, **user_game_states.get(uid, {})}
 
         game_lang = game.get('lang', lang)
-        active_questions = questions_zh if game_lang == 'zh-HK' else questions
+        # Treat any zh-* language code as Chinese so users with 'zh',
+        # 'zh-CN', or 'zh-HK' preferences get the Chinese question set.
+        active_questions = questions_zh if (isinstance(game_lang, str) and game_lang.startswith('zh')) else questions
 
         def _persist_game_state() -> None:
             request.session['game_state'] = game
@@ -1349,7 +1376,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 else:
                     response = f"Please type your answer after 'answer'. Current question: {game['current_question']}"
                 _persist_game_state()
-            elif _normalize_quiz_answer(answer_text) == _normalize_quiz_answer(game['correct_answer']):
+            elif _is_quiz_answer_correct(answer_text, game['correct_answer']):
                 game['score'] += 1
                 response = f"啱咗！分數：{game['score']}" if lang == 'zh-HK' else f"Correct! Score: {game['score']}"
             else:
