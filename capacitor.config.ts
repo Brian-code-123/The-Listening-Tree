@@ -21,7 +21,7 @@ const config: CapacitorConfig = {
     // the native WebView — backend routes, sessions, and JS work
     // exactly as in a browser.
     // ───────────────────────────────────────────────────────────────
-    url: 'http://localhost:5000',
+    url: 'https://the-listening-tree.vercel.app',
     cleartext: true,   // Allow HTTP (non-HTTPS) for local dev
   },
   plugins: {
