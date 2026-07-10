@@ -113,9 +113,9 @@
                         <i class="fas fa-shield-alt"></i>
                         {{ translations.verification_code if translations else 'Verification Code' }}
                     </label>
-                    <div class="form-control-wrapper" style="display:flex; gap:8px;">
+                    <div class="form-control-wrapper verify-code-group">
                         <input type="text" name="verification_code" class="form-control" id="verification_code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" autocomplete="one-time-code" required>
-                        <button type="button" class="btn btn-outline-primary" id="sendCodeBtn" style="white-space:nowrap;">
+                        <button type="button" class="btn" id="sendCodeBtn">
                             {{ translations.send_code if translations else 'Send Code' }}
                         </button>
                     </div>

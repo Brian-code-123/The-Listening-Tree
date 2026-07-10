@@ -752,6 +752,16 @@ body {
 .page-register .password-hint { font-size: 0.85rem; color: var(--text-muted); margin-top: 5px; }
 .page-register .field-error { font-size: 0.85rem; color: var(--danger); margin-top: 5px; min-height: 1em; }
 .page-register .field-status { font-size: 0.85rem; margin-top: 5px; min-height: 1em; }
+.page-register .verify-code-group { display: flex; align-items: stretch; gap: 8px; }
+.page-register .verify-code-group .form-control { flex: 1 1 auto; min-width: 0; }
+.page-register .verify-code-group .btn {
+    flex: 0 0 auto; white-space: nowrap; padding: 0 18px;
+    border-radius: var(--radius-sm); font-weight: 600; font-size: 0.9rem;
+    border: 1.5px solid var(--primary); color: var(--primary); background: transparent;
+    transition: all 0.2s;
+}
+.page-register .verify-code-group .btn:hover:not(:disabled) { background: var(--primary); color: #fff; }
+.page-register .verify-code-group .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .page-register .field-status.is-error { color: var(--danger); }
 .page-register .field-status.is-success { color: var(--success); }
 .page-login .form-control-wrapper, .page-register .form-control-wrapper { position: relative; }
