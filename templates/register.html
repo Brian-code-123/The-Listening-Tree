@@ -107,22 +107,6 @@
                     <div class="field-error" id="password-error"></div>
                 </div>
 
-                <!-- Verification Code Field -->
-                <div class="form-group mb-3">
-                    <label for="verification_code" class="form-label">
-                        <i class="fas fa-shield-alt"></i>
-                        {{ translations.verification_code if translations else 'Verification Code' }}
-                    </label>
-                    <div class="form-control-wrapper verify-code-group">
-                        <input type="text" name="verification_code" class="form-control" id="verification_code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" autocomplete="one-time-code" required>
-                        <button type="button" class="btn" id="sendCodeBtn">
-                            {{ translations.send_code if translations else 'Send Code' }}
-                        </button>
-                    </div>
-                    <div class="field-error" id="verification_code-error"></div>
-                    <div class="field-status" id="verify-status"></div>
-                </div>
-
                 <!-- Confirm Password Field -->
                 <div class="form-group mb-3">
                     <label for="confirm_password" class="form-label">
@@ -141,6 +125,22 @@
                         <span id="matchText"></span>
                     </div>
                     <div class="field-error" id="confirm_password-error"></div>
+                </div>
+
+                <!-- Verification Code Field -->
+                <div class="form-group mb-3">
+                    <label for="verification_code" class="form-label">
+                        <i class="fas fa-shield-alt"></i>
+                        {{ translations.verification_code if translations else 'Verification Code' }}
+                    </label>
+                    <div class="form-control-wrapper verify-code-group">
+                        <input type="text" name="verification_code" class="form-control" id="verification_code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" autocomplete="one-time-code" required>
+                        <button type="button" class="btn" id="sendCodeBtn">
+                            {{ translations.send_code if translations else 'Send Code' }}
+                        </button>
+                    </div>
+                    <div class="field-error" id="verification_code-error"></div>
+                    <div class="field-status" id="verify-status"></div>
                 </div>
 
                 <!-- Form-level error (shown for non-field errors) -->
