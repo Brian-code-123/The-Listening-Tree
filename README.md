@@ -11,7 +11,8 @@ Elderly-friendly AI companion for English and Cantonese conversations, reminders
 - [Tech Stack](#tech-stack)
 - [System Architecture](#system-architecture)
 - [Core Workflow](#core-workflow)
-- [Testing & Validation](#testing--validation)
+- [Testing & Evaluation Methodology](#testing--evaluation-methodology)
+- [Security & Privacy](#security--privacy)
 - [Deployment](#deployment)
 - [Future Improvements](#future-improvements)
 - [License](#license)
@@ -107,12 +108,38 @@ The project follows a modular three-layer architecture designed for stability an
 - AI responds in the user’s language with clear, slow speech.
 - Seamless language switching with one click.
 
-## Testing & Validation
+## Testing & Evaluation Methodology
 
+### Automated testing
+
+- Unit testing: Vitest for JavaScript utility functions.
+- Integration testing: pytest against an ephemeral PostgreSQL container, covering registration with email verification, login, reminder CRUD, AI chat, cognitive game flow, and voice transcription.
 - End-to-end testing: Playwright simulates real user flows such as reminder CRUD, voice chat, and mobile responsiveness.
-- CI/CD automation: GitHub Actions runs tests on every commit for consistent quality.
-- Key results: 100% test case pass rate, validated 99.9% system stability, and cross-device compatibility.
-- Focus: critical features like the reminder system and voice interaction are prioritized for elderly user needs.
+- CI/CD automation: GitHub Actions runs the full suite on every commit; current main branch passes all automated checks.
+
+### Known evaluation gaps
+
+Automated test pass rate reflects functional correctness, not usability. The project does not yet include:
+
+- A formal System Usability Scale (SUS) study with elderly test participants.
+- Measured response latency / throughput benchmarks under load.
+- A structured user feedback or focus-group study.
+
+These are tracked as future work (see [Future Improvements](#future-improvements)).
+
+## Security & Privacy
+
+- Password storage: PBKDF2-HMAC-SHA256 with a unique per-user salt (390,000 iterations), never plaintext or reversibly encrypted.
+- Session integrity: session signing key is read from `SECRET_KEY`/`SESSION_SECRET`; in production, startup fails fast if no persistent secret is configured, preventing silent use of a throwaway key that would invalidate all sessions on restart.
+- Verification code abuse prevention: `/send_verification_code` enforces a server-side cooldown per email address, rejecting rapid repeat requests with HTTP 429.
+- Database access: connections use Supabase's managed connection pooler rather than raw per-request connections; credentials are read from environment variables, never hardcoded.
+- SQL injection prevention: all queries use parameterized placeholders via the `db_execute` helper.
+
+### Known gaps
+
+- Encryption-at-rest relies on Supabase's underlying infrastructure and is not independently documented or verified at the application level.
+- No formal written threat model.
+- No documented data retention / deletion policy for user accounts and chat history.
 
 ## Deployment
 
@@ -122,6 +149,8 @@ The project follows a modular three-layer architecture designed for stability an
 
 ## Future Improvements
 
+- Formal usability evaluation with an elderly test group, using the System Usability Scale (SUS) methodology.
+- Documented threat model and data retention / deletion policy.
 - Advanced analytics dashboard for usage and wellness tracking.
 - Offline mode support for low-connectivity environments.
 - Multi-language expansion for additional regional dialects.
