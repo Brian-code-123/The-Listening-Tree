@@ -490,6 +490,93 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     return True, ""
 
 
+def generate_verification_code() -> str:
+    """Generate a random 6-digit numeric verification code."""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def send_verification_email(to_email: str, code: str, lang: str = "en") -> bool:
+    """Send a verification-code email via Azure Communication Services. Returns True on success."""
+    if not AZURE_COMMUNICATION_CONNECTION_STRING:
+        _builtins._original_print("[Email] ⚠ AZURE_COMMUNICATION_CONNECTION_STRING not set — skipping send")
+        return False
+
+    brand_color = "#5B9A7D"
+    bg_color = "#F4F7F5"
+
+    if lang == "zh-HK":
+        subject = "你嘅 The Listening Tree 驗證碼"
+        greeting = "你好，"
+        lead = "多謝你註冊 The Listening Tree！你嘅驗證碼係："
+        expiry_note = f"呢個驗證碼將於 <strong>{VERIFICATION_CODE_TTL_MINUTES} 分鐘</strong>後失效。"
+        ignore_note = "如果唔係你本人操作，請忽略呢封郵件。"
+        footer_note = "呢封係系統自動發出嘅郵件，請勿直接回覆。"
+    else:
+        subject = "Your The Listening Tree verification code"
+        greeting = "Hello,"
+        lead = "Thanks for registering with The Listening Tree! Your verification code is:"
+        expiry_note = f"This code expires in <strong>{VERIFICATION_CODE_TTL_MINUTES} minutes</strong>."
+        ignore_note = "If you did not request this, you can safely ignore this email."
+        footer_note = "This is an automated message — please do not reply directly to this email."
+
+    html = f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin:0; padding:0; background-color:{bg_color}; font-family:'Segoe UI', Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:{bg_color}; padding:32px 16px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+                    <tr>
+                        <td style="background-color:{brand_color}; padding:28px 32px; text-align:center;">
+                            <span style="font-size:28px;">🌳</span>
+                            <div style="color:#ffffff; font-size:20px; font-weight:600; margin-top:6px;">The Listening Tree</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:32px;">
+                            <p style="margin:0 0 12px; color:#2D3A33; font-size:16px;">{greeting}</p>
+                            <p style="margin:0 0 24px; color:#4A554E; font-size:15px; line-height:1.6;">{lead}</p>
+                            <div style="text-align:center; margin:0 0 24px;">
+                                <span style="display:inline-block; background-color:{bg_color}; border:1px solid #DCE7E1; border-radius:10px; padding:16px 28px; font-size:32px; font-weight:700; letter-spacing:8px; color:{brand_color};">{code}</span>
+                            </div>
+                            <p style="margin:0 0 8px; color:#6B786F; font-size:13px; line-height:1.6;">{expiry_note}</p>
+                            <p style="margin:0; color:#6B786F; font-size:13px; line-height:1.6;">{ignore_note}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:16px 32px 28px; border-top:1px solid #EEF2EF;">
+                            <p style="margin:16px 0 0; color:#9AA69E; font-size:12px; text-align:center;">{footer_note}</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+    try:
+        from azure.communication.email import EmailClient
+
+        client = EmailClient.from_connection_string(AZURE_COMMUNICATION_CONNECTION_STRING)
+        message = {
+            "senderAddress": AZURE_SENDER_EMAIL,
+            "recipients": {"to": [{"address": to_email}]},
+            "content": {"subject": subject, "html": html},
+        }
+        poller = client.begin_send(message)
+        result = poller.result()
+        status = result.get("status") if isinstance(result, dict) else getattr(result, "status", None)
+        if status and str(status).lower() not in ("succeeded", "running"):
+            _builtins._original_print(f"[Email] ❌ Azure Email send status: {status}")
+            return False
+        return True
+    except Exception as e:
+        _builtins._original_print(f"[Email] ❌ Failed to send verification email: {e}")
+        return False
+
+
 def _normalize_quiz_answer(text: str) -> str:
     """Normalize quiz answers for tolerant matching.
 
@@ -550,6 +637,19 @@ if ZHIPU_API_KEY:
     print(f"[AI] ✅ {ZHIPU_MODEL} configured (Zhipu AI)")
 else:
     print("[AI] ⚠ ZHIPU_API_KEY not set — using warm fallback responses")
+
+# ---------------------------------------------------------------------------
+# Email configuration — Azure Communication Services (registration verification codes)
+# ---------------------------------------------------------------------------
+AZURE_COMMUNICATION_CONNECTION_STRING = os.environ.get("AZURE_COMMUNICATION_CONNECTION_STRING")
+AZURE_SENDER_EMAIL = os.environ.get("AZURE_SENDER_EMAIL", "DoNotReply@yourdomain.azurecomm.net")
+VERIFICATION_CODE_TTL_MINUTES = 5
+VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
+
+if AZURE_COMMUNICATION_CONNECTION_STRING:
+    print("[Email] ✅ Azure Communication Services configured for verification codes")
+else:
+    print("[Email] ⚠ AZURE_COMMUNICATION_CONNECTION_STRING not set — verification emails will not be sent")
 
 print("[STT] ✅ Browser Web Speech API ready (EN + zh-HK, zero server deps)")
 
@@ -813,8 +913,21 @@ def init_db() -> None:
         )
     """)
     
+    # Email verification codes (registration)
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS email_verifications (
+            id {id_type},
+            email TEXT NOT NULL,
+            code TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # Create indexes
     c.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications ((LOWER(email)))")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
@@ -1038,53 +1151,155 @@ async def register_page(request: Request):
         return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse("register.html", tpl_context(request))
 
+@app.post("/send_verification_code")
+async def send_verification_code(request: Request):
+    """Generate and email a 6-digit verification code for registration.
+
+    Body: JSON {"email": str}
+    Returns JSON {"success": bool, "message": str}
+    """
+    lang = get_lang(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = str(body.get("email", "")).strip().lower()
+
+    is_valid_email, _ = validate_email(email)
+    if not is_valid_email:
+        return JSONResponse(
+            {"success": False, "message": "Invalid email format" if lang == 'en' else "電郵格式無效"},
+            status_code=400,
+        )
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(c, "SELECT id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+        if c.fetchone():
+            conn.close()
+            return JSONResponse(
+                {"success": False, "message": "Email already registered" if lang == 'en' else "電郵已註冊"},
+                status_code=400,
+            )
+
+        db_execute(
+            c,
+            "SELECT created_at FROM email_verifications WHERE LOWER(email) = LOWER(?) ORDER BY created_at DESC LIMIT 1",
+            (email,),
+        )
+        last = c.fetchone()
+        if last and (datetime.now() - last["created_at"]).total_seconds() < VERIFICATION_RESEND_COOLDOWN_SECONDS:
+            conn.close()
+            return JSONResponse(
+                {"success": False, "message": "Please wait before requesting another code" if lang == 'en' else "請稍等先再發送驗證碼"},
+                status_code=429,
+            )
+
+        code = generate_verification_code()
+        ts = datetime.now()
+        expires_at = ts.timestamp() + VERIFICATION_CODE_TTL_MINUTES * 60
+        expires_at_str = datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')
+        db_execute(
+            c,
+            "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES (?, ?, ?, ?)",
+            (email, code, expires_at_str, ts.strftime('%Y-%m-%d %H:%M:%S')),
+        )
+        conn.commit()
+        conn.close()
+
+        sent = send_verification_email(email, code, lang)
+        if not sent:
+            return JSONResponse(
+                {"success": False, "message": "Failed to send verification email" if lang == 'en' else "驗證碼郵件發送失敗"},
+                status_code=500,
+            )
+        return JSONResponse({"success": True, "message": "Verification code sent" if lang == 'en' else "驗證碼已發送"})
+    except Exception as e:
+        conn.close()
+        _builtins._original_print(f"[ERROR] send_verification_code failed: {e}")
+        return JSONResponse(
+            {"success": False, "message": "Service temporarily unavailable" if lang == 'en' else "服務暫時不可用"},
+            status_code=500,
+        )
+
+
 @app.post("/register", response_class=HTMLResponse)
-async def register_post(request: Request, email: str = Form(...), password: str = Form(...), confirm_password: str = Form(...)):
+async def register_post(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...),
+    verification_code: str = Form(...),
+):
     """Create a new user account (registration).
 
     Validation steps:
       1. Email format validation (RFC 5322 basic pattern)
       2. Password strength validation (min 8 characters)
       3. Confirm password == password (client-side + server-side check)
-      4. Email must be unique (PostgreSQL UNIQUE constraint)
-      5. Password stored with PBKDF2-HMAC-SHA256
+      4. Verification code must match an unused, unexpired code sent to this email
+      5. Email must be unique (PostgreSQL UNIQUE constraint)
+      6. Password stored with PBKDF2-HMAC-SHA256
 
     On success: Inserts new user row, creates authenticated session, redirects to /.
-    On failure: Returns register.html with localized error message.
+    On failure: Returns register.html with localized error message (or JSON if
+    the request declares it wants a JSON response, for the AJAX form flow).
 
     Args:
         request: HTTP request object
         email: Email address (must not exist in users table)
         password: Password in plaintext (min 8 chars)
         confirm_password: Confirmation password (must == password)
+        verification_code: 6-digit code sent to email via /send_verification_code
 
     Returns:
-        HTMLResponse: Redirect to /login on success, or register.html with error on failure
+        HTMLResponse: Redirect to / on success, or register.html with error on failure
     """
     lang = get_lang(request)
+    wants_json = "application/json" in request.headers.get("accept", "")
+
+    def fail(message: str, field: str = "email", status_code: int = 400):
+        if wants_json:
+            return JSONResponse({"success": False, "field": field, "message": message}, status_code=status_code)
+        return templates.TemplateResponse("register.html", tpl_context(request, error=message))
+
     email = email.strip().lower()
     password = password.strip()
     confirm_password = confirm_password.strip()
-    
+    verification_code = verification_code.strip()
+
     # Validate email format
     is_valid_email, email_error = validate_email(email)
     if not is_valid_email:
-        return templates.TemplateResponse("register.html", tpl_context(request, error="Invalid email format" if lang == 'en' else "電郵格式無效"))
-    
+        return fail("Invalid email format" if lang == 'en' else "電郵格式無效", field="email")
+
     # Validate password strength
     is_valid_password, password_error = validate_password_strength(password)
     if not is_valid_password:
-        return templates.TemplateResponse("register.html", tpl_context(request, error="Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元"))
-    
+        return fail("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", field="password")
+
     # Validate password confirmation
     if password != confirm_password:
-        return templates.TemplateResponse("register.html", tpl_context(request, error="Passwords do not match" if lang == 'en' else "密碼唔一致"))
-    
+        return fail("Passwords do not match" if lang == 'en' else "密碼唔一致", field="confirm_password")
+
     conn = get_db()
     c = conn.cursor()
     try:
+        # Validate verification code
+        db_execute(
+            c,
+            "SELECT id FROM email_verifications WHERE LOWER(email) = LOWER(?) AND code = ? AND used = FALSE AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
+            (email, verification_code, datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        )
+        verification = c.fetchone()
+        if not verification:
+            conn.close()
+            return fail("Verification code is incorrect or has expired" if lang == 'en' else "驗證碼錯誤或已過期", field="verification_code")
+
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
+        db_execute(c, "UPDATE email_verifications SET used = TRUE WHERE id = ?", (verification["id"],))
         conn.commit()
         db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
         created_user = c.fetchone()
@@ -1092,23 +1307,21 @@ async def register_post(request: Request, email: str = Form(...), password: str 
             request.session['user_email'] = created_user["email"]
             request.session['user_id'] = created_user["id"]
         conn.close()
+        if wants_json:
+            return JSONResponse({"success": True, "redirect": "/"})
         return RedirectResponse(url="/", status_code=303)
     except PgIntegrityError:
         conn.close()
-        return templates.TemplateResponse("register.html", tpl_context(request, error="Email already exists" if lang == 'en' else "電郵已存在"))
+        return fail("Email already exists" if lang == 'en' else "電郵已存在", field="email")
     except Exception as e:
         conn.close()
         _builtins._original_print(f"[ERROR] Registration failed: {e}")
-        return templates.TemplateResponse(
-            "register.html",
-            tpl_context(
-                request,
-                error=(
-                    "Service temporarily unavailable. Your account data remains in database; please try again."
-                    if lang == 'en'
-                    else "服務暫時不可用。帳號資料會保留喺資料庫，請稍後再試。"
-                ),
-            ),
+        return fail(
+            "Service temporarily unavailable. Your account data remains in database; please try again."
+            if lang == 'en'
+            else "服務暫時不可用。帳號資料會保留喺資料庫，請稍後再試。",
+            field="email",
+            status_code=500,
         )
 
 @app.get("/forgot_password")

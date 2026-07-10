@@ -68,7 +68,7 @@
             </div>
             {% endif %}
 
-            <form method="POST" action="/register" class="auth-form">
+            <form method="POST" action="/register" class="auth-form" id="registerForm">
                 <!-- Email Field -->
                 <div class="form-group mb-3">
                     <label for="email" class="form-label">
@@ -78,6 +78,23 @@
                     <div class="form-control-wrapper">
                         <input type="email" name="email" class="form-control" id="email" placeholder="your.email@example.com" autocomplete="email" required>
                     </div>
+                    <div class="field-error" id="email-error"></div>
+                </div>
+
+                <!-- Verification Code Field -->
+                <div class="form-group mb-3">
+                    <label for="verification_code" class="form-label">
+                        <i class="fas fa-shield-alt"></i>
+                        {{ translations.verification_code if translations else 'Verification Code' }}
+                    </label>
+                    <div class="form-control-wrapper" style="display:flex; gap:8px;">
+                        <input type="text" name="verification_code" class="form-control" id="verification_code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" autocomplete="one-time-code" required>
+                        <button type="button" class="btn btn-outline-primary" id="sendCodeBtn" style="white-space:nowrap;">
+                            {{ translations.send_code if translations else 'Send Code' }}
+                        </button>
+                    </div>
+                    <div class="field-error" id="verification_code-error"></div>
+                    <div class="field-status" id="verify-status"></div>
                 </div>
 
                 <!-- Password Field -->
@@ -103,6 +120,7 @@
                         <i class="fas fa-info-circle"></i>
                         <span>{{ translations.password_hint if translations else 'Use at least 8 characters with letters and numbers' }}</span>
                     </div>
+                    <div class="field-error" id="password-error"></div>
                 </div>
 
                 <!-- Confirm Password Field -->
@@ -122,10 +140,14 @@
                         <i class="fas fa-check-circle"></i>
                         <span id="matchText"></span>
                     </div>
+                    <div class="field-error" id="confirm_password-error"></div>
                 </div>
 
+                <!-- Form-level error (shown for non-field errors) -->
+                <div class="alert alert-danger" role="alert" id="formError" style="display:none;"></div>
+
                 <!-- Submit Button -->
-                <button type="submit" class="btn btn-primary w-100">{{ translations.register if translations else 'Register' }}</button>
+                <button type="submit" class="btn btn-primary w-100" id="registerBtn">{{ translations.register if translations else 'Register' }}</button>
             </form>
 
             <!-- Help Section -->
@@ -274,6 +296,108 @@
                     setTimeout(() => alert.remove(), 300);
                 }, 5000);
             });
+        });
+
+        // --- Send verification code ---
+        const sendCodeBtn = document.getElementById('sendCodeBtn');
+        const verifyStatus = document.getElementById('verify-status');
+        const emailField = document.getElementById('email');
+        let cooldownTimer = null;
+
+        function setSendCodeCooldown(seconds) {
+            let remaining = seconds;
+            sendCodeBtn.disabled = true;
+            const originalLabel = sendCodeBtn.dataset.label || sendCodeBtn.textContent;
+            sendCodeBtn.dataset.label = originalLabel;
+            sendCodeBtn.textContent = `${remaining}s`;
+            cooldownTimer = setInterval(() => {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    clearInterval(cooldownTimer);
+                    sendCodeBtn.disabled = false;
+                    sendCodeBtn.textContent = originalLabel;
+                } else {
+                    sendCodeBtn.textContent = `${remaining}s`;
+                }
+            }, 1000);
+        }
+
+        function showVerifyStatus(message, isError) {
+            verifyStatus.textContent = message;
+            verifyStatus.classList.toggle('is-error', !!isError);
+            verifyStatus.classList.toggle('is-success', !isError);
+        }
+
+        sendCodeBtn.addEventListener('click', async function() {
+            const email = emailField.value.trim();
+            if (!email || !emailField.checkValidity()) {
+                showVerifyStatus('{{ translations.email_invalid if translations else "Please enter a valid email first" }}', true);
+                emailField.focus();
+                return;
+            }
+            sendCodeBtn.disabled = true;
+            try {
+                const res = await fetch('/send_verification_code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showVerifyStatus(data.message, false);
+                    setSendCodeCooldown(60);
+                    document.getElementById('verification_code').focus();
+                } else {
+                    showVerifyStatus(data.message, true);
+                    sendCodeBtn.disabled = false;
+                }
+            } catch (err) {
+                showVerifyStatus('{{ translations.network_error if translations else "Network error, please try again" }}', true);
+                sendCodeBtn.disabled = false;
+            }
+        });
+
+        // --- AJAX register submit (keeps form values on error, no page reload) ---
+        const registerForm = document.getElementById('registerForm');
+        const registerBtn = document.getElementById('registerBtn');
+        const formError = document.getElementById('formError');
+
+        function clearFieldErrors() {
+            document.querySelectorAll('.field-error').forEach(el => { el.textContent = ''; });
+            formError.style.display = 'none';
+            formError.textContent = '';
+        }
+
+        registerForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            clearFieldErrors();
+            registerBtn.disabled = true;
+            try {
+                const res = await fetch('/register', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: new FormData(registerForm)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = data.redirect || '/';
+                    return;
+                }
+                const fieldErrorEl = document.getElementById(`${data.field}-error`);
+                if (fieldErrorEl) {
+                    fieldErrorEl.textContent = data.message;
+                    const fieldInput = document.getElementById(data.field);
+                    if (fieldInput) fieldInput.focus();
+                } else {
+                    formError.textContent = data.message;
+                    formError.style.display = 'block';
+                }
+            } catch (err) {
+                formError.textContent = '{{ translations.network_error if translations else "Network error, please try again" }}';
+                formError.style.display = 'block';
+            } finally {
+                registerBtn.disabled = false;
+            }
         });
     </script>
 </body>

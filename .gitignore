@@ -4,6 +4,9 @@ venv/
 env/
 ENV/
 
+# Local Claude Code project instructions
+CLAUDE.md
+
 # Python bytecode and caches
 __pycache__/
 *.py[cod]
