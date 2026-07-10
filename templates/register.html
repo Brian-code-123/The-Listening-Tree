@@ -81,22 +81,6 @@
                     <div class="field-error" id="email-error"></div>
                 </div>
 
-                <!-- Verification Code Field -->
-                <div class="form-group mb-3">
-                    <label for="verification_code" class="form-label">
-                        <i class="fas fa-shield-alt"></i>
-                        {{ translations.verification_code if translations else 'Verification Code' }}
-                    </label>
-                    <div class="form-control-wrapper" style="display:flex; gap:8px;">
-                        <input type="text" name="verification_code" class="form-control" id="verification_code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" autocomplete="one-time-code" required>
-                        <button type="button" class="btn btn-outline-primary" id="sendCodeBtn" style="white-space:nowrap;">
-                            {{ translations.send_code if translations else 'Send Code' }}
-                        </button>
-                    </div>
-                    <div class="field-error" id="verification_code-error"></div>
-                    <div class="field-status" id="verify-status"></div>
-                </div>
-
                 <!-- Password Field -->
                 <div class="form-group mb-3">
                     <label for="password" class="form-label">
@@ -121,6 +105,22 @@
                         <span>{{ translations.password_hint if translations else 'Use at least 8 characters with letters and numbers' }}</span>
                     </div>
                     <div class="field-error" id="password-error"></div>
+                </div>
+
+                <!-- Verification Code Field -->
+                <div class="form-group mb-3">
+                    <label for="verification_code" class="form-label">
+                        <i class="fas fa-shield-alt"></i>
+                        {{ translations.verification_code if translations else 'Verification Code' }}
+                    </label>
+                    <div class="form-control-wrapper" style="display:flex; gap:8px;">
+                        <input type="text" name="verification_code" class="form-control" id="verification_code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" autocomplete="one-time-code" required>
+                        <button type="button" class="btn btn-outline-primary" id="sendCodeBtn" style="white-space:nowrap;">
+                            {{ translations.send_code if translations else 'Send Code' }}
+                        </button>
+                    </div>
+                    <div class="field-error" id="verification_code-error"></div>
+                    <div class="field-status" id="verify-status"></div>
                 </div>
 
                 <!-- Confirm Password Field -->
