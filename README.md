@@ -55,7 +55,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Core: HTML5, CSS3, JavaScript (ES6+)
 - Framework: Bootstrap 5 for responsive layout
 - Libraries: jQuery, FullCalendar.js, Font Awesome
-- Voice: Web Speech API for browser-native speech-to-text and text-to-speech
+- Voice: Web Speech API for browser-native speech-to-text and text-to-speech, with a server-side SpeechRecognition fallback (`/transcribe`) for browsers without Web Speech API support
 - Mobile build: Capacitor 6 for iOS and Android packaging
 - Deployment: Vercel
 
@@ -64,7 +64,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Framework: FastAPI on Python 3.12+
 - Server: Uvicorn ASGI server
 - LLM integration: Zhipu AI GLM-4 Flash for bilingual conversations
-- Security: bcryptjs for password hashing, python-multipart for form handling
+- Security: PBKDF2-HMAC-SHA256 (per-user salt) for password hashing, python-multipart for form handling
 - API: RESTful endpoints for auth, chat, reminders, and utilities
 
 ### Database
@@ -91,7 +91,7 @@ The project follows a modular three-layer architecture designed for stability an
 
 ### 1. User Onboarding
 
-- Simple registration and login with email authentication.
+- Registration with email verification code (sent via Azure Email Server) and login with email authentication.
 - Bilingual setup in English or Cantonese plus theme selection for standard or high-contrast mode.
 - AI voice greeting for a friendly first experience.
 
@@ -122,7 +122,6 @@ The project follows a modular three-layer architecture designed for stability an
 
 ## Future Improvements
 
-- Email verification via Azure Email Server for enhanced account security.
 - Advanced analytics dashboard for usage and wellness tracking.
 - Offline mode support for low-connectivity environments.
 - Multi-language expansion for additional regional dialects.

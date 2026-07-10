@@ -13,10 +13,12 @@ sequenceDiagram
 """
 
 import uuid
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
+import run
 from run import app
 
 
@@ -27,6 +29,21 @@ def _new_user_email() -> str:
     return f"integration_{uuid.uuid4().hex[:10]}@example.com"
 
 
+def _seed_verification_code(email: str, code: str = "123456") -> str:
+    conn = run.get_db()
+    c = conn.cursor()
+    ts = datetime.now()
+    expires_at = (ts + timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')
+    run.db_execute(
+        c,
+        "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES (?, ?, ?, ?)",
+        (email, code, expires_at, ts.strftime('%Y-%m-%d %H:%M:%S')),
+    )
+    conn.commit()
+    conn.close()
+    return code
+
+
 def test_reminders_crud_flow():
     email = _new_user_email()
     password = 'TestPass123!'
@@ -34,12 +51,14 @@ def test_reminders_crud_flow():
     time = '09:30'
 
     with TestClient(app) as client:
+        code = _seed_verification_code(email)
         register_resp = client.post(
             '/register',
             data={
                 'email': email,
                 'password': password,
                 'confirm_password': password,
+                'verification_code': code,
             },
             follow_redirects=False,
         )
