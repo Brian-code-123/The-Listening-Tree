@@ -1351,10 +1351,36 @@ async def index(request: Request):
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("chat.html", tpl_context(request))
 
+_SAFE_REDIRECT_PATHS = {
+    "/", "/chat", "/accessibility", "/hk_guide", "/login", "/register",
+}
+
+def _safe_redirect_target(request: Request) -> str:
+    """Resolve where to send the user back to after switching language.
+
+    Uses the Referer header so the language switch keeps the user on the
+    page they were viewing (e.g. hk_guide, accessibility) instead of always
+    bouncing to /. Only same-origin, known app paths are honored to avoid
+    open-redirect via a spoofed Referer header.
+    """
+    referer = request.headers.get("referer")
+    if not referer:
+        return "/"
+    try:
+        parsed = urlsplit(referer)
+        if parsed.netloc and parsed.netloc != request.url.netloc:
+            return "/"
+        if parsed.path in _SAFE_REDIRECT_PATHS:
+            return parsed.path
+    except ValueError:
+        pass
+    return "/"
+
 @app.get("/set_language/{lang}")
 async def set_language(request: Request, lang: str):
-    """Set user language preference and persist to database.
-    Always return to /chat (authenticated view) to avoid redirect loops."""
+    """Set user language preference, persist to database, and redirect back
+    to the page the user was viewing (so switching language shows that same
+    page, translated) instead of always bouncing to /chat."""
     if lang in ('en', 'zh-HK'):
         request.session['language'] = lang
         uid = get_user(request)
@@ -1365,8 +1391,7 @@ async def set_language(request: Request, lang: str):
             db_insert_or_replace_preference(c, uid, 'language', lang, ts)
             conn.commit()
             conn.close()
-    # Always return to /chat (authenticated users only); avoids redirect loops and lost sessions
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=_safe_redirect_target(request), status_code=303)
 
 @app.get("/accessibility", response_class=HTMLResponse)
 async def accessibility_mode(request: Request):
