@@ -651,7 +651,15 @@ if AZURE_COMMUNICATION_CONNECTION_STRING:
 else:
     print("[Email] ⚠ AZURE_COMMUNICATION_CONNECTION_STRING not set — verification emails will not be sent")
 
-print("[STT] ✅ Browser Web Speech API ready (EN + zh-HK, zero server deps)")
+# Hugging Face Inference API — Whisper large-v3 for server-side STT.
+HF_API_KEY = os.environ.get("HF_API_KEY")
+HF_WHISPER_MODEL = os.environ.get("HF_WHISPER_MODEL", "openai/whisper-large-v3")
+HF_WHISPER_URL = f"https://router.huggingface.co/hf-inference/models/{HF_WHISPER_MODEL}"
+
+if HF_API_KEY:
+    print(f"[STT] ✅ {HF_WHISPER_MODEL} configured (Hugging Face Inference API)")
+else:
+    print("[STT] ⚠ HF_API_KEY not set — falling back to Google Web Speech / browser STT")
 
 # System prompt — Cantonese elderly companion (Chinese)
 # Guides the LLM to reply in warm, patient Cantonese with simple vocabulary.
@@ -1640,24 +1648,42 @@ async def get_response(request: Request, msg: str = Form(...)):
     return JSONResponse({"response": response})
 
 # ---------------------------------------------------------------------------
-# Voice Transcription — browser-only mode
+# Voice Transcription
 # ---------------------------------------------------------------------------
+async def _transcribe_with_hf_whisper(content: bytes) -> str:
+    """Call Hugging Face Inference API (Whisper large-v3). Raises on failure."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            HF_WHISPER_URL,
+            headers={
+                "Authorization": f"Bearer {HF_API_KEY}",
+                "Content-Type": "audio/wav",
+            },
+            content=content,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and "text" in data:
+            return data["text"].strip()
+        raise ValueError(f"Unexpected Whisper response: {data}")
+
+
+def _transcribe_with_google_fallback(content: bytes, language: str) -> str:
+    """Legacy SpeechRecognition + Google Web Speech backend fallback."""
+    if sr is None:
+        raise RuntimeError("Server STT dependency missing (SpeechRecognition).")
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(io.BytesIO(content)) as source:
+        audio_data = recognizer.record(source)
+    return recognizer.recognize_google(audio_data, language=language).strip()
+
+
 @app.post("/transcribe")
 async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang: str = Form("en-US")):
-    """Server-side STT fallback for browsers/environments without Web Speech API.
-
-    Input: WAV audio blob posted from frontend fallback recorder.
-    Engine: SpeechRecognition + Google Web Speech backend.
+    """Server-side STT. Primary engine: Whisper large-v3 (Hugging Face Inference
+    API). Falls back to Google Web Speech (via SpeechRecognition) if no HF key
+    is configured or the HF call fails.
     """
-    if sr is None:
-        return JSONResponse(
-            {
-                "text": "",
-                "error": "Server STT dependency missing (SpeechRecognition).",
-            },
-            status_code=503,
-        )
-
     language = (lang or get_lang(request) or "en").strip()
     lang_map = {
         "en": "en-US",
@@ -1668,42 +1694,46 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang
     }
     language = lang_map.get(language.lower(), language)
 
+    content = await audio.read()
+    if not content:
+        return JSONResponse({"text": "", "error": "Empty audio payload."}, status_code=400)
+
+    if HF_API_KEY:
+        try:
+            text = await _transcribe_with_hf_whisper(content)
+            if text:
+                return JSONResponse({"text": text, "engine": HF_WHISPER_MODEL})
+            return JSONResponse(
+                {"text": "", "error": get_text("no_speech_detected", get_lang(request))},
+                status_code=422,
+            )
+        except Exception as e:
+            _builtins._original_print(f"[STT] Whisper (HF) error, falling back: {e}")
+
+    if sr is None:
+        return JSONResponse(
+            {"text": "", "error": "Server STT dependency missing (SpeechRecognition)."},
+            status_code=503,
+        )
+
     try:
-        content = await audio.read()
-        if not content:
-            return JSONResponse({"text": "", "error": "Empty audio payload."}, status_code=400)
-
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(io.BytesIO(content)) as source:
-            audio_data = recognizer.record(source)
-
-        text = recognizer.recognize_google(audio_data, language=language)
-        return JSONResponse({"text": text.strip(), "engine": "google-web-speech"})
-
+        text = _transcribe_with_google_fallback(content, language)
+        return JSONResponse({"text": text, "engine": "google-web-speech"})
     except sr.UnknownValueError:
         return JSONResponse(
-            {
-                "text": "",
-                "error": get_text("no_speech_detected", get_lang(request)),
-            },
+            {"text": "", "error": get_text("no_speech_detected", get_lang(request))},
             status_code=422,
         )
     except sr.RequestError as e:
         _builtins._original_print(f"[STT] upstream request error: {e}")
         return JSONResponse(
-            {
-                "text": "",
-                "error": get_text("error_network", get_lang(request)),
-            },
+            {"text": "", "error": get_text("error_network", get_lang(request))},
             status_code=503,
         )
     except Exception as e:
         _builtins._original_print(f"[STT] transcribe error: {e}")
         return JSONResponse(
-            {
-                "text": "",
-                "error": get_text("error_voice", get_lang(request)),
-            },
+            {"text": "", "error": get_text("error_voice", get_lang(request))},
             status_code=500,
         )
 
