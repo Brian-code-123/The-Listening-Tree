@@ -1822,28 +1822,39 @@ async def get_chat_history(request: Request):
         c = conn.cursor()
         db_execute(
             c,
-            "SELECT timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
+            "SELECT id, timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
             (uid, lang),
         )
+        rows = c.fetchall()
+
+        # A lone bot-authored auto-greeting isn't real conversation content —
+        # if it's stuck showing a different language's greeting text (e.g. it
+        # was written before the user ever switched language), soft-delete it
+        # so it gets recomputed live in the *current* language below, instead
+        # of staying frozen in whatever language it was first shown in.
+        current_welcome = get_text("welcome_chat", lang)
+        if len(rows) == 1 and rows[0]["is_bot"]:
+            all_welcome_variants = {get_text("welcome_chat", l) for l in TRANSLATIONS}
+            if rows[0]["message"] in all_welcome_variants and rows[0]["message"] != current_welcome:
+                db_execute(c, "UPDATE chat_history SET is_deleted = TRUE WHERE id = ?", (rows[0]["id"],))
+                conn.commit()
+                rows = []
+
         history = [
             {
                 "timestamp": _json_timestamp(r["timestamp"]),
                 "sender": "bot" if r["is_bot"] else "user",
                 "message": r["message"],
             }
-            for r in c.fetchall()
+            for r in rows
         ]
 
         if not history:
-            welcome_msg = get_text("welcome_chat", lang)
+            # Recomputed live (not persisted) so it always matches the
+            # current UI language, even across repeated language switches
+            # before the user ever sends a real message.
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            db_execute(
-                c,
-                "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
-                (uid, lang, ts, welcome_msg),
-            )
-            conn.commit()
-            history = [{"timestamp": ts, "sender": "bot", "message": welcome_msg}]
+            history = [{"timestamp": ts, "sender": "bot", "message": current_welcome}]
 
         return JSONResponse({"history": history})
     except Exception as e:
