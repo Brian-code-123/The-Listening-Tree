@@ -421,6 +421,8 @@ body {
 .page-chat .mic-btn { background: var(--accent); }
 .page-chat .mic-btn:hover { background: var(--accent-hover); }
 .page-chat .stop-btn { background: #888; }
+.page-chat .delete-btn { background: #888; margin-left: 0; margin-right: 8px; }
+.page-chat .delete-btn:hover { background: #6b6b6b; }
 
 #micBtn.recording-active,
 #micBtn.pulse-recording {

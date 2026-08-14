@@ -107,6 +107,9 @@
                 <!-- Message Input -->
                 <div class="chat-footer">
                     <form id="messageArea" class="d-flex align-items-center">
+                        <button type="button" id="micDeleteBtn" class="send_btn delete-btn d-none" title="{{ translations.cancel_voice if translations else 'Discard recording' }}">
+                            <i class="fas fa-trash"></i>
+                        </button>
                         <input type="text" id="text" name="msg"
                                placeholder="{{ translations.type_message if translations else 'Type your message...' }}"
                                autocomplete="off" class="type_msg" required>
@@ -411,6 +414,7 @@
         let _recognition = null;
         let _isRecording = false;
         let _recordingMode = null; // 'webspeech' | 'fallback'
+        let _discardRecording = false; // true = user hit trash; drop result, don't transcribe/populate
         let _fallbackStream = null;
         let _fallbackRecorder = null;
         let _fallbackChunks = [];
@@ -541,14 +545,18 @@
         function resetMicUi() {
             _isRecording = false;
             _recordingMode = null;
+            _discardRecording = false;
             teardownWaveform();
             $('#micBtn')
                 .removeClass('recording-active pulse-recording')
                 .find('i').removeClass('fa-stop fa-play').addClass('fa-microphone');
+            $('#micDeleteBtn').addClass('d-none');
             $('#text').removeClass('d-none').attr('placeholder', PLACEHOLDER_IDLE);
         }
 
         function stopRecording() {
+            $('#micDeleteBtn').addClass('d-none');
+
             if (_recordingMode === 'fallback' && _fallbackRecorder && _fallbackRecorder.state !== 'inactive') {
                 _isRecording = false;
                 teardownWaveform();
@@ -588,6 +596,34 @@
                 .removeClass('recording-active pulse-recording')
                 .find('i').removeClass('fa-stop').addClass('fa-play');
             $('#text').removeClass('d-none').attr('placeholder', PLACEHOLDER_PROCESS);
+        }
+
+        /**
+         * Discard the in-progress recording — like WhatsApp's trash icon.
+         * Stops capture and drops whatever was said so far without
+         * transcribing (fallback engine) or populating the input
+         * (Web Speech engine).
+         */
+        function discardRecording() {
+            $('#text').val('');
+            $('#micDeleteBtn').addClass('d-none');
+
+            if (_recordingMode === 'fallback' && _fallbackRecorder && _fallbackRecorder.state !== 'inactive') {
+                _discardRecording = true;
+                try { _fallbackRecorder.stop(); } catch (e) { /* already stopped */ }
+                return; // onstop handler finishes cleanup, sees the flag, skips transcribing
+            }
+
+            if (_recognition) {
+                _discardRecording = true;
+                try {
+                    if (typeof _recognition.abort === 'function') _recognition.abort();
+                    else _recognition.stop();
+                } catch (e) { /* already stopped */ }
+                return; // 'end' handler finishes cleanup, sees the flag, skips populating text
+            }
+
+            resetMicUi();
         }
 
         function encodeWavFromAudioBuffer(audioBuffer) {
@@ -722,7 +758,9 @@
                         _fallbackStream.getTracks().forEach(track => track.stop());
                         _fallbackStream = null;
                     }
-                    await transcribeFallbackChunks();
+                    if (!_discardRecording) {
+                        await transcribeFallbackChunks();
+                    }
                     _fallbackRecorder = null;
                     _fallbackChunks = [];
                     _fallbackMimeType = '';
@@ -758,19 +796,33 @@
          */
         async function startRecording() {
             _isRecording = true;
+            _discardRecording = false;
             $('#micBtn')
                 .addClass('recording-active pulse-recording')
                 .find('i').removeClass('fa-microphone').addClass('fa-stop');
+            $('#micDeleteBtn').removeClass('d-none');
             $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 _recordingMode = 'webspeech';
-                // No live waveform here: a second getUserMedia() call just for
-                // visualization can contend with the recognizer's own mic
-                // capture on some browsers/drivers and silently starve it of
-                // audio. The text field shows the live interim transcript
-                // instead, same as before this feature was added.
+                // Web Speech API gives no raw audio access, so grab a second,
+                // visualization-only stream once recognition has actually
+                // started successfully. Best-effort: if denied/unsupported/
+                // fails, recording still proceeds via the recognizer alone
+                // with the live interim transcript shown in the text field.
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    navigator.mediaDevices.getUserMedia({ audio: true })
+                        .then(vizStream => {
+                            if (!_isRecording || _recordingMode !== 'webspeech') {
+                                vizStream.getTracks().forEach(t => t.stop());
+                                return;
+                            }
+                            initWaveformAnalyser(vizStream, true);
+                            $('#text').addClass('d-none');
+                        })
+                        .catch(e => console.warn('[Waveform] visualization mic unavailable:', e));
+                }
                 _recognition = new SpeechRecognition();
                 _recognition.lang = (currentLang === 'zh-HK') ? 'zh-HK' : 'en-US';
                 _recognition.interimResults = true;
@@ -821,8 +873,13 @@
                 });
 
                 _recognition.addEventListener('end', function () {
+                    const discarded = _discardRecording;
                     resetMicUi();
                     _recognition = null;
+                    if (discarded) {
+                        $('#text').val('');
+                        return;
+                    }
                     // Leave the transcript in the input for the user to
                     // review/edit and press Send themselves — don't auto-submit.
                     const transcript = $('#text').val().trim();
@@ -853,6 +910,13 @@
         $('#micBtn').on('click', function () {
             if (_isRecording) stopRecording();
             else startRecording();
+        });
+
+        // Trash button: discard the in-progress recording without sending
+        $('#micDeleteBtn').on('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            discardRecording();
         });
 
         // Stop button: cancel recording (same action as mic button when recording)
