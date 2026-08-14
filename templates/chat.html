@@ -701,6 +701,7 @@
             try {
                 _fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 initWaveformAnalyser(_fallbackStream, false);
+                $('#text').addClass('d-none');
                 _fallbackMimeType = '';
                 if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
                     _fallbackMimeType = mimeCandidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
@@ -760,19 +761,16 @@
             $('#micBtn')
                 .addClass('recording-active pulse-recording')
                 .find('i').removeClass('fa-microphone').addClass('fa-stop');
-            $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN).addClass('d-none');
+            $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 _recordingMode = 'webspeech';
-                // Web Speech API gives no raw audio access, so grab a second,
-                // visualization-only stream. Best-effort: if denied/unsupported,
-                // recording still proceeds via the recognizer alone.
-                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                    navigator.mediaDevices.getUserMedia({ audio: true })
-                        .then(vizStream => initWaveformAnalyser(vizStream, true))
-                        .catch(e => console.warn('[Waveform] visualization mic unavailable:', e));
-                }
+                // No live waveform here: a second getUserMedia() call just for
+                // visualization can contend with the recognizer's own mic
+                // capture on some browsers/drivers and silently starve it of
+                // audio. The text field shows the live interim transcript
+                // instead, same as before this feature was added.
                 _recognition = new SpeechRecognition();
                 _recognition.lang = (currentLang === 'zh-HK') ? 'zh-HK' : 'en-US';
                 _recognition.interimResults = true;
