@@ -110,6 +110,7 @@
                         <input type="text" id="text" name="msg"
                                placeholder="{{ translations.type_message if translations else 'Type your message...' }}"
                                autocomplete="off" class="type_msg" required>
+                        <canvas id="voiceWaveform" class="voice-waveform d-none" width="180" height="40"></canvas>
 
                         <button type="button" id="micBtn" class="send_btn mic-btn" title="{{ translations.start_voice if translations else 'Start Voice' }}">
                             <i class="fas fa-microphone"></i>
@@ -420,6 +421,119 @@
         const PLACEHOLDER_LISTEN  = '{{ translations.recording      | default("Listening... speak now") }}';
         const PLACEHOLDER_PROCESS = '{{ translations.processing     | default("Processing...") }}';
 
+        // ----------------------------------------------------------------
+        // Live voice waveform (ECG-style amplitude bars while recording)
+        // ----------------------------------------------------------------
+        let _waveformState = null; // { audioCtx, analyser, dataArray, rafId, stream, ownsStream }
+        // Bar pitch (px) — a new history sample is appended roughly every
+        // SAMPLE_INTERVAL_MS, and one bar is drawn per sample, scrolling
+        // left as new ones arrive (like WhatsApp/iMessage voice notes) —
+        // this is what actually produces the varying-height "ECG strip"
+        // look, as opposed to redrawing one live snapshot every frame
+        // (which just shows a near-constant band for a steady tone).
+        const BAR_PITCH_PX = 4;
+        const SAMPLE_INTERVAL_MS = 70;
+        const _prefersReducedMotion = window.matchMedia
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function initWaveformAnalyser(stream, ownsStream) {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const audioCtx = new AudioCtx();
+                const source = audioCtx.createMediaStreamSource(stream);
+                const analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                source.connect(analyser); // never connect to destination — avoids echo
+
+                const canvasEl = document.getElementById('voiceWaveform');
+                $(canvasEl).removeClass('d-none');
+                // CSS stretches this element responsively (flex:1); sync the
+                // canvas's drawing-buffer resolution to its actual rendered
+                // size so bars aren't stretched/blurry.
+                if (canvasEl && canvasEl.clientWidth) {
+                    canvasEl.width = canvasEl.clientWidth;
+                    canvasEl.height = canvasEl.clientHeight;
+                }
+
+                _waveformState = {
+                    audioCtx,
+                    analyser,
+                    dataArray: new Uint8Array(analyser.frequencyBinCount),
+                    history: [], // amplitude samples, 0..1, oldest first
+                    maxBars: Math.max(1, Math.floor(canvasEl.width / BAR_PITCH_PX)),
+                    rafId: null,
+                    lastSampleTime: 0,
+                    stream,
+                    ownsStream,
+                };
+                drawWaveform();
+            } catch (e) {
+                console.warn('[Waveform] init failed:', e);
+            }
+        }
+
+        function drawWaveform(ts) {
+            if (!_waveformState) return;
+            const s = _waveformState;
+            const interval = _prefersReducedMotion ? SAMPLE_INTERVAL_MS * 4 : SAMPLE_INTERVAL_MS;
+
+            if (!ts || ts - s.lastSampleTime >= interval) {
+                s.lastSampleTime = ts || 0;
+                s.analyser.getByteTimeDomainData(s.dataArray);
+                // RMS amplitude of this window, 0..1 — gives a natural,
+                // speech-like envelope rather than a flat average.
+                let sumSquares = 0;
+                for (let i = 0; i < s.dataArray.length; i++) {
+                    const v = (s.dataArray[i] - 128) / 128;
+                    sumSquares += v * v;
+                }
+                const rms = Math.sqrt(sumSquares / s.dataArray.length);
+                s.history.push(Math.min(1, rms * 4)); // small gain so normal speech reaches good height
+                if (s.history.length > s.maxBars) s.history.shift();
+            }
+
+            const canvas = document.getElementById('voiceWaveform');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const { width, height } = canvas;
+            ctx.clearRect(0, 0, width, height);
+
+            const minBarHeight = 3;
+            ctx.fillStyle = '#5B9A7D';
+            // Right-align the strip so the newest sample sits at the right
+            // edge, oldest ones scroll off to the left (WhatsApp-style).
+            const startX = width - s.history.length * BAR_PITCH_PX;
+            for (let i = 0; i < s.history.length; i++) {
+                const amp = s.history[i];
+                const barHeight = Math.max(minBarHeight, amp * height * 0.9);
+                const x = startX + i * BAR_PITCH_PX;
+                const y = (height - barHeight) / 2;
+                ctx.beginPath();
+                if (ctx.roundRect) ctx.roundRect(x, y, BAR_PITCH_PX - 1.5, barHeight, 2);
+                else ctx.rect(x, y, BAR_PITCH_PX - 1.5, barHeight);
+                ctx.fill();
+            }
+
+            s.rafId = requestAnimationFrame(drawWaveform);
+        }
+
+        function teardownWaveform() {
+            if (!_waveformState) {
+                $('#voiceWaveform').addClass('d-none');
+                return;
+            }
+            if (_waveformState.rafId) cancelAnimationFrame(_waveformState.rafId);
+            if (_waveformState.ownsStream && _waveformState.stream) {
+                _waveformState.stream.getTracks().forEach(track => track.stop());
+            }
+            try {
+                if (_waveformState.audioCtx.state !== 'closed') _waveformState.audioCtx.close();
+            } catch (e) { /* already closed */ }
+            _waveformState = null;
+            $('#voiceWaveform').addClass('d-none');
+        }
+
         /**
          * Gracefully stop any active recording session.
          * Resets the mic button state and placeholder text.
@@ -427,22 +541,30 @@
         function resetMicUi() {
             _isRecording = false;
             _recordingMode = null;
+            teardownWaveform();
             $('#micBtn')
                 .removeClass('recording-active pulse-recording')
-                .find('i').removeClass('fa-stop').addClass('fa-microphone');
-            $('#text').attr('placeholder', PLACEHOLDER_IDLE);
+                .find('i').removeClass('fa-stop fa-play').addClass('fa-microphone');
+            $('#text').removeClass('d-none').attr('placeholder', PLACEHOLDER_IDLE);
         }
 
         function stopRecording() {
             if (_recordingMode === 'fallback' && _fallbackRecorder && _fallbackRecorder.state !== 'inactive') {
                 _isRecording = false;
+                teardownWaveform();
                 $('#micBtn')
                     .removeClass('recording-active pulse-recording')
-                    .find('i').removeClass('fa-stop').addClass('fa-microphone');
-                $('#text').attr('placeholder', PLACEHOLDER_PROCESS);
+                    .find('i').removeClass('fa-stop').addClass('fa-play');
+                $('#text').removeClass('d-none').attr('placeholder', PLACEHOLDER_PROCESS);
                 try { _fallbackRecorder.stop(); } catch (e) { /* already stopped */ }
                 return;
             }
+
+            // Only a live recognizer means we're genuinely awaiting a result
+            // (its 'end' event will call resetMicUi()). If there's nothing to
+            // wait on — unsupported browser, permission denied, start failed —
+            // reset straight to idle instead of getting stuck on the play icon.
+            const awaitingResult = !!_recognition;
 
             if (_recognition) {
                 try { _recognition.stop(); } catch (e) { /* already stopped */ }
@@ -455,7 +577,17 @@
             _fallbackRecorder = null;
             _fallbackChunks = [];
             _fallbackMimeType = '';
-            resetMicUi();
+
+            if (!awaitingResult) {
+                resetMicUi();
+                return;
+            }
+
+            teardownWaveform();
+            $('#micBtn')
+                .removeClass('recording-active pulse-recording')
+                .find('i').removeClass('fa-stop').addClass('fa-play');
+            $('#text').removeClass('d-none').attr('placeholder', PLACEHOLDER_PROCESS);
         }
 
         function encodeWavFromAudioBuffer(audioBuffer) {
@@ -539,8 +671,9 @@
                     return;
                 }
 
-                $('#text').val(text);
-                setTimeout(() => $('#messageArea').submit(), 120);
+                // Populate the input with the transcript but let the user
+                // review/edit it and press Send themselves — don't auto-submit.
+                $('#text').val(text).trigger('focus');
             } catch (e) {
                 console.error('[STT fallback] error:', e);
                 showVoiceToast(currentLang === 'zh-HK'
@@ -567,6 +700,7 @@
 
             try {
                 _fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                initWaveformAnalyser(_fallbackStream, false);
                 _fallbackMimeType = '';
                 if (window.MediaRecorder && MediaRecorder.isTypeSupported) {
                     _fallbackMimeType = mimeCandidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
@@ -626,11 +760,19 @@
             $('#micBtn')
                 .addClass('recording-active pulse-recording')
                 .find('i').removeClass('fa-microphone').addClass('fa-stop');
-            $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN);
+            $('#text').val('').attr('placeholder', PLACEHOLDER_LISTEN).addClass('d-none');
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 _recordingMode = 'webspeech';
+                // Web Speech API gives no raw audio access, so grab a second,
+                // visualization-only stream. Best-effort: if denied/unsupported,
+                // recording still proceeds via the recognizer alone.
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    navigator.mediaDevices.getUserMedia({ audio: true })
+                        .then(vizStream => initWaveformAnalyser(vizStream, true))
+                        .catch(e => console.warn('[Waveform] visualization mic unavailable:', e));
+                }
                 _recognition = new SpeechRecognition();
                 _recognition.lang = (currentLang === 'zh-HK') ? 'zh-HK' : 'en-US';
                 _recognition.interimResults = true;
@@ -683,11 +825,10 @@
                 _recognition.addEventListener('end', function () {
                     resetMicUi();
                     _recognition = null;
+                    // Leave the transcript in the input for the user to
+                    // review/edit and press Send themselves — don't auto-submit.
                     const transcript = $('#text').val().trim();
-                    // Auto-submit if we got text
-                    if (transcript) {
-                        setTimeout(() => $('#messageArea').submit(), 150);
-                    }
+                    if (transcript) $('#text').trigger('focus');
                 });
 
                 try {
@@ -695,6 +836,10 @@
                     console.log('[STT] started Web Speech API');
                 } catch (e) {
                     console.error('[STT] failed to start:', e);
+                    // start() threw synchronously — no 'end' event will ever
+                    // fire for this instance, so clear it before stopRecording()
+                    // or the mic would get stuck showing the play icon forever.
+                    _recognition = null;
                     stopRecording();
                     showVoiceToast(currentLang === 'zh-HK'
                         ? '⚠️ 語音功能啟動失敗。'
