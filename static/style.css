@@ -406,6 +406,11 @@ body {
 }
 .page-chat .type_msg:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(91,154,125,0.15); outline: none; }
 
+.page-chat .voice-waveform {
+    background: var(--bg-input); border: 1.5px solid var(--border);
+    border-radius: 24px; flex: 1; height: 48px;
+}
+
 .page-chat .send_btn {
     background: var(--primary); color: white; border: none;
     width: 48px; height: 48px; min-width: 48px; border-radius: 50%;
