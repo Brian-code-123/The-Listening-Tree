@@ -477,6 +477,30 @@
             }
         }
 
+        /**
+         * Web Speech API exposes no raw audio, so its waveform can't reflect
+         * real amplitude. A synthetic breathing pulse conveys "listening"
+         * without a second getUserMedia() call — see startRecording() for
+         * why that call was removed (multi-second contention delay).
+         */
+        function initSyntheticWaveform() {
+            const canvasEl = document.getElementById('voiceWaveform');
+            $(canvasEl).removeClass('d-none');
+            if (canvasEl && canvasEl.clientWidth) {
+                canvasEl.width = canvasEl.clientWidth;
+                canvasEl.height = canvasEl.clientHeight;
+            }
+            _waveformState = {
+                synthetic: true,
+                history: [],
+                maxBars: Math.max(1, Math.floor(canvasEl.width / BAR_PITCH_PX)),
+                rafId: null,
+                lastSampleTime: 0,
+                startTime: performance.now(),
+            };
+            drawWaveform();
+        }
+
         function drawWaveform(ts) {
             if (!_waveformState) return;
             const s = _waveformState;
@@ -484,16 +508,23 @@
 
             if (!ts || ts - s.lastSampleTime >= interval) {
                 s.lastSampleTime = ts || 0;
-                s.analyser.getByteTimeDomainData(s.dataArray);
-                // RMS amplitude of this window, 0..1 — gives a natural,
-                // speech-like envelope rather than a flat average.
-                let sumSquares = 0;
-                for (let i = 0; i < s.dataArray.length; i++) {
-                    const v = (s.dataArray[i] - 128) / 128;
-                    sumSquares += v * v;
+                let amp;
+                if (s.synthetic) {
+                    const t = (performance.now() - s.startTime) / 1000;
+                    amp = 0.35 + 0.25 * Math.abs(Math.sin(t * 2.2)) + Math.random() * 0.1;
+                } else {
+                    s.analyser.getByteTimeDomainData(s.dataArray);
+                    // RMS amplitude of this window, 0..1 — gives a natural,
+                    // speech-like envelope rather than a flat average.
+                    let sumSquares = 0;
+                    for (let i = 0; i < s.dataArray.length; i++) {
+                        const v = (s.dataArray[i] - 128) / 128;
+                        sumSquares += v * v;
+                    }
+                    const rms = Math.sqrt(sumSquares / s.dataArray.length);
+                    amp = Math.min(1, rms * 4); // small gain so normal speech reaches good height
                 }
-                const rms = Math.sqrt(sumSquares / s.dataArray.length);
-                s.history.push(Math.min(1, rms * 4)); // small gain so normal speech reaches good height
+                s.history.push(amp);
                 if (s.history.length > s.maxBars) s.history.shift();
             }
 
@@ -532,7 +563,9 @@
                 _waveformState.stream.getTracks().forEach(track => track.stop());
             }
             try {
-                if (_waveformState.audioCtx.state !== 'closed') _waveformState.audioCtx.close();
+                if (_waveformState.audioCtx && _waveformState.audioCtx.state !== 'closed') {
+                    _waveformState.audioCtx.close();
+                }
             } catch (e) { /* already closed */ }
             _waveformState = null;
             $('#voiceWaveform').addClass('d-none');
@@ -806,23 +839,16 @@
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 _recordingMode = 'webspeech';
-                // Web Speech API gives no raw audio access, so grab a second,
-                // visualization-only stream once recognition has actually
-                // started successfully. Best-effort: if denied/unsupported/
-                // fails, recording still proceeds via the recognizer alone
-                // with the live interim transcript shown in the text field.
-                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                    navigator.mediaDevices.getUserMedia({ audio: true })
-                        .then(vizStream => {
-                            if (!_isRecording || _recordingMode !== 'webspeech') {
-                                vizStream.getTracks().forEach(t => t.stop());
-                                return;
-                            }
-                            initWaveformAnalyser(vizStream, true);
-                            $('#text').addClass('d-none');
-                        })
-                        .catch(e => console.warn('[Waveform] visualization mic unavailable:', e));
-                }
+                // Web Speech API gives no raw audio access. A second,
+                // visualization-only getUserMedia() call used to run here,
+                // but on the same physical mic device it can take several
+                // seconds to resolve while the recognizer already holds the
+                // mic (OS-level capture arbitration) — the waveform would
+                // stay hidden for that whole window. Use a synthetic pulse
+                // instead: same WhatsApp-style visual, no real audio needed,
+                // shows instantly with no contention.
+                initSyntheticWaveform();
+                $('#text').addClass('d-none');
                 _recognition = new SpeechRecognition();
                 _recognition.lang = (currentLang === 'zh-HK') ? 'zh-HK' : 'en-US';
                 _recognition.interimResults = true;
