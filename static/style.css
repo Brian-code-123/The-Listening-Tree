@@ -677,6 +677,7 @@ body {
     .page-chat .msg_cotainer, .page-chat .msg_cotainer_send { max-width: 85%; font-size: 1rem; }
     .page-chat .chat-footer { padding: 8px 10px; }
     .theme-toggle { top: 10px; right: 10px; width: 38px; height: 38px; }
+    .hk-guide-lang { margin-right: 48px; }
 }
 
 /* Hidden file input */
@@ -1224,6 +1225,10 @@ body.font-scale-large .type_msg {
 .hk-guide-lang {
     display: flex;
     gap: 8px;
+    /* .theme-toggle is position:fixed at right:24px, width:44px — reserve
+       that space so the language links don't sit underneath it on
+       viewports narrower than the nav's max-width. */
+    margin-right: 68px;
 }
 
 /* Tabs */
