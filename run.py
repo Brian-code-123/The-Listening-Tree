@@ -1356,7 +1356,7 @@ async def logout(request: Request):
 async def index(request: Request):
     uid = get_user(request)
     if uid is None:
-        return RedirectResponse(url="/login", status_code=303)
+        return templates.TemplateResponse("login.html", tpl_context(request))
     return templates.TemplateResponse("chat.html", tpl_context(request))
 
 _SAFE_REDIRECT_PATHS = {
