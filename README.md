@@ -43,7 +43,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 - Bilingual AI chatbot: warm, patient conversations powered by Zhipu AI GLM-4 LLM in English and Cantonese.
 - Voice interaction: Web Speech API for real-time speech recognition and synthesis.
-- Smart reminder system: CRUD-managed medication and activity reminders with scheduled notifications.
+- Smart reminder system: CRUD-managed medication and activity reminders, checked server-side every 60 seconds (in-app; push/local notification delivery is not yet wired up).
 - Cross-platform support: responsive web app plus native iOS and Android builds via Capacitor.
 - Accessibility optimization: large typography, high-contrast themes, and simplified navigation.
 - Cognitive wellness tools: bilingual memory games and daily wellness prompts.
@@ -56,7 +56,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Core: HTML5, CSS3, JavaScript (ES6+)
 - Framework: Bootstrap 5 for responsive layout
 - Libraries: jQuery, FullCalendar.js, Font Awesome
-- Voice: Web Speech API for browser-native speech-to-text and text-to-speech, with a server-side SpeechRecognition fallback (`/transcribe`) for browsers without Web Speech API support
+- Voice: Web Speech API for browser-native speech-to-text and text-to-speech, with a server-side `/transcribe` fallback (Hugging Face Whisper, then legacy Google Web Speech via `SpeechRecognition`) for browsers without Web Speech API support
 - Mobile build: Capacitor 6 for iOS and Android packaging
 - Deployment: Vercel
 
@@ -70,9 +70,9 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 ### Database
 
-- Database: PostgreSQL 12+ for secure relational persistence
-- Core entities: User, ChatMessage, Reminder, Preference
-- Hosting: Supabase and Neon for managed PostgreSQL services
+- Database: PostgreSQL for secure relational persistence
+- Core tables: `users`, `chat_history`, `reminders`, `preferences`, `email_verifications`
+- Hosting: Supabase (managed PostgreSQL with connection pooler)
 
 ### DevOps & Testing
 
@@ -84,7 +84,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 The project follows a modular three-layer architecture designed for stability and maintainability:
 
-- Frontend layer: responsive UI handling user interactions, voice input and output, and dynamic content rendering.
+- Frontend layer: Jinja2-templated pages (`templates/`) for chat, login, register, accessibility, and HK guide, plus a standalone Capacitor shell (`www/`) for the mobile build — handling user interactions, voice input and output, and dynamic content rendering.
 - Backend API layer: FastAPI service handling business logic, LLM integration, authentication, and database operations.
 - Database layer: PostgreSQL storing user profiles, chat history, reminders, and preferences with optimized indexing.
 
@@ -92,7 +92,7 @@ The project follows a modular three-layer architecture designed for stability an
 
 ### 1. User Onboarding
 
-- Registration with email verification code (sent via Azure Email Server) and login with email authentication.
+- Registration with email verification code (sent via Azure Communication Services) and login with email authentication.
 - Bilingual setup in English or Cantonese plus theme selection for standard or high-contrast mode.
 - AI voice greeting for a friendly first experience.
 
@@ -115,7 +115,7 @@ The project follows a modular three-layer architecture designed for stability an
 - Unit testing: Vitest for JavaScript utility functions.
 - Integration testing: pytest against an ephemeral PostgreSQL container, covering registration with email verification, login, reminder CRUD, AI chat, cognitive game flow, and voice transcription.
 - End-to-end testing: Playwright simulates real user flows such as reminder CRUD, voice chat, and mobile responsiveness.
-- CI/CD automation: GitHub Actions runs the full suite on every commit; current main branch passes all automated checks.
+- CI/CD automation: GitHub Actions runs unit and integration tests on every push/PR to `main`/`develop`; Playwright E2E tests are run locally/manually and are not yet wired into CI.
 
 ### Known evaluation gaps
 
