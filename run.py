@@ -23,6 +23,7 @@ License: Academic — Educational & Research Use
 import os
 import json
 import asyncio
+import re
 import secrets
 import random
 import threading
@@ -33,7 +34,7 @@ import socket
 import time as _time
 import builtins as _builtins
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, quote
@@ -51,10 +52,13 @@ try:
     import psycopg2
     from psycopg2.extras import RealDictCursor
     from psycopg2 import IntegrityError as PgIntegrityError
+    from psycopg2 import InterfaceError as PgInterfaceError
 except ImportError:
     psycopg2 = None
     RealDictCursor = None
     class PgIntegrityError(Exception):
+        pass
+    class PgInterfaceError(Exception):
         pass
 from dotenv import load_dotenv
 
@@ -184,6 +188,8 @@ async def lifespan(app: FastAPI):
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
+    # Release pooled database connections held for reuse.
+    close_db_pool()
 
 # ---------------------------------------------------------------------------
 # Application initialisation
@@ -210,14 +216,52 @@ if _SECRET_KEY and len(_SECRET_KEY) >= 16:
     print("[SECURITY] 🔑 SECRET_KEY is set")
 else:
     print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
+REMEMBER_ME_MAX_AGE = 60 * 60 * 24 * 90
+
+
+class RememberMeCookieMiddleware:
+    """Rewrites the session cookie to a browser-session cookie when the user
+    did not opt into "remember me" at login — SessionMiddleware only supports
+    a single fixed max_age, so this strips Max-Age/Expires from its Set-Cookie
+    header after the fact when `session['remember_me']` is falsy.
+    """
+
+    _ATTR_PATTERN = re.compile(rb";\s*(?:Max-Age|Expires)=[^;]*", re.IGNORECASE)
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            # Only strip when the user explicitly opted out. A missing key (an
+            # older session, or the register flow) keeps the persistent cookie.
+            if message["type"] == "http.response.start" and scope.get("session", {}).get("remember_me") is False:
+                new_headers = []
+                for name, value in message.get("headers", []):
+                    if name.lower() == b"set-cookie" and value.startswith(b"lt_session="):
+                        value = self._ATTR_PATTERN.sub(b"", value)
+                    new_headers.append((name, value))
+                message = {**message, "headers": new_headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=_SECRET_KEY,
     session_cookie="lt_session",
-    max_age=60 * 60 * 24 * 30,
+    max_age=REMEMBER_ME_MAX_AGE,
     same_site="lax",
     https_only=IN_PRODUCTION,
 )
+# Added after SessionMiddleware so it sits *outside* it: SessionMiddleware
+# writes the Set-Cookie header first, then this one gets to rewrite it.
+app.add_middleware(RememberMeCookieMiddleware)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -421,6 +465,9 @@ def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, 
 
 PBKDF2_ITERATIONS = 390000
 PBKDF2_SCHEME = "pbkdf2_sha256"
+
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 15
 
 
 def hash_password(password: str) -> str:
@@ -817,8 +864,13 @@ questions = [
 # ---------------------------------------------------------------------------
 # Database Setup — PostgreSQL (Supabase)
 # ---------------------------------------------------------------------------
-def get_db():
-    """Open a PostgreSQL connection with dict-like row access."""
+def _open_new_db_connection():
+    """Open a brand-new PostgreSQL connection with dict-like row access.
+
+    This performs the full TCP + TLS handshake against Supabase, which costs
+    several hundred milliseconds. Callers should normally use `get_db()`
+    instead, which reuses an already-established connection when one is idle.
+    """
     global _DB_ACTIVE_CANDIDATE_INDEX, _DB_HOSTNAME, _DB_HOSTADDR, _DB_RUNTIME_LABEL
     global _RUNTIME_DB_BACKEND, _DB_NEXT_PG_RETRY_TS, _DB_LAST_PG_ERROR, _DB_LAST_PG_ATTEMPTS
 
@@ -866,6 +918,161 @@ def get_db():
     raise RuntimeError("No database connection candidates are available.")
 
 
+# ---------------------------------------------------------------------------
+# Connection reuse pool
+#
+# Opening a fresh connection to Supabase costs a full TCP + TLS handshake
+# (measured at ~600ms from Hong Kong), and the app previously paid that on
+# every single request that touched the database. Serverless instances stay
+# warm between requests, so module-level state survives and an already-open
+# connection can be handed to the next request instead.
+#
+# Call sites are unchanged: `get_db()` still returns something that looks like
+# a psycopg2 connection, and `conn.close()` still ends that request's use of
+# it. The difference is that close() now parks the connection in `_DB_IDLE_POOL`
+# for the next request rather than tearing down the socket.
+# ---------------------------------------------------------------------------
+
+# Idle connections available for reuse, as (raw psycopg2 connection, time parked).
+_DB_IDLE_POOL: List[tuple] = []
+# Guards _DB_IDLE_POOL: the background reminder task and request handlers can
+# both borrow connections, and a connection must never be lent out twice.
+_DB_POOL_LOCK = threading.Lock()
+# Cap on parked connections. Supabase's pooler has a per-project connection
+# limit, so idle connections beyond this are closed for real.
+DB_POOL_MAX_IDLE = int(os.environ.get("DB_POOL_MAX_IDLE", "4"))
+# A connection parked longer than this may have been dropped server-side, so it
+# is validated with a cheap `SELECT 1` before being handed out. Connections
+# reused sooner than this skip the check and cost no extra round trip.
+DB_POOL_HEALTHCHECK_IDLE_SEC = float(os.environ.get("DB_POOL_HEALTHCHECK_IDLE_SEC", "30"))
+
+
+def _discard_raw_connection(raw) -> None:
+    """Close a raw connection, ignoring errors from an already-broken socket."""
+    try:
+        raw.close()
+    except Exception:
+        pass
+
+
+def _is_raw_connection_usable(raw, idle_seconds: float) -> bool:
+    """Check whether a parked connection can still serve a query.
+
+    Connections parked only briefly are trusted as-is. Longer-idle ones are
+    probed with `SELECT 1`, since Supabase's pooler can drop idle connections
+    and a dead socket would otherwise fail inside the caller's own query.
+    """
+    if raw.closed:
+        return False
+    if idle_seconds < DB_POOL_HEALTHCHECK_IDLE_SEC:
+        return True
+    try:
+        with raw.cursor() as probe:
+            probe.execute("SELECT 1")
+            probe.fetchone()
+        return True
+    except Exception:
+        return False
+
+
+class _PooledConnection:
+    """A psycopg2 connection whose `close()` returns it to `_DB_IDLE_POOL`.
+
+    Every attribute other than the ones defined here (`cursor`, `commit`, ...)
+    is delegated straight to the underlying connection, so this behaves like
+    the real thing for all existing call sites.
+    """
+
+    __slots__ = ("_raw", "_returned")
+
+    def __init__(self, raw):
+        self._raw = raw
+        self._returned = False
+
+    def __getattr__(self, name):
+        # Only reached for attributes not defined on this class, i.e. the
+        # entire psycopg2 connection API.
+        if self._returned:
+            # The underlying connection has been handed back and may already be
+            # serving another request. Fail loudly, as a real closed psycopg2
+            # connection would, rather than silently sharing someone else's
+            # transaction.
+            raise PgInterfaceError("connection already closed")
+        return getattr(self._raw, name)
+
+    @property
+    def closed(self):
+        """Report as closed once returned, matching psycopg2's own semantics."""
+        return 1 if self._returned else self._raw.closed
+
+    def close(self) -> None:
+        """Release this connection back to the pool for the next request."""
+        if self._returned:
+            # Double-close is a no-op, as it is on a real connection.
+            return
+        self._returned = True
+        raw = self._raw
+
+        if raw.closed:
+            return
+
+        try:
+            # Clear any transaction the caller left open (for example a route
+            # that raised before committing) so the next borrower starts clean.
+            # This is a local no-op when no transaction is in progress.
+            raw.rollback()
+        except Exception:
+            _discard_raw_connection(raw)
+            return
+
+        with _DB_POOL_LOCK:
+            if len(_DB_IDLE_POOL) >= DB_POOL_MAX_IDLE:
+                # Pool is full — genuinely close this one to respect the
+                # server-side connection limit.
+                _discard_raw_connection(raw)
+                return
+            _DB_IDLE_POOL.append((raw, _time.monotonic()))
+
+    def __enter__(self):
+        # psycopg2 connections are context managers over a *transaction*, not
+        # the connection itself; preserve that behaviour.
+        self._raw.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self._raw.__exit__(exc_type, exc_value, traceback)
+
+
+def get_db():
+    """Return a PostgreSQL connection with dict-like row access.
+
+    Reuses an idle connection when one is available, otherwise opens a new one.
+    Callers must still call `conn.close()` when done, which returns the
+    connection to the pool instead of closing the socket.
+    """
+    while True:
+        with _DB_POOL_LOCK:
+            if not _DB_IDLE_POOL:
+                break
+            raw, parked_at = _DB_IDLE_POOL.pop()
+
+        if _is_raw_connection_usable(raw, _time.monotonic() - parked_at):
+            return _PooledConnection(raw)
+        # Stale connection — drop it and try the next one in the pool.
+        _discard_raw_connection(raw)
+
+    return _PooledConnection(_open_new_db_connection())
+
+
+def close_db_pool() -> None:
+    """Close every idle connection. Called on application shutdown."""
+    with _DB_POOL_LOCK:
+        parked = list(_DB_IDLE_POOL)
+        _DB_IDLE_POOL.clear()
+    for raw, _parked_at in parked:
+        _discard_raw_connection(raw)
+
+
 def init_db() -> None:
     """Initialize PostgreSQL schema with all required tables and indexes."""
     conn = get_db()
@@ -886,7 +1093,9 @@ def init_db() -> None:
             is_active BOOLEAN DEFAULT TRUE
         )
     """)
-    
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP")
+
     # Reminders table
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS reminders (
@@ -1119,18 +1328,29 @@ async def login_page(request: Request):
     return templates.TemplateResponse("login.html", tpl_context(request))
 
 @app.post("/login", response_class=HTMLResponse)
-async def login_post(request: Request, email: str = Form(...), password: str = Form(...)):
+async def login_post(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    remember_me: Optional[str] = Form(None),
+):
     """Authenticate user login with email and password credentials.
 
     Sets session values on successful authentication:
       - session['user_id']: Database row ID
       - session['user_email']: User email address
+      - session['remember_me']: whether the session cookie should persist (90 days) or expire with the browser session
       - session['language']: User's preferred language (loaded from preferences table)
+
+    Failed attempts are tracked per account (`users.failed_login_attempts` /
+    `locked_until`) and lock the account for LOGIN_LOCKOUT_MINUTES after
+    LOGIN_MAX_ATTEMPTS consecutive failures, to slow down brute-force guessing.
 
     Args:
         request: HTTP request object with session middleware
-        email: User email (case-sensitive, must match registered email exactly)
-        password: Plain-text password (compared directly; not hashed)
+        email: User email (matched case-insensitively against the stored address)
+        password: User password, verified against the PBKDF2-HMAC-SHA256 hash
+        remember_me: Present (any value) when the "remember me" checkbox was checked
 
     Returns:
         HTMLResponse: Redirect to / (home) on success, or login.html with error message on failure
@@ -1138,19 +1358,39 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
     lang = get_lang(request)
     email = email.strip().lower()
     password = password.strip()
+    generic_error = "Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"
     conn = get_db()
     c = conn.cursor()
-    db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+    db_execute(
+        c,
+        "SELECT id, email, password, failed_login_attempts, locked_until FROM users WHERE LOWER(email) = LOWER(?)",
+        (email,),
+    )
     user = c.fetchone()
+
+    if user and user["locked_until"] and user["locked_until"] > datetime.now():
+        conn.close()
+        wait_minutes = max(1, int((user["locked_until"] - datetime.now()).total_seconds() // 60) + 1)
+        locked_msg = (
+            f"Too many failed attempts. Try again in {wait_minutes} min." if lang == 'en'
+            else f"登入失敗次數過多，請 {wait_minutes} 分鐘後再試"
+        )
+        return templates.TemplateResponse("login.html", tpl_context(request, error=locked_msg), status_code=429)
+
     if user and verify_password(password, user["password"]):
         if not is_password_hashed(user["password"]):
             # Transparent migration for legacy plaintext rows.
             db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
+        db_execute(
+            c,
+            "UPDATE users SET last_login = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
+            (ts, user["id"]),
+        )
         conn.commit()
         request.session['user_email'] = user["email"]
         request.session['user_id'] = user["id"]
+        request.session['remember_me'] = bool(remember_me)
         # Load language preference
         db_execute(c, "SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
         pref = c.fetchone()
@@ -1158,8 +1398,21 @@ async def login_post(request: Request, email: str = Form(...), password: str = F
             request.session['language'] = pref["pref_value"]
         conn.close()
         return RedirectResponse(url="/", status_code=303)
+
+    if user:
+        attempts = (user["failed_login_attempts"] or 0) + 1
+        if attempts >= LOGIN_MAX_ATTEMPTS:
+            locked_until = (datetime.now() + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
+            db_execute(
+                c,
+                "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
+                (attempts, locked_until, user["id"]),
+            )
+        else:
+            db_execute(c, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
+        conn.commit()
     conn.close()
-    return templates.TemplateResponse("login.html", tpl_context(request, error="Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"))
+    return templates.TemplateResponse("login.html", tpl_context(request, error=generic_error))
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
@@ -1322,6 +1575,7 @@ async def register_post(
         if created_user:
             request.session['user_email'] = created_user["email"]
             request.session['user_id'] = created_user["id"]
+            request.session['remember_me'] = True
         conn.close()
         if wants_json:
             return JSONResponse({"success": True, "redirect": "/"})
