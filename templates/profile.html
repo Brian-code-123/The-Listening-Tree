@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="{{ lang if lang else 'en' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>{{ translations.profile_title if translations else 'My Profile' }} - {{ translations.app_name if translations else 'The Listening Tree' }}</title>
+
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+HK:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+
+    <!-- Vercel Analytics -->
+        <script>
+            window.va = window.va || function () {
+                window.vaq = window.vaq || [];
+                window.vaq.push(arguments);
+            };
+        </script>
+    <script defer src="/_vercel/insights/script.js"></script>
+
+    <style>
+        .page-profile .profile-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 28px;
+            max-width: 520px;
+            margin: 0 auto 24px;
+        }
+        .page-profile .profile-card h2 {
+            font-size: 1.15rem;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .page-profile .profile-card .card-desc {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 18px;
+        }
+        .page-profile .form-label { color: var(--text-secondary); font-weight: 600; }
+        .page-profile .field-error { font-size: 0.85rem; color: var(--danger); margin-top: 4px; min-height: 1em; }
+        .page-profile .form-status { font-size: 0.9rem; margin-top: 12px; min-height: 1.2em; }
+        .page-profile .form-status.success { color: var(--success); }
+        .page-profile .form-status.error { color: var(--danger); }
+        .page-profile main { padding: 24px 16px 48px; }
+    </style>
+</head>
+<body class="page-profile" data-theme="light">
+
+    <!-- Theme Toggle -->
+    <button class="theme-toggle" id="themeToggle" title="{{ translations.theme_toggle if translations else 'Toggle Theme' }}">
+        <i class="fas fa-sun" id="themeIcon"></i>
+    </button>
+
+    <a href="#main-content" class="skip-link">{{ translations.skip_to_content if translations else 'Skip to main content' }}</a>
+
+    <div class="container-fluid">
+        <!-- Banner -->
+        <div class="accessibility-banner" role="banner">
+            <div class="accessibility-banner-icon" aria-hidden="true">
+                <i class="fas fa-user-circle"></i>
+            </div>
+            <div class="accessibility-banner-content">
+                <h1>{{ translations.profile_title if translations else 'My Profile' }}</h1>
+                <p>{{ translations.profile_desc if translations else 'Update your display name or change your password.' }}</p>
+            </div>
+        </div>
+
+        <!-- Navigation Bar -->
+        <nav class="nav-bar" role="navigation" aria-label="{{ translations.main_navigation if translations else 'Main navigation' }}">
+            <div class="nav-header">
+                <h1 class="nav-title">
+                    <span class="nav-title-icon" aria-hidden="true"><i class="fas fa-tree"></i></span>
+                    <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
+                </h1>
+                <div class="lang-switch" role="group" aria-label="{{ translations.language_selector if translations else 'Language selector' }}">
+                    <a href="/set_language/en" class="lang-btn {{ 'active' if lang == 'en' else '' }}" aria-label="English">EN</a>
+                    <a href="/set_language/zh-HK" class="lang-btn {{ 'active' if lang == 'zh-HK' else '' }}" aria-label="繁體中文">繁中</a>
+                </div>
+            </div>
+            <div class="nav-buttons">
+                <a href="/" class="btn-accessible btn-secondary-accessible" aria-label="{{ translations.normal_mode if translations else 'Back to chat' }}">
+                    <span class="btn-icon" aria-hidden="true"><i class="fas fa-comments"></i></span>
+                    <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
+                </a>
+                <a href="/logout" class="btn-accessible btn-danger-accessible" aria-label="{{ translations.logout if translations else 'Logout' }}">
+                    <span class="btn-icon" aria-hidden="true"><i class="fas fa-sign-out-alt"></i></span>
+                    <span>{{ translations.logout if translations else 'Logout' }}</span>
+                </a>
+            </div>
+        </nav>
+
+        <main id="main-content" role="main">
+            <!-- Display Name -->
+            <div class="profile-card">
+                <h2><i class="fas fa-id-badge" aria-hidden="true"></i> {{ translations.display_name if translations else 'Display Name' }}</h2>
+                <p class="card-desc">{{ email }}</p>
+                <form id="nameForm">
+                    <div class="mb-3">
+                        <label for="display_name" class="form-label">{{ translations.display_name if translations else 'Display Name' }}</label>
+                        <input type="text" name="display_name" id="display_name" class="form-control" maxlength="50"
+                               placeholder="{{ translations.display_name_placeholder if translations else 'What should we call you?' }}"
+                               value="{{ display_name }}">
+                        <div class="field-error" id="display_name-error"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="nameSaveBtn">
+                        {{ translations.save_name if translations else 'Save Name' }}
+                    </button>
+                    <div class="form-status" id="nameStatus"></div>
+                </form>
+            </div>
+
+            <!-- Change Password -->
+            <div class="profile-card">
+                <h2><i class="fas fa-lock" aria-hidden="true"></i> {{ translations.save_password if translations else 'Change Password' }}</h2>
+                <form id="passwordForm">
+                    <div class="mb-3">
+                        <label for="current_password" class="form-label">{{ translations.current_password if translations else 'Current Password' }}</label>
+                        <input type="password" name="current_password" id="current_password" class="form-control" autocomplete="current-password" required>
+                        <div class="field-error" id="current_password-error"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="new_password" class="form-label">{{ translations.new_password if translations else 'New Password' }}</label>
+                        <input type="password" name="new_password" id="new_password" class="form-control" autocomplete="new-password" required>
+                        <div class="field-error" id="new_password-error"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="confirm_new_password" class="form-label">{{ translations.confirm_new_password if translations else 'Confirm New Password' }}</label>
+                        <input type="password" name="confirm_new_password" id="confirm_new_password" class="form-control" autocomplete="new-password" required>
+                        <div class="field-error" id="confirm_new_password-error"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="passwordSaveBtn">
+                        {{ translations.save_password if translations else 'Change Password' }}
+                    </button>
+                    <div class="form-status" id="passwordStatus"></div>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Theme toggle
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.body.setAttribute('data-theme', savedTheme);
+        document.getElementById('themeIcon').className = savedTheme === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
+        document.getElementById('themeToggle').addEventListener('click', function() {
+            const current = document.body.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.body.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+            document.getElementById('themeIcon').className = next === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
+        });
+
+        function clearFieldErrors(form) {
+            form.querySelectorAll('.field-error').forEach(el => el.textContent = '');
+        }
+
+        function showStatus(el, message, isError) {
+            el.textContent = message;
+            el.classList.remove('success', 'error');
+            el.classList.add(isError ? 'error' : 'success');
+        }
+
+        async function submitForm(form, url, statusEl, onSuccess) {
+            clearFieldErrors(form);
+            statusEl.textContent = '';
+            const submitBtn = form.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: new FormData(form),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showStatus(statusEl, data.message, false);
+                    if (onSuccess) onSuccess(data);
+                } else if (data.field) {
+                    const fieldErrorEl = document.getElementById(`${data.field}-error`);
+                    if (fieldErrorEl) fieldErrorEl.textContent = data.message;
+                    else showStatus(statusEl, data.message, true);
+                } else {
+                    showStatus(statusEl, data.message || '{{ translations.error_generic if translations else "Something went wrong." }}', true);
+                }
+            } catch (err) {
+                showStatus(statusEl, '{{ translations.network_error if translations else "Network error, please try again" }}', true);
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        document.getElementById('nameForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            submitForm(this, '/profile/name', document.getElementById('nameStatus'));
+        });
+
+        document.getElementById('passwordForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            submitForm(this, '/profile/password', document.getElementById('passwordStatus'), function() {
+                document.getElementById('passwordForm').reset();
+            });
+        });
+    </script>
+</body>
+</html>

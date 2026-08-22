@@ -67,6 +67,14 @@ try:
 except ImportError:
     sr = None
 
+try:
+    from authlib.integrations.starlette_client import OAuth
+    from authlib.integrations.base_client.errors import OAuthError
+except ImportError:
+    OAuth = None
+    class OAuthError(Exception):
+        pass
+
 # Load environment variables from .env file
 env_path = Path(__file__).parent / '.env'
 load_dotenv(env_path, override=False)
@@ -152,7 +160,10 @@ async def run_periodic_tasks():
                 auto_expire_old_reminders()
 
             # 3. Clean Chat History (Every 10 minutes)
+            # Conversation-level cap runs first so a conversation that's
+            # about to be dropped wholesale doesn't also get message-pruned.
             if now.minute % 10 == 0:
+                cleanup_old_conversations()
                 cleanup_old_chat_history()
 
         except asyncio.CancelledError:
@@ -265,6 +276,27 @@ app.add_middleware(RememberMeCookieMiddleware)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+# ---------------------------------------------------------------------------
+# Google Sign-In (OAuth 2.0 / OpenID Connect via Authlib)
+# ---------------------------------------------------------------------------
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")
+# Feature is entirely optional: absent client id/secret just hides the button.
+GOOGLE_LOGIN_ENABLED = bool(OAuth and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+if IN_PRODUCTION and (GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET) and not GOOGLE_LOGIN_ENABLED:
+    raise RuntimeError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set to enable Google sign-in.")
+
+oauth = OAuth() if OAuth else None
+if GOOGLE_LOGIN_ENABLED:
+    oauth.register(
+        name="google",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -671,6 +703,11 @@ user_api_histories: dict = {}
 # Keep only the most recent chat messages per user/language.
 # Older rows are soft-deleted to bound table growth while preserving continuity.
 CHAT_HISTORY_MAX_MESSAGES_PER_LANG = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES_PER_LANG", "200"))
+# Per-conversation cap on top of the per-conversation message cap above —
+# without this, a user with hundreds of conversations would keep them all
+# forever. Oldest conversations (by updated_at) beyond this count are
+# soft-deleted wholesale rather than having their messages pruned piecemeal.
+CONVERSATION_MAX_PER_LANG = int(os.environ.get("CONVERSATION_MAX_PER_LANG", "50"))
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -779,10 +816,21 @@ WARM_FALLBACK_EN = [
     "I hear you, and I'm glad you told me. 😊",
 ]
 
-async def call_ai(user_input: str, user_id: int, lang: str = 'en'):
+async def call_ai(user_input: str, user_id: int, lang: str = 'en', display_name: Optional[str] = None):
     """Call Zhipu AI (智谱AI) for warm elderly conversation."""
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
+
+    if display_name:
+        # `users.username` is already sanitized (control characters stripped,
+        # length-capped) when it's written in /profile/name, so it's safe to
+        # interpolate directly here.
+        name_hint = (
+            f"用戶嘅名叫{display_name}，可以間唔中親切噉叫返佢個名。"
+            if lang == 'zh-HK'
+            else f"The user's name is {display_name}; address them by name occasionally."
+        )
+        system_prompt = f"{system_prompt}\n\n{name_hint}"
 
     if not ZHIPU_API_KEY:
         return random.choice(fallback)
@@ -1093,8 +1141,20 @@ def init_db() -> None:
             is_active BOOLEAN DEFAULT TRUE
         )
     """)
+    # `username` is in the CREATE TABLE above too, but that only takes effect
+    # for a brand-new table — this database's `users` table predates the
+    # column being added to the schema, so it needs the same explicit
+    # ADD COLUMN treatment as the two below.
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0")
     c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP")
+    # Google Sign-In: google_id links a row to a Google account; auth_provider
+    # is informational only (password login still works for 'google' rows if
+    # they ever set one). password stays NOT NULL — Google-only signups get a
+    # random unusable hash instead (see /auth/google/callback).
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT")
+    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'password'")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id) WHERE google_id IS NOT NULL")
 
     # Reminders table
     c.execute(f"""
@@ -1124,7 +1184,46 @@ def init_db() -> None:
             token_count INTEGER
         )
     """)
-    
+
+    # Conversations table — groups chat_history rows into independent,
+    # resumable threads (added after chat_history already had a flat log).
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id {id_type},
+            user_id {id_ref} NOT NULL,
+            lang TEXT DEFAULT 'en',
+            title TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_deleted BOOLEAN DEFAULT FALSE
+        )
+    """)
+    c.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS conversation_id BIGINT")
+
+    # One-time backfill: chat_history rows that predate the conversation_id
+    # column get grouped into a single "legacy" conversation per (user_id,
+    # lang) so existing history stays visible instead of being orphaned.
+    # Guarded so it only does work the first time it finds orphaned rows.
+    c.execute("SELECT 1 FROM chat_history WHERE conversation_id IS NULL LIMIT 1")
+    if c.fetchone():
+        c.execute("""
+            INSERT INTO conversations (user_id, lang, title, created_at, updated_at)
+            SELECT DISTINCT user_id, lang, NULL,
+                   MIN(timestamp) OVER (PARTITION BY user_id, lang),
+                   MAX(timestamp) OVER (PARTITION BY user_id, lang)
+            FROM chat_history
+            WHERE conversation_id IS NULL
+        """)
+        c.execute("""
+            UPDATE chat_history AS ch
+            SET conversation_id = conv.id
+            FROM conversations AS conv
+            WHERE ch.conversation_id IS NULL
+              AND conv.user_id = ch.user_id
+              AND conv.lang = ch.lang
+              AND conv.title IS NULL
+        """)
+
     # Preferences table
     c.execute(f"""
         CREATE TABLE IF NOT EXISTS preferences (
@@ -1159,6 +1258,8 @@ def init_db() -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, lang, is_deleted)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_conversation ON chat_history(conversation_id)")
 
     conn.commit()
     conn.close()
@@ -1197,8 +1298,15 @@ def ensure_db_initialized(strict: bool = False) -> bool:
 # Background helpers — housekeeping tasks
 # ---------------------------------------------------------------------------
 
-def cleanup_old_chat_history() -> None:
-    """Soft-delete oldest chat rows beyond the per-user/language cap."""
+def cleanup_old_conversations() -> None:
+    """Soft-delete whole conversations beyond the per-user/language cap.
+
+    Runs before the per-conversation message cleanup below so that a
+    conversation slated for removal doesn't also cost a message-level pass.
+    Caps by *conversation count*, not message count — an old conversation is
+    dropped wholesale rather than gutted message-by-message, so it either
+    fully exists or fully doesn't in the sidebar list.
+    """
     conn = get_db()
     c = conn.cursor()
     c.execute(
@@ -1208,6 +1316,42 @@ def cleanup_old_chat_history() -> None:
                 id,
                 ROW_NUMBER() OVER (
                     PARTITION BY user_id, lang
+                    ORDER BY updated_at DESC, id DESC
+                ) AS rn
+            FROM conversations
+            WHERE is_deleted = FALSE
+        )
+        UPDATE conversations AS conv
+        SET is_deleted = TRUE
+        FROM ranked
+        WHERE conv.id = ranked.id
+          AND ranked.rn > %s
+        """,
+        (CONVERSATION_MAX_PER_LANG,),
+    )
+    deleted_count = _safe_rowcount(c)
+    conn.commit()
+    conn.close()
+    if deleted_count > 0:
+        print(f"[CLEANUP] 🗑️  Marked {deleted_count} old conversations as deleted")
+
+
+def cleanup_old_chat_history() -> None:
+    """Soft-delete oldest chat rows beyond the per-conversation cap.
+
+    Partitioned by conversation_id (not user_id/lang) so a long-running
+    conversation can't crowd out messages belonging to a different,
+    still-listed conversation for the same user.
+    """
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        """
+        WITH ranked AS (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY conversation_id
                     ORDER BY timestamp DESC, id DESC
                 ) AS rn
             FROM chat_history
@@ -1228,28 +1372,30 @@ def cleanup_old_chat_history() -> None:
         print(f"[CLEANUP] 🗑️  Marked {deleted_count} old chat rows as deleted")
 
 
-def prune_user_chat_history(cursor, user_id: int, lang: str) -> None:
-    """Prune oldest rows for one user/language after inserting new messages."""
+def prune_user_chat_history(cursor, conversation_id: int) -> None:
+    """Prune oldest rows within one conversation after inserting new messages.
+
+    Scoped to `conversation_id` (not just user_id/lang) so sending lots of
+    messages in one conversation never soft-deletes rows from another.
+    """
     c = cursor
     c.execute(
         """
         WITH keep_ids AS (
             SELECT id
             FROM chat_history
-            WHERE user_id = %s
-              AND lang = %s
+            WHERE conversation_id = %s
               AND is_deleted = FALSE
             ORDER BY timestamp DESC, id DESC
             LIMIT %s
         )
         UPDATE chat_history
         SET is_deleted = TRUE
-        WHERE user_id = %s
-          AND lang = %s
+        WHERE conversation_id = %s
           AND is_deleted = FALSE
           AND id NOT IN (SELECT id FROM keep_ids)
         """,
-        (user_id, lang, CHAT_HISTORY_MAX_MESSAGES_PER_LANG, user_id, lang),
+        (conversation_id, CHAT_HISTORY_MAX_MESSAGES_PER_LANG, conversation_id),
     )
 
 
@@ -1322,10 +1468,17 @@ def tpl_context(request: Request, **kwargs) -> dict:
 # Auth Routes — login / register / logout
 # ---------------------------------------------------------------------------
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
+async def login_page(request: Request, error: Optional[str] = None):
     if get_user(request) is not None:
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("login.html", tpl_context(request))
+    lang = get_lang(request)
+    google_error = None
+    if error == "google_failed":
+        google_error = "Google sign-in failed. Please try again or use your password." if lang == 'en' else "Google 登入失敗，請再試一次或用密碼登入"
+    return templates.TemplateResponse(
+        "login.html",
+        tpl_context(request, error=google_error, google_enabled=GOOGLE_LOGIN_ENABLED),
+    )
 
 @app.post("/login", response_class=HTMLResponse)
 async def login_post(
@@ -1594,6 +1747,81 @@ async def register_post(
             status_code=500,
         )
 
+@app.get("/auth/google")
+async def google_login(request: Request):
+    """Redirect to Google's consent screen. 404s if Google sign-in isn't configured."""
+    if not GOOGLE_LOGIN_ENABLED:
+        raise HTTPException(status_code=404)
+    redirect_uri = GOOGLE_REDIRECT_URI or str(request.url_for("google_callback"))
+    return await oauth.google.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/google/callback", name="google_callback")
+async def google_callback(request: Request):
+    """Handle Google's redirect back: verify the ID token, then find-or-create
+    the local user and log them in the same way /login does.
+
+    Matching order: first by google_id (returning Google user), then by
+    email (auto-link an existing password account — Google already verified
+    ownership of that email), otherwise create a brand-new account with a
+    random, never-typeable password hash.
+    """
+    if not GOOGLE_LOGIN_ENABLED:
+        raise HTTPException(status_code=404)
+
+    try:
+        token = await oauth.google.authorize_access_token(request)
+    except OAuthError:
+        return RedirectResponse(url="/login?error=google_failed", status_code=303)
+
+    userinfo = token.get("userinfo") or {}
+    google_id = userinfo.get("sub")
+    email = (userinfo.get("email") or "").strip().lower()
+    if not google_id or not email or not userinfo.get("email_verified"):
+        return RedirectResponse(url="/login?error=google_failed", status_code=303)
+
+    display_name = _CONTROL_CHAR_PATTERN.sub(" ", userinfo.get("name") or "")
+    display_name = " ".join(display_name.split())[:50]
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
+        user = c.fetchone()
+
+        if not user:
+            db_execute(c, "SELECT id, email, google_id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+            existing = c.fetchone()
+            if existing and existing["google_id"]:
+                # Email matches, but already linked to a different Google account.
+                conn.close()
+                return RedirectResponse(url="/login?error=google_failed", status_code=303)
+            if existing:
+                db_execute(c, "UPDATE users SET google_id = ?, auth_provider = 'google' WHERE id = ?", (google_id, existing["id"]))
+                user = existing
+            else:
+                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                synthetic_password = hash_password(secrets.token_hex(32))
+                db_execute(
+                    c,
+                    "INSERT INTO users (email, password, username, google_id, auth_provider, created_at) VALUES (?, ?, ?, ?, 'google', ?)",
+                    (email, synthetic_password, display_name or None, google_id, ts),
+                )
+                db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
+                user = c.fetchone()
+
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
+        conn.commit()
+        request.session['user_email'] = user["email"]
+        request.session['user_id'] = user["id"]
+        request.session['remember_me'] = True
+    finally:
+        conn.close()
+
+    return RedirectResponse(url="/", status_code=303)
+
+
 @app.get("/forgot_password")
 async def forgot_password(request: Request):
     return RedirectResponse(url="/login", status_code=303)
@@ -1614,7 +1842,7 @@ async def index(request: Request):
     return templates.TemplateResponse("chat.html", tpl_context(request))
 
 _SAFE_REDIRECT_PATHS = {
-    "/", "/chat", "/accessibility", "/hk_guide", "/login", "/register",
+    "/", "/chat", "/accessibility", "/hk_guide", "/login", "/register", "/profile",
 }
 
 def _safe_redirect_target(request: Request) -> str:
@@ -1663,6 +1891,139 @@ async def accessibility_mode(request: Request):
     return templates.TemplateResponse("accessibility.html", tpl_context(request))
 
 # ---------------------------------------------------------------------------
+# Profile — display name + password
+# ---------------------------------------------------------------------------
+_CONTROL_CHAR_PATTERN = re.compile(r"[\r\n\t\x00-\x1f]")
+
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    uid = get_user(request)
+    if uid is None:
+        return RedirectResponse(url="/login", status_code=303)
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c, "SELECT username, email FROM users WHERE id = ?", (uid,))
+    user_row = c.fetchone()
+    conn.close()
+    return templates.TemplateResponse(
+        "profile.html",
+        tpl_context(
+            request,
+            display_name=(user_row["username"] if user_row else None) or "",
+            email=user_row["email"] if user_row else "",
+        ),
+    )
+
+
+@app.post("/profile/name")
+async def update_profile_name(request: Request, display_name: str = Form(...)):
+    """Update the user's display name, shown in chat headers and used to
+    let the AI address them by name (see call_ai's `display_name` param)."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"success": False, "message": "Not authenticated"}, status_code=401)
+    lang = get_lang(request)
+
+    # Strip control characters and collapse whitespace — this value is later
+    # interpolated directly into the LLM system prompt in call_ai(), so it
+    # must never be able to smuggle in newlines or a fake "SYSTEM:" line.
+    cleaned = _CONTROL_CHAR_PATTERN.sub(" ", display_name)
+    cleaned = " ".join(cleaned.split())[:50]
+
+    if not cleaned:
+        return JSONResponse(
+            {"success": False, "field": "display_name", "message": "Please enter a name" if lang == 'en' else "請輸入名稱"},
+            status_code=400,
+        )
+
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c, "UPDATE users SET username = ? WHERE id = ?", (cleaned, uid))
+    conn.commit()
+    conn.close()
+    return JSONResponse({"success": True, "display_name": cleaned, "message": "Name updated" if lang == 'en' else "名稱已更新"})
+
+
+@app.post("/profile/password")
+async def update_profile_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_new_password: str = Form(...),
+):
+    """Change the user's password, gated on confirming the current one."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"success": False, "message": "Not authenticated"}, status_code=401)
+    lang = get_lang(request)
+
+    def fail(message: str, field: str, status_code: int = 400):
+        return JSONResponse({"success": False, "field": field, "message": message}, status_code=status_code)
+
+    current_password = current_password.strip()
+    new_password = new_password.strip()
+    confirm_new_password = confirm_new_password.strip()
+
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(c, "SELECT password FROM users WHERE id = ?", (uid,))
+    user_row = c.fetchone()
+    if not user_row or not verify_password(current_password, user_row["password"]):
+        conn.close()
+        return fail("Current password is incorrect" if lang == 'en' else "現時密碼不正確", field="current_password")
+
+    is_valid_password, _ = validate_password_strength(new_password)
+    if not is_valid_password:
+        conn.close()
+        return fail("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", field="new_password")
+
+    if new_password != confirm_new_password:
+        conn.close()
+        return fail("Passwords do not match" if lang == 'en' else "密碼唔一致", field="confirm_new_password")
+
+    db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), uid))
+    conn.commit()
+    conn.close()
+    return JSONResponse({"success": True, "message": "Password updated" if lang == 'en' else "密碼已更新"})
+
+def _get_or_create_active_conversation(cursor, user_id: int, lang: str, requested_id: Optional[int]) -> int:
+    """Resolve which conversation a new message belongs to.
+
+    Trusts `requested_id` only if it exists, belongs to this user, and isn't
+    deleted; otherwise falls back to the user's most recently updated
+    conversation for this language, creating one if they have none yet. This
+    keeps callers that don't know about conversations (quick-action buttons
+    that POST to /get_response directly) working without any changes.
+    """
+    if requested_id is not None:
+        db_execute(
+            cursor,
+            "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE",
+            (requested_id, user_id),
+        )
+        if cursor.fetchone():
+            return requested_id
+
+    db_execute(
+        cursor,
+        "SELECT id FROM conversations WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY updated_at DESC LIMIT 1",
+        (user_id, lang),
+    )
+    row = cursor.fetchone()
+    if row:
+        return row["id"]
+
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    db_execute(
+        cursor,
+        "INSERT INTO conversations (user_id, lang, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id",
+        (user_id, lang, ts, ts),
+    )
+    return cursor.fetchone()["id"]
+
+
+# ---------------------------------------------------------------------------
 # Chat Response — the core message handler
 #
 # Accepts free-text input from the user, checks for special command
@@ -1670,7 +2031,7 @@ async def accessibility_mode(request: Request):
 # Tencent Hunyuan LLM for general conversation.
 # ---------------------------------------------------------------------------
 @app.post("/get_response")
-async def get_response(request: Request, msg: str = Form(...)):
+async def get_response(request: Request, msg: str = Form(...), conversation_id: Optional[int] = Form(None)):
     """Process user message and return AI/command response."""
     uid = get_user(request)
     if uid is None:
@@ -1684,11 +2045,24 @@ async def get_response(request: Request, msg: str = Form(...)):
     conn = get_db()
     c = conn.cursor()
 
+    # conversation_id is optional so older/other callers (voice shortcuts,
+    # the reminder-delete quick action) keep working unchanged — they just
+    # land in the user's most recent conversation instead of a specific one.
+    conversation_id = _get_or_create_active_conversation(c, uid, lang, conversation_id)
+
     # Store user message
     db_execute(
         c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, FALSE, ?, FALSE)",
-        (uid, lang, timestamp, user_input_original),
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, FALSE, ?, FALSE, ?)",
+        (uid, lang, timestamp, user_input_original, conversation_id),
+    )
+    # Auto-title from the first message in this conversation; COALESCE makes
+    # this a no-op once a title already exists.
+    preview_title = user_input_original.replace("\n", " ").replace("\r", " ").strip()[:40]
+    db_execute(
+        c,
+        "UPDATE conversations SET title = COALESCE(title, ?), updated_at = ? WHERE id = ?",
+        (preview_title or None, timestamp, conversation_id),
     )
     conn.commit()
 
@@ -1730,7 +2104,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[1:-1])
             else:
                 response = "格式：設置提醒 [活動] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, response, conversation_id))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
         else:
@@ -1740,7 +2114,7 @@ async def get_response(request: Request, msg: str = Form(...)):
                 label = ' '.join(parts[2:-1])
             else:
                 response = "Usage: set reminder [activity] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)", (uid, lang, timestamp, response))
+                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, response, conversation_id))
                 conn.commit(); conn.close()
                 return JSONResponse({"response": response})
 
@@ -1918,17 +2292,20 @@ async def get_response(request: Request, msg: str = Form(...)):
 
         # ---- Normal AI Chat ----
         else:
-            response = await call_ai(user_input_original, uid, lang)
+            db_execute(c, "SELECT username FROM users WHERE id = ?", (uid,))
+            user_row = c.fetchone()
+            display_name = user_row["username"] if user_row else None
+            response = await call_ai(user_input_original, uid, lang, display_name=display_name)
 
     # Store bot response
     db_execute(
         c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted) VALUES (?, ?, ?, TRUE, ?, FALSE)",
-        (uid, lang, timestamp, response),
+        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)",
+        (uid, lang, timestamp, response, conversation_id),
     )
 
     # Keep recent history stable across Vercel/local/mobile by pruning oldest rows.
-    prune_user_chat_history(c, uid, lang)
+    prune_user_chat_history(c, conversation_id)
     conn.commit()
     conn.close()
 
@@ -2071,9 +2448,61 @@ async def get_reminders(request: Request):
     conn.close()
     return JSONResponse({"reminders": reminders})
 
+def _load_conversation_messages(cursor, conn, conversation_id: int, lang: str) -> list:
+    """Shared history-loading logic for one conversation.
+
+    Extracted so both the legacy `/get_chat_history` endpoint and the new
+    per-conversation endpoint return identical shapes and share the
+    stale-greeting cleanup behaviour.
+    """
+    db_execute(
+        cursor,
+        "SELECT id, timestamp, is_bot, message FROM chat_history WHERE conversation_id = ? AND is_deleted = FALSE ORDER BY timestamp",
+        (conversation_id,),
+    )
+    rows = cursor.fetchall()
+
+    # A lone bot-authored auto-greeting isn't real conversation content —
+    # if it's stuck showing a different language's greeting text (e.g. it
+    # was written before the user ever switched language), soft-delete it
+    # so it gets recomputed live in the *current* language below, instead
+    # of staying frozen in whatever language it was first shown in.
+    current_welcome = get_text("welcome_chat", lang)
+    if len(rows) == 1 and rows[0]["is_bot"]:
+        all_welcome_variants = {get_text("welcome_chat", l) for l in TRANSLATIONS}
+        if rows[0]["message"] in all_welcome_variants and rows[0]["message"] != current_welcome:
+            db_execute(cursor, "UPDATE chat_history SET is_deleted = TRUE WHERE id = ?", (rows[0]["id"],))
+            conn.commit()
+            rows = []
+
+    history = [
+        {
+            "timestamp": _json_timestamp(r["timestamp"]),
+            "sender": "bot" if r["is_bot"] else "user",
+            "message": r["message"],
+        }
+        for r in rows
+    ]
+
+    if not history:
+        # Recomputed live (not persisted) so it always matches the
+        # current UI language, even across repeated language switches
+        # before the user ever sends a real message.
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        history = [{"timestamp": ts, "sender": "bot", "message": current_welcome}]
+
+    return history
+
+
 @app.get("/get_chat_history")
 async def get_chat_history(request: Request):
-    """Get chat history for current user, filtered by current language."""
+    """Legacy: get history for the user's most recent conversation.
+
+    Kept for callers that don't know about conversations yet (the
+    accessibility-mode chat page) — resolves to the same "most recent, or
+    create one" conversation that a conversation_id-less /get_response call
+    would land in, so both stay in sync.
+    """
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"history": []})
@@ -2082,48 +2511,88 @@ async def get_chat_history(request: Request):
     try:
         conn = get_db()
         c = conn.cursor()
-        db_execute(
-            c,
-            "SELECT id, timestamp, is_bot, message FROM chat_history WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY timestamp",
-            (uid, lang),
-        )
-        rows = c.fetchall()
-
-        # A lone bot-authored auto-greeting isn't real conversation content —
-        # if it's stuck showing a different language's greeting text (e.g. it
-        # was written before the user ever switched language), soft-delete it
-        # so it gets recomputed live in the *current* language below, instead
-        # of staying frozen in whatever language it was first shown in.
-        current_welcome = get_text("welcome_chat", lang)
-        if len(rows) == 1 and rows[0]["is_bot"]:
-            all_welcome_variants = {get_text("welcome_chat", l) for l in TRANSLATIONS}
-            if rows[0]["message"] in all_welcome_variants and rows[0]["message"] != current_welcome:
-                db_execute(c, "UPDATE chat_history SET is_deleted = TRUE WHERE id = ?", (rows[0]["id"],))
-                conn.commit()
-                rows = []
-
-        history = [
-            {
-                "timestamp": _json_timestamp(r["timestamp"]),
-                "sender": "bot" if r["is_bot"] else "user",
-                "message": r["message"],
-            }
-            for r in rows
-        ]
-
-        if not history:
-            # Recomputed live (not persisted) so it always matches the
-            # current UI language, even across repeated language switches
-            # before the user ever sends a real message.
-            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            history = [{"timestamp": ts, "sender": "bot", "message": current_welcome}]
-
+        conversation_id = _get_or_create_active_conversation(c, uid, lang, None)
+        conn.commit()
+        history = _load_conversation_messages(c, conn, conversation_id, lang)
         return JSONResponse({"history": history})
     except Exception as e:
         # Graceful degradation for transient DB/network failures.
         _builtins._original_print(f"[CHAT_HISTORY] fallback due to DB error: {e}")
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         return JSONResponse({"history": [{"timestamp": ts, "sender": "bot", "message": get_text("welcome_chat", lang)}], "degraded": True})
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@app.get("/conversations")
+async def list_conversations(request: Request):
+    """List the current user's conversations for the sidebar, newest first."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"conversations": []})
+    lang = get_lang(request)
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        "SELECT id, title, updated_at FROM conversations WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY updated_at DESC",
+        (uid, lang),
+    )
+    conversations = [
+        {
+            "id": r["id"],
+            "title": r["title"] or get_text("new_conversation", lang),
+            "updated_at": _json_timestamp(r["updated_at"]),
+        }
+        for r in c.fetchall()
+    ]
+    conn.close()
+    return JSONResponse({"conversations": conversations})
+
+
+@app.post("/conversations/new")
+async def create_conversation(request: Request):
+    """Start a new, empty conversation and return its id."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    lang = get_lang(request)
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conn = get_db()
+    c = conn.cursor()
+    db_execute(
+        c,
+        "INSERT INTO conversations (user_id, lang, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id",
+        (uid, lang, ts, ts),
+    )
+    new_id = c.fetchone()["id"]
+    conn.commit()
+    conn.close()
+    return JSONResponse({"conversation_id": new_id})
+
+
+@app.get("/conversations/{conversation_id}/messages")
+async def get_conversation_messages(request: Request, conversation_id: int):
+    """Get the message history for one specific conversation."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"history": []}, status_code=401)
+    lang = get_lang(request)
+    conn = None
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        # Ownership check — a conversation_id belonging to another user (or a
+        # deleted one) is treated as not found rather than leaking its rows.
+        db_execute(c, "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE", (conversation_id, uid))
+        if not c.fetchone():
+            return JSONResponse({"history": [], "error": "not found"}, status_code=404)
+        history = _load_conversation_messages(c, conn, conversation_id, lang)
+        return JSONResponse({"history": history})
+    except Exception as e:
+        _builtins._original_print(f"[CONVERSATIONS] fallback due to DB error: {e}")
+        return JSONResponse({"history": [], "degraded": True})
     finally:
         if conn is not None:
             conn.close()

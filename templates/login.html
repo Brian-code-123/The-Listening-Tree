@@ -13,6 +13,31 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+HK:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .auth-divider {
+            display: flex;
+            align-items: center;
+            text-align: center;
+            color: var(--text-muted, #888);
+            font-size: 0.85rem;
+            margin: 1rem 0;
+        }
+        .auth-divider::before,
+        .auth-divider::after {
+            content: "";
+            flex: 1;
+            border-bottom: 1px solid var(--border, #ddd);
+        }
+        .auth-divider span {
+            padding: 0 0.75rem;
+        }
+        .google-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+    </style>
 
     <!-- Vercel Analytics -->
         <script>
@@ -113,6 +138,14 @@
                 <!-- Submit Button -->
                 <button type="submit" class="btn btn-primary w-100">{{ translations.sign_in if translations else 'Sign In' }}</button>
             </form>
+
+            {% if google_enabled %}
+            <div class="auth-divider"><span>{{ translations.or_divider if translations else 'or' }}</span></div>
+            <a href="/auth/google" class="btn btn-outline-secondary w-100 google-btn">
+                <i class="fa-brands fa-google"></i>
+                {{ translations.sign_in_with_google if translations else 'Sign in with Google' }}
+            </a>
+            {% endif %}
 
             <!-- Help Section -->
             <div class="help-section">

@@ -45,7 +45,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'email': 'Email',
         'password': 'Password',
         'confirm_password': 'Confirm Password',
-        'remember_me': 'Remember me',
         'already_have_account': 'Already have an account?',
         'no_account': "Don't have an account?",
 
@@ -125,9 +124,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'sign_in_desc': 'Please enter your details to continue',
         'forgot_password': 'Forgot password?',
         'remember_me': 'Keep me signed in for 90 days',
+        'or_divider': 'or',
+        'sign_in_with_google': 'Sign in with Google',
         'need_help_title': 'Need Help?',
         'need_help_desc': 'If you have trouble logging in, please contact our support team. We are here to help you.',
         'show_password': 'Show password',
+
+        # Conversations sidebar
+        'conversations': 'Conversations',
+        'new_conversation': 'New conversation',
+
+        # Profile page
+        'profile_nav': 'My Profile',
+        'profile_title': 'My Profile',
+        'profile_desc': 'Update your display name or change your password.',
+        'display_name': 'Display Name',
+        'display_name_placeholder': 'What should we call you?',
+        'save_name': 'Save Name',
+        'name_updated': 'Name updated',
+        'current_password': 'Current Password',
+        'new_password': 'New Password',
+        'confirm_new_password': 'Confirm New Password',
+        'save_password': 'Change Password',
+        'password_updated': 'Password updated',
 
         # Auth - Register
         'join_community': 'Join Our Community!',
@@ -262,7 +281,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'email': '電郵',
         'password': '密碼',
         'confirm_password': '確認密碼',
-        'remember_me': '記住我',
         'already_have_account': '已有帳戶？',
         'no_account': '還沒有帳戶？',
 
@@ -342,9 +360,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'sign_in_desc': '請輸入您的資料以繼續',
         'forgot_password': '忘記密碼？',
         'remember_me': '記住我 90 日',
+        'or_divider': '或',
+        'sign_in_with_google': '用 Google 登入',
         'need_help_title': '需要幫忙？',
         'need_help_desc': '如果登入有問題，請聯絡我們的支援團隊。我們隨時為您服務。',
         'show_password': '顯示密碼',
+
+        # Conversations sidebar
+        'conversations': '對話記錄',
+        'new_conversation': '開新對話',
+
+        # Profile page
+        'profile_nav': '個人檔案',
+        'profile_title': '個人檔案',
+        'profile_desc': '更新您嘅顯示名稱或者更改密碼。',
+        'display_name': '顯示名稱',
+        'display_name_placeholder': '我哋應該點稱呼您？',
+        'save_name': '儲存名稱',
+        'name_updated': '名稱已更新',
+        'current_password': '現時密碼',
+        'new_password': '新密碼',
+        'confirm_new_password': '確認新密碼',
+        'save_password': '更改密碼',
+        'password_updated': '密碼已更新',
 
         # Auth - Register
         'join_community': '加入我們！',
