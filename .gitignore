@@ -52,9 +52,7 @@ www/vendor/
 *.code-workspace
 .project
 .settings/
-.vscode/*
-!.vscode/mcp.json
-!.vscode/settings.json
+.vscode/
 
 # OS metadata
 .DS_Store
