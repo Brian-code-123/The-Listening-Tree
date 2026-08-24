@@ -24,31 +24,96 @@
     <script defer src="/_vercel/insights/script.js"></script>
 
     <style>
+        .page-profile { font-size: 1.05rem; line-height: 1.6; background: var(--gradient-bg); }
+        .page-profile .skip-link {
+            position: absolute; top: -50px; left: 10px; background: var(--primary); color: white;
+            padding: 10px 18px; border-radius: var(--radius-xs); z-index: 10000; transition: top 0.2s;
+        }
+        .page-profile .skip-link:focus { top: 10px; }
+
+        /* Hero header: avatar + name + email, mirrors the login page's
+           welcome-panel gradient so /profile reads as part of the same app
+           instead of a bare form. */
+        .page-profile .profile-hero {
+            max-width: 560px; margin: 20px auto; padding: 32px 28px;
+            border-radius: var(--radius); background: var(--gradient-welcome);
+            color: white; display: flex; align-items: center; gap: 20px;
+            box-shadow: var(--shadow-lg);
+        }
+        .page-profile .profile-avatar {
+            flex-shrink: 0; width: 68px; height: 68px; border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2); border: 2px solid rgba(255, 255, 255, 0.5);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.6rem; font-weight: 700; letter-spacing: 0.02em;
+        }
+        .page-profile .profile-hero-text h1 { margin: 0 0 4px; font-size: 1.5rem; }
+        .page-profile .profile-hero-text p { margin: 0; opacity: 0.9; font-size: 0.95rem; word-break: break-all; }
+
+        /* Nav bar: same glass-card language as the other authenticated pages */
+        .page-profile .nav-bar {
+            background: var(--bg-card); backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            padding: 16px 20px; margin: 0 auto 24px; max-width: 560px; border-radius: var(--radius);
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 12px; border: var(--glass-border); box-shadow: var(--shadow);
+        }
+        .page-profile .lang-switch { display: flex; gap: 8px; }
+        .page-profile .lang-btn {
+            padding: 8px 16px; border-radius: var(--radius-xs); text-decoration: none;
+            background: var(--bg-secondary); color: var(--text-primary);
+            border: 2px solid transparent; transition: all 0.2s; font-weight: 600; font-size: 0.9rem;
+        }
+        .page-profile .lang-btn.active, .page-profile .lang-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+        .page-profile .nav-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+        .page-profile .btn-accessible {
+            display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;
+            border-radius: var(--radius-xs); text-decoration: none; font-weight: 600; font-size: 0.9rem;
+            transition: all 0.2s; border: none;
+        }
+        .page-profile .btn-secondary-accessible { background: var(--bg-secondary); color: var(--text-primary); }
+        .page-profile .btn-danger-accessible { background: var(--danger); color: white; }
+        .page-profile .btn-accessible:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+
+        .page-profile main { max-width: 560px; margin: 0 auto; padding: 0 16px 48px; }
+
         .page-profile .profile-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-            padding: 28px;
-            max-width: 520px;
-            margin: 0 auto 24px;
+            background: var(--bg-card); backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: var(--glass-border); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 28px; margin-bottom: 20px;
         }
-        .page-profile .profile-card h2 {
-            font-size: 1.15rem;
-            color: var(--text-primary);
-            margin-bottom: 4px;
+        .page-profile .profile-card-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+        .page-profile .profile-card-icon {
+            flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px;
+            background: var(--primary-light); color: var(--primary);
+            display: flex; align-items: center; justify-content: center; font-size: 1.1rem;
         }
-        .page-profile .profile-card .card-desc {
-            color: var(--text-muted);
-            font-size: 0.9rem;
-            margin-bottom: 18px;
+        .page-profile .profile-card h2 { font-size: 1.1rem; color: var(--text-primary); margin: 0; }
+        .page-profile .profile-card .card-desc { color: var(--text-muted); font-size: 0.85rem; margin: 2px 0 0; }
+
+        .page-profile .form-label { color: var(--text-secondary); font-weight: 600; font-size: 0.9rem; }
+        .page-profile .form-control {
+            background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary);
+            border-radius: var(--radius-xs); padding: 10px 14px;
         }
-        .page-profile .form-label { color: var(--text-secondary); font-weight: 600; }
+        .page-profile .form-control:focus {
+            background: var(--bg-input); border-color: var(--primary); color: var(--text-primary);
+            box-shadow: 0 0 0 3px var(--primary-light); outline: none;
+        }
+        .page-profile .btn-primary {
+            background: var(--primary); border-color: var(--primary); border-radius: var(--radius-xs);
+            padding: 10px 22px; font-weight: 600; transition: all 0.2s;
+        }
+        .page-profile .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); transform: translateY(-1px); }
         .page-profile .field-error { font-size: 0.85rem; color: var(--danger); margin-top: 4px; min-height: 1em; }
-        .page-profile .form-status { font-size: 0.9rem; margin-top: 12px; min-height: 1.2em; }
+        .page-profile .form-status { font-size: 0.9rem; margin-top: 12px; min-height: 1.2em; font-weight: 500; }
         .page-profile .form-status.success { color: var(--success); }
         .page-profile .form-status.error { color: var(--danger); }
-        .page-profile main { padding: 24px 16px 48px; }
+
+        @media (max-width: 480px) {
+            .page-profile .profile-hero { flex-direction: column; text-align: center; padding: 28px 20px; }
+            .page-profile .nav-bar { flex-direction: column; text-align: center; }
+        }
     </style>
 </head>
 <body class="page-profile" data-theme="light">
@@ -61,28 +126,20 @@
     <a href="#main-content" class="skip-link">{{ translations.skip_to_content if translations else 'Skip to main content' }}</a>
 
     <div class="container-fluid">
-        <!-- Banner -->
-        <div class="accessibility-banner" role="banner">
-            <div class="accessibility-banner-icon" aria-hidden="true">
-                <i class="fas fa-user-circle"></i>
-            </div>
-            <div class="accessibility-banner-content">
+        <!-- Hero -->
+        <div class="profile-hero" role="banner">
+            <div class="profile-avatar" aria-hidden="true">{{ (display_name or email or '?')[0]|upper }}</div>
+            <div class="profile-hero-text">
                 <h1>{{ translations.profile_title if translations else 'My Profile' }}</h1>
-                <p>{{ translations.profile_desc if translations else 'Update your display name or change your password.' }}</p>
+                <p>{{ display_name if display_name else email }}</p>
             </div>
         </div>
 
         <!-- Navigation Bar -->
         <nav class="nav-bar" role="navigation" aria-label="{{ translations.main_navigation if translations else 'Main navigation' }}">
-            <div class="nav-header">
-                <h1 class="nav-title">
-                    <span class="nav-title-icon" aria-hidden="true"><i class="fas fa-tree"></i></span>
-                    <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
-                </h1>
-                <div class="lang-switch" role="group" aria-label="{{ translations.language_selector if translations else 'Language selector' }}">
-                    <a href="/set_language/en" class="lang-btn {{ 'active' if lang == 'en' else '' }}" aria-label="English">EN</a>
-                    <a href="/set_language/zh-HK" class="lang-btn {{ 'active' if lang == 'zh-HK' else '' }}" aria-label="繁體中文">繁中</a>
-                </div>
+            <div class="lang-switch" role="group" aria-label="{{ translations.language_selector if translations else 'Language selector' }}">
+                <a href="/set_language/en" class="lang-btn {{ 'active' if lang == 'en' else '' }}" aria-label="English">EN</a>
+                <a href="/set_language/zh-HK" class="lang-btn {{ 'active' if lang == 'zh-HK' else '' }}" aria-label="繁體中文">繁中</a>
             </div>
             <div class="nav-buttons">
                 <a href="/" class="btn-accessible btn-secondary-accessible" aria-label="{{ translations.normal_mode if translations else 'Back to chat' }}">
@@ -99,8 +156,13 @@
         <main id="main-content" role="main">
             <!-- Display Name -->
             <div class="profile-card">
-                <h2><i class="fas fa-id-badge" aria-hidden="true"></i> {{ translations.display_name if translations else 'Display Name' }}</h2>
-                <p class="card-desc">{{ email }}</p>
+                <div class="profile-card-head">
+                    <div class="profile-card-icon" aria-hidden="true"><i class="fas fa-id-badge"></i></div>
+                    <div>
+                        <h2>{{ translations.display_name if translations else 'Display Name' }}</h2>
+                        <p class="card-desc">{{ email }}</p>
+                    </div>
+                </div>
                 <form id="nameForm">
                     <div class="mb-3">
                         <label for="display_name" class="form-label">{{ translations.display_name if translations else 'Display Name' }}</label>
@@ -118,7 +180,10 @@
 
             <!-- Change Password -->
             <div class="profile-card">
-                <h2><i class="fas fa-lock" aria-hidden="true"></i> {{ translations.save_password if translations else 'Change Password' }}</h2>
+                <div class="profile-card-head">
+                    <div class="profile-card-icon" aria-hidden="true"><i class="fas fa-lock"></i></div>
+                    <h2>{{ translations.save_password if translations else 'Change Password' }}</h2>
+                </div>
                 <form id="passwordForm">
                     <div class="mb-3">
                         <label for="current_password" class="form-label">{{ translations.current_password if translations else 'Current Password' }}</label>
