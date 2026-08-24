@@ -12,7 +12,7 @@ class _FakeCursor:
         self._one = None
         self.rowcount = 0
 
-    def execute(self, query, params=()):
+    async def execute(self, query, params=()):
         normalized = " ".join(query.lower().split())
         self._rows = []
         self._one = None
@@ -40,7 +40,7 @@ class _FakeCursor:
             self.rowcount = 1
             return
 
-        if "select id, email, password from users where lower(email) = lower(%s)" in normalized:
+        if "select id, email, password from users where lower(email) = lower(?)" in normalized:
             email = params[0].lower()
             user = self.state["users_by_email"].get(email)
             self._one = {
@@ -50,7 +50,7 @@ class _FakeCursor:
             } if user else None
             return
 
-        if "update users set password = %s where id = %s" in normalized:
+        if "update users set password = ? where id = ?" in normalized:
             password, user_id = params
             user = self.state["users_by_id"].get(user_id)
             if user:
@@ -58,7 +58,7 @@ class _FakeCursor:
                 self.rowcount = 1
             return
 
-        if "update users set last_login = %s where id = %s" in normalized:
+        if "update users set last_login = ? where id = ?" in normalized:
             ts, user_id = params
             user = self.state["users_by_id"].get(user_id)
             if user:
@@ -89,7 +89,7 @@ class _FakeCursor:
             self.rowcount = 1
             return
 
-        if "delete from reminders where user_id = %s and label = %s" in normalized:
+        if "delete from reminders where user_id = ? and label = ?" in normalized:
             user_id, label = params
             before = len(self.state["reminders"])
             self.state["reminders"] = [
@@ -137,10 +137,10 @@ class _FakeConn:
     def cursor(self):
         return _FakeCursor(self.state)
 
-    def commit(self):
+    async def commit(self):
         return None
 
-    def close(self):
+    async def close(self):
         return None
 
 
@@ -156,7 +156,14 @@ def fake_db_for_tests(monkeypatch):
         "reminders": [],
         "chat_history": [],
     }
-    monkeypatch.setattr(run, "ensure_db_initialized", lambda strict=False: True)
-    monkeypatch.setattr(run, "get_db", lambda: _FakeConn(state))
+
+    async def _fake_ensure_db_initialized(strict=False):
+        return True
+
+    async def _fake_get_db():
+        return _FakeConn(state)
+
+    monkeypatch.setattr(run, "ensure_db_initialized", _fake_ensure_db_initialized)
+    monkeypatch.setattr(run, "get_db", _fake_get_db)
     run.user_game_states.clear()
     run.user_api_histories.clear()

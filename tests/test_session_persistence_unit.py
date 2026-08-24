@@ -21,7 +21,7 @@ class _FakeCursor:
         self.state = state
         self._last = None
 
-    def execute(self, query, params=()):
+    async def execute(self, query, params=()):
         normalized = " ".join(query.lower().split())
 
         if "insert into users" in normalized:
@@ -33,13 +33,13 @@ class _FakeCursor:
             self._last = None
             return
 
-        if "select id, email, password from users where lower(email) = lower(%s)" in normalized:
+        if "select id, email, password from users where lower(email) = lower(?)" in normalized:
             email = params[0]
             user = self.state["users"].get(email.lower())
             self._last = {"id": user["id"], "email": user["email"], "password": user["password"]} if user else None
             return
 
-        if "update users set password = %s where id = %s" in normalized:
+        if "update users set password = ? where id = ?" in normalized:
             hashed, user_id = params
             for row in self.state["users"].values():
                 if row["id"] == user_id:
@@ -48,7 +48,7 @@ class _FakeCursor:
             self._last = None
             return
 
-        if "update users set last_login = %s where id = %s" in normalized:
+        if "update users set last_login = ? where id = ?" in normalized:
             self._last = None
             return
 
@@ -72,18 +72,24 @@ class _FakeConn:
     def cursor(self):
         return _FakeCursor(self.state)
 
-    def commit(self):
+    async def commit(self):
         return None
 
-    def close(self):
+    async def close(self):
         return None
 
 
 def test_existing_user_can_login_without_reregister(monkeypatch):
     state = {"users": {}}
 
-    monkeypatch.setattr(run, "ensure_db_initialized", lambda strict=False: True)
-    monkeypatch.setattr(run, "get_db", lambda: _FakeConn(state))
+    async def _fake_ensure_db_initialized(strict=False):
+        return True
+
+    async def _fake_get_db():
+        return _FakeConn(state)
+
+    monkeypatch.setattr(run, "ensure_db_initialized", _fake_ensure_db_initialized)
+    monkeypatch.setattr(run, "get_db", _fake_get_db)
 
     with TestClient(run.app) as client:
         register_resp = client.post(

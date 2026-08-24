@@ -12,9 +12,11 @@ sequenceDiagram
     API-->>Tester: CRUD confirmations
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta
 
+import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -30,17 +32,20 @@ def _new_user_email() -> str:
 
 
 def _seed_verification_code(email: str, code: str = "123456") -> str:
-    conn = run.get_db()
-    c = conn.cursor()
-    ts = datetime.now()
-    expires_at = (ts + timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')
-    run.db_execute(
-        c,
-        "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES (?, ?, ?, ?)",
-        (email, code, expires_at, ts.strftime('%Y-%m-%d %H:%M:%S')),
-    )
-    conn.commit()
-    conn.close()
+    # A standalone connection, not `run.get_db()` — the app's `_DB_POOL` is
+    # bound to TestClient's own event loop, and `asyncio.run()` here spins up
+    # a separate one, so reusing the pool across them would break asyncpg's
+    # per-loop binding.
+    async def _seed():
+        conn = await asyncpg.connect(dsn=run._ASYNCPG_DSN, statement_cache_size=0)
+        ts = datetime.now()
+        await conn.execute(
+            "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES ($1, $2, $3, $4)",
+            email, code, ts + timedelta(minutes=10), ts,
+        )
+        await conn.close()
+
+    asyncio.run(_seed())
     return code
 
 
