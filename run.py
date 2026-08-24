@@ -189,6 +189,13 @@ async def lifespan(app: FastAPI):
         max_size=10,
         statement_cache_size=0,  # required behind Supabase's transaction-pooling PgBouncer
         command_timeout=15,       # bounds a stuck query instead of freezing the whole server
+        # The background task only touches the DB once every 60s — well past
+        # Supabase's pooler-side idle timeout, which was closing the
+        # connection server-side while asyncpg's pool still thought it was
+        # good, surfacing as "connection was closed in the middle of
+        # operation" on the next use. Recycle idle connections client-side
+        # before that can happen.
+        max_inactive_connection_lifetime=30,
     )
 
     # Initialize database schema on app startup (not at import time).
