@@ -8,6 +8,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#5B9A7D">
     <title>{{ translations.app_name if translations else 'The Listening Tree' }}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>%F0%9F%8C%B3</text></svg>">
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -55,11 +56,6 @@
         <i class="fas fa-wifi-slash"></i> {{ translations.offline_mode if translations else 'Offline - Connection Limited' }}
     </div>
 
-    <!-- Theme Toggle -->
-    <button class="theme-toggle" id="themeToggle" title="{{ translations.theme_toggle if translations else 'Toggle Theme' }}">
-        <i class="fas fa-sun" id="themeIcon"></i>
-    </button>
-
     <!-- ============================================================
          MAIN 3-COLUMN LAYOUT: Chat (left) + Sidebar (right)
          ============================================================ -->
@@ -73,7 +69,7 @@
                     <div class="d-flex align-items-center">
                         <img src="/static/Chatbot.png" class="user_img" alt="Bot">
                         <div class="user_info ms-3">
-                            <span>{{ translations.app_name if translations else 'The Listening Tree' }}</span>
+                            <span>🌳 {{ translations.app_name if translations else 'The Listening Tree' }}</span>
                             <p>{{ translations.tagline if translations else 'Your friendly companion' }}</p>
                         </div>
                         <div class="ms-auto d-flex gap-2 align-items-center">
@@ -84,6 +80,12 @@
                             <button class="btn btn-sm btn-outline-light" id="guideFab" type="button" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">
                                 <i class="fas fa-question-circle"></i>
                             </button>
+                            <button class="btn btn-sm btn-outline-light theme-toggle" id="themeToggle" type="button" title="{{ translations.theme_toggle if translations else 'Toggle Theme' }}">
+                                <i class="fas fa-sun" id="themeIcon"></i>
+                            </button>
+                            <a href="/history" class="btn btn-sm btn-outline-light" title="{{ translations.conversation_history_title if translations else 'Conversation History' }}">
+                                <i class="fas fa-clock-rotate-left"></i>
+                            </a>
                             <a href="/profile" class="btn btn-sm btn-outline-light" title="{{ translations.profile_nav if translations else 'My Profile' }}">
                                 <i class="fas fa-user-circle"></i>
                             </a>
@@ -137,7 +139,8 @@
         <!-- ===== RIGHT: Sidebar Column (Conversations + Calendar + Reminders + News) ===== -->
         <div class="sidebar-column" id="sidebarColumn">
 
-            <!-- 0) Conversations Card -->
+            <!-- 0) Conversations Card — full browsing/pin/tag lives on /history now;
+                 this card is just a shortcut to start or find one. -->
             <div class="sidebar-card conversations-card">
                 <div class="sidebar-card-header">
                     <i class="fas fa-comment-dots"></i>
@@ -146,7 +149,12 @@
                         <i class="fas fa-plus"></i>
                     </button>
                 </div>
-                <div class="sidebar-card-body" id="conversationList" style="max-height:220px;overflow-y:auto;"></div>
+                <div class="sidebar-card-body" style="padding: 10px 12px;">
+                    <a href="/history" class="btn btn-sm btn-outline-secondary w-100">
+                        <i class="fas fa-clock-rotate-left"></i>
+                        {{ translations.view_all_conversations if translations else 'View all conversations' }}
+                    </a>
+                </div>
             </div>
 
             <!-- 1) Calendar Card -->
@@ -376,28 +384,8 @@
             });
         }
 
-        function renderConversationList(conversations) {
-            const $list = $('#conversationList');
-            $list.empty();
-            if (!conversations || conversations.length === 0) {
-                const noneMsg = currentLang === 'zh-HK' ? '未有對話記錄' : 'No conversations yet';
-                $list.append(`<p style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:8px 0;">${noneMsg}</p>`);
-                return;
-            }
-            conversations.forEach(conv => {
-                const isActive = conv.id === currentConversationId;
-                const $item = $(`<div class="conversation-item${isActive ? ' active' : ''}" data-id="${conv.id}" style="padding:8px 10px;border-radius:8px;cursor:pointer;font-size:0.88rem;${isActive ? 'background:var(--primary-light);font-weight:600;' : ''}">${$('<div>').text(conv.title).html()}</div>`);
-                $item.on('click', function() {
-                    loadConversationMessages(conv.id);
-                    renderConversationList(conversations);
-                });
-                $list.append($item);
-            });
-        }
-
         function loadConversationList(onDone) {
             $.get('/conversations', function(data) {
-                renderConversationList(data.conversations);
                 if (onDone) onDone(data.conversations);
             });
         }
@@ -405,20 +393,25 @@
         $('#newConversationBtn').on('click', function() {
             $.post('/conversations/new', function(data) {
                 loadConversationMessages(data.conversation_id);
-                loadConversationList();
             });
         });
 
-        // Load chat history: start on the most recent conversation, or
-        // create the user's first one if they have none yet.
+        // Load chat history: honor a `?conversation_id=` deep link (used by
+        // the /history page's "open this conversation" cards), otherwise
+        // start on the most recent conversation, or create the user's first
+        // one if they have none yet.
         function loadChatHistory() {
+            const requestedId = new URLSearchParams(location.search).get('conversation_id');
+            if (requestedId) {
+                loadConversationMessages(parseInt(requestedId, 10));
+                return;
+            }
             loadConversationList(function(conversations) {
                 if (conversations && conversations.length > 0) {
                     loadConversationMessages(conversations[0].id);
                 } else {
                     $.post('/conversations/new', function(data) {
                         loadConversationMessages(data.conversation_id);
-                        loadConversationList();
                     });
                 }
             });
@@ -469,7 +462,6 @@
                     appendMessage('bot', data.response, time);
                     speakText(data.response);
                     if (text.toLowerCase().includes('reminder') || text.includes('提醒')) checkReminders();
-                    loadConversationList();
                 },
                 error: function(xhr) {
                     console.error('Error:', xhr);

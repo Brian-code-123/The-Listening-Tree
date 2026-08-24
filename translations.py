@@ -133,6 +133,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Conversations sidebar
         'conversations': 'Conversations',
         'new_conversation': 'New conversation',
+        'view_all_conversations': 'View all conversations',
+        'conversation_history_title': 'Conversation History',
+        'conversation_history_back': 'Back to Chat',
+        'pin_conversation': 'Pin',
+        'unpin_conversation': 'Unpin',
+        'filter_all': 'All',
+        'filter_pinned': 'Pinned',
+        'no_tag': 'No tag',
+        'tag_family': 'Family',
+        'tag_friends': 'Friends',
+        'tag_health': 'Health',
+        'tag_daily': 'Daily life',
+        'tag_important': 'Important',
+        'no_conversations': 'No conversations yet.',
+        'rename_conversation': 'Rename',
 
         # Profile page
         'profile_nav': 'My Profile',
@@ -369,6 +384,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         # Conversations sidebar
         'conversations': '對話記錄',
         'new_conversation': '開新對話',
+        'view_all_conversations': '查看全部對話記錄',
+        'conversation_history_title': '對話記錄',
+        'conversation_history_back': '返回聊天',
+        'pin_conversation': '置頂',
+        'unpin_conversation': '取消置頂',
+        'filter_all': '全部',
+        'filter_pinned': '已置頂',
+        'no_tag': '未分類',
+        'tag_family': '家人',
+        'tag_friends': '朋友',
+        'tag_health': '健康',
+        'tag_daily': '日常',
+        'tag_important': '重要',
+        'no_conversations': '未有對話記錄。',
+        'rename_conversation': '重新命名',
 
         # Profile page
         'profile_nav': '個人檔案',

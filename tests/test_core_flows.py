@@ -24,16 +24,19 @@ def _new_user_email() -> str:
 
 def test_health_endpoints():
     with TestClient(app) as client:
+        # /health is intentionally minimal for an unauthenticated caller —
+        # no infra details (hostname, backend config, raw exception text).
         resp = client.get("/health")
         assert resp.status_code == 200
         payload = resp.json()
         assert payload["ok"] is True
-        assert "backend" in payload
+        assert "db_hostname" not in payload
 
         db_resp = client.get("/health/db")
         assert db_resp.status_code == 200
         db_payload = db_resp.json()
         assert db_payload["ok"] is True
+        assert "db_hostname" not in db_payload
 
 
 def test_register_login_chat_and_reminders_flow():
@@ -47,6 +50,7 @@ def test_register_login_chat_and_reminders_flow():
                 "email": email,
                 "password": password,
                 "confirm_password": password,
+                "verification_code": "123456",
             },
             follow_redirects=False,
         )
@@ -100,6 +104,7 @@ def test_quiz_flow():
                 "email": email,
                 "password": password,
                 "confirm_password": password,
+                "verification_code": "123456",
             },
             follow_redirects=False,
         )
@@ -136,6 +141,7 @@ def test_existing_user_can_login_without_reregister():
                 "email": email,
                 "password": password,
                 "confirm_password": password,
+                "verification_code": "123456",
             },
             follow_redirects=False,
         )
@@ -148,6 +154,7 @@ def test_existing_user_can_login_without_reregister():
                 "email": email.upper(),
                 "password": password,
                 "confirm_password": password,
+                "verification_code": "123456",
             },
             follow_redirects=True,
         )

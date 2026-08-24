@@ -352,6 +352,29 @@ body {
     padding: 4px 8px;
 }
 
+/* Theme toggle: on the chat page it sits inline in the header button row
+   (was position:fixed top-right, which floated on top of the sidebar's
+   rounded corner) — same fix pattern as #guideFab above. */
+.page-chat .msg_head #themeToggle {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    margin: 0 !important;
+    border-radius: 8px;
+    min-width: 34px;
+    height: 31px;
+    padding: 4px 8px;
+    background: transparent;
+    backdrop-filter: none;
+    box-shadow: none;
+    font-size: 1rem;
+}
+.page-chat .msg_head #themeToggle:hover {
+    transform: none;
+}
+
 /* Feature Buttons Row */
 .page-chat .chat-feature-bar {
     display: flex; align-items: center; gap: 6px;

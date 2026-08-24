@@ -66,12 +66,13 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Server: Uvicorn ASGI server
 - LLM integration: Zhipu AI GLM-4 Flash for bilingual conversations
 - Security: PBKDF2-HMAC-SHA256 (per-user salt) for password hashing, python-multipart for form handling
+- Auth: email/password with account lockout after repeated failed attempts, plus optional Google Sign-In (OAuth 2.0 via Authlib) — auto-links to an existing password account by email if one already exists
 - API: RESTful endpoints for auth, chat, reminders, and utilities
 
 ### Database
 
 - Database: PostgreSQL for secure relational persistence
-- Core tables: `users`, `chat_history`, `reminders`, `preferences`, `email_verifications`
+- Core tables: `users`, `chat_history`, `reminders`, `preferences`, `email_verifications`, `conversations`
 - Hosting: Supabase (managed PostgreSQL with connection pooler)
 
 ### DevOps & Testing
@@ -92,7 +93,7 @@ The project follows a modular three-layer architecture designed for stability an
 
 ### 1. User Onboarding
 
-- Registration with email verification code (sent via Azure Communication Services) and login with email authentication.
+- Registration with email verification code (sent via Azure Communication Services) and login with email authentication, or sign in directly with Google.
 - Bilingual setup in English or Cantonese plus theme selection for standard or high-contrast mode.
 - AI voice greeting for a friendly first experience.
 

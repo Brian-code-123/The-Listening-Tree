@@ -24,13 +24,34 @@ class _FakeCursor:
     async def execute(self, query, params=()):
         normalized = " ".join(query.lower().split())
 
+        # Registration requires a verification_code — accept any code for
+        # any email, matching the equivalent fake in tests/conftest.py.
+        if "select id from email_verifications where lower(email) = lower(?) and code = ?" in normalized:
+            self._last = {"id": 1}
+            return
+        if "update email_verifications set used = true where id = ?" in normalized:
+            self._last = None
+            return
+
         if "insert into users" in normalized:
             email, password, _ts = params
             if email in self.state["users"]:
                 raise run.PgIntegrityError("duplicate")
             new_id = len(self.state["users"]) + 1
-            self.state["users"][email] = {"id": new_id, "email": email, "password": password}
+            self.state["users"][email] = {
+                "id": new_id,
+                "email": email,
+                "password": password,
+                "failed_login_attempts": 0,
+                "locked_until": None,
+            }
             self._last = None
+            return
+
+        if "select id, email, password, failed_login_attempts, locked_until from users where lower(email) = lower(?)" in normalized:
+            email = params[0]
+            user = self.state["users"].get(email.lower())
+            self._last = dict(user) if user else None
             return
 
         if "select id, email, password from users where lower(email) = lower(?)" in normalized:
@@ -48,7 +69,11 @@ class _FakeCursor:
             self._last = None
             return
 
-        if "update users set last_login = ? where id = ?" in normalized:
+        if "update users set last_login" in normalized:
+            self._last = None
+            return
+
+        if "update users set failed_login_attempts" in normalized:
             self._last = None
             return
 
@@ -98,6 +123,7 @@ def test_existing_user_can_login_without_reregister(monkeypatch):
                 "email": "User@Test.com",
                 "password": "TestPass123!",
                 "confirm_password": "TestPass123!",
+                "verification_code": "123456",
             },
             follow_redirects=False,
         )

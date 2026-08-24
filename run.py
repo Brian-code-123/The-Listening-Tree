@@ -294,7 +294,25 @@ app.add_middleware(
 # writes the Set-Cookie header first, then this one gets to rewrite it.
 app.add_middleware(RememberMeCookieMiddleware)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+
+
+class CachedStaticFiles(StaticFiles):
+    """Adds a Cache-Control header — static assets are otherwise served
+    through this one Python function (Vercel's catch-all route sends
+    everything here, not the edge network) with no caching hint at all.
+    A modest max-age rather than a long/immutable one: nothing in this repo
+    cache-busts asset URLs (no `?v=hash`), so style.css/speech.js could go
+    stale for returning users after a deploy if cached too aggressively.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
+
+
+app.mount("/static", CachedStaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # ---------------------------------------------------------------------------
@@ -742,6 +760,19 @@ CHAT_HISTORY_MAX_MESSAGES_PER_LANG = int(os.environ.get("CHAT_HISTORY_MAX_MESSAG
 # soft-deleted wholesale rather than having their messages pruned piecemeal.
 CONVERSATION_MAX_PER_LANG = int(os.environ.get("CONVERSATION_MAX_PER_LANG", "50"))
 
+# Fixed, small set of everyday-life labels a conversation can be tagged
+# with — deliberately not free-text (elderly-friendly: pick from a short
+# list, don't type a category name). Icon/color drive the chip UI on the
+# conversation history page; the label text itself lives in translations.py
+# as `tag_<key>` (EN + zh-HK).
+CONVERSATION_TAGS = {
+    "family": {"icon": "fa-people-roof", "color": "#5B8DEF"},
+    "friends": {"icon": "fa-user-friends", "color": "#F2CC8F"},
+    "health": {"icon": "fa-heart-pulse", "color": "#5B9A7D"},
+    "daily": {"icon": "fa-sun", "color": "#98A2B3"},
+    "important": {"icon": "fa-star", "color": "#E07A5F"},
+}
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # AI configuration — Zhipu AI (智谱AI)
@@ -771,6 +802,9 @@ else:
 # Hugging Face Inference API — Whisper large-v3 for server-side STT.
 HF_API_KEY = os.environ.get("HF_API_KEY")
 HF_WHISPER_MODEL = os.environ.get("HF_WHISPER_MODEL", "openai/whisper-large-v3")
+# Generous for a short voice-input clip; caps /transcribe's exposure to a
+# memory-exhaustion DoS from a large repeated upload.
+MAX_TRANSCRIBE_UPLOAD_BYTES = int(os.environ.get("MAX_TRANSCRIBE_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 HF_WHISPER_URL = f"https://router.huggingface.co/hf-inference/models/{HF_WHISPER_MODEL}"
 
 if HF_API_KEY:
@@ -1028,6 +1062,8 @@ async def init_db() -> None:
         )
     """)
     await c.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS conversation_id BIGINT")
+    await c.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT FALSE")
+    await c.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tag TEXT")
 
     # One-time backfill: chat_history rows that predate the conversation_id
     # column get grouped into a single "legacy" conversation per (user_id,
@@ -1089,6 +1125,19 @@ async def init_db() -> None:
     await c.execute("CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)")
     await c.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, lang, is_deleted)")
     await c.execute("CREATE INDEX IF NOT EXISTS idx_chat_conversation ON chat_history(conversation_id)")
+    # Cover the columns cleanup_old_conversations/cleanup_old_chat_history
+    # actually filter and order by — the plainer indexes above don't include
+    # updated_at/timestamp, so those queries were scanning the full table.
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_conversations_cleanup ON conversations(user_id, lang, is_deleted, updated_at DESC)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_chat_conversation_cleanup ON chat_history(conversation_id, is_deleted, timestamp DESC)")
+
+    # RLS: the app connects as the `postgres` role via asyncpg, which
+    # bypasses RLS regardless, so this has no effect on app behavior — it
+    # only matters for Supabase's PostgREST API (exposed by default on every
+    # table in `public`). `conversations` was added after the other tables
+    # already had this enabled and got missed; no policies needed since
+    # PostgREST access isn't used by this app (fail-closed is correct here).
+    await c.execute("ALTER TABLE conversations ENABLE ROW LEVEL SECURITY")
 
     await conn.commit()
     await conn.close()
@@ -2183,6 +2232,15 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang
     API). Falls back to Google Web Speech (via SpeechRecognition) if no HF key
     is configured or the HF call fails.
     """
+    if get_user(request) is None:
+        return JSONResponse({"text": "", "error": "Not authenticated"}, status_code=401)
+
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_TRANSCRIBE_UPLOAD_BYTES:
+        return JSONResponse({"text": "", "error": "Audio file too large."}, status_code=413)
+    if audio.content_type and not audio.content_type.startswith("audio/"):
+        return JSONResponse({"text": "", "error": "Expected an audio file."}, status_code=415)
+
     language = (lang or get_lang(request) or "en").strip()
     lang_map = {
         "en": "en-US",
@@ -2196,6 +2254,8 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang
     content = await audio.read()
     if not content:
         return JSONResponse({"text": "", "error": "Empty audio payload."}, status_code=400)
+    if len(content) > MAX_TRANSCRIBE_UPLOAD_BYTES:
+        return JSONResponse({"text": "", "error": "Audio file too large."}, status_code=413)
 
     if HF_API_KEY:
         try:
@@ -2371,7 +2431,9 @@ async def list_conversations(request: Request):
     c = conn.cursor()
     await db_execute(
         c,
-        "SELECT id, title, updated_at FROM conversations WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY updated_at DESC",
+        "SELECT id, title, updated_at, pinned, tag FROM conversations "
+        "WHERE user_id = ? AND lang = ? AND is_deleted = FALSE "
+        "ORDER BY pinned DESC, updated_at DESC",
         (uid, lang),
     )
     conversations = [
@@ -2379,11 +2441,104 @@ async def list_conversations(request: Request):
             "id": r["id"],
             "title": r["title"] or get_text("new_conversation", lang),
             "updated_at": _json_timestamp(r["updated_at"]),
+            "pinned": bool(r["pinned"]),
+            "tag": r["tag"],
         }
         for r in c.fetchall()
     ]
     await conn.close()
     return JSONResponse({"conversations": conversations})
+
+
+@app.post("/conversations/{conversation_id}/pin")
+async def toggle_conversation_pin(request: Request, conversation_id: int):
+    """Flip a conversation's pinned state; pinned ones sort first."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    conn = await get_db()
+    try:
+        c = conn.cursor()
+        await db_execute(
+            c,
+            "SELECT pinned FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE",
+            (conversation_id, uid),
+        )
+        row = c.fetchone()
+        if not row:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        new_pinned = not row["pinned"]
+        await db_execute(c, "UPDATE conversations SET pinned = ? WHERE id = ?", (new_pinned, conversation_id))
+        await conn.commit()
+        return JSONResponse({"pinned": new_pinned})
+    finally:
+        await conn.close()
+
+
+@app.post("/conversations/{conversation_id}/tag")
+async def set_conversation_tag(request: Request, conversation_id: int, tag: str = Form("")):
+    """Set (or clear, with an empty value) a conversation's category tag."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    tag = tag.strip()
+    if tag and tag not in CONVERSATION_TAGS:
+        return JSONResponse({"error": "invalid tag"}, status_code=400)
+    conn = await get_db()
+    try:
+        c = conn.cursor()
+        await db_execute(
+            c,
+            "UPDATE conversations SET tag = ? WHERE id = ? AND user_id = ? AND is_deleted = FALSE",
+            (tag or None, conversation_id, uid),
+        )
+        found = _safe_rowcount(c) > 0
+        await conn.commit()
+        if not found:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({"tag": tag or None})
+    finally:
+        await conn.close()
+
+
+@app.post("/conversations/{conversation_id}/title")
+async def rename_conversation(request: Request, conversation_id: int, title: str = Form(...)):
+    """Rename a conversation. An empty result after cleanup falls back to
+    the auto-generated title (first-message text) instead of storing blank."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    lang = get_lang(request)
+    cleaned = _CONTROL_CHAR_PATTERN.sub(" ", title)
+    cleaned = " ".join(cleaned.split())[:100]
+    conn = await get_db()
+    try:
+        c = conn.cursor()
+        await db_execute(
+            c,
+            "UPDATE conversations SET title = ? WHERE id = ? AND user_id = ? AND is_deleted = FALSE",
+            (cleaned or None, conversation_id, uid),
+        )
+        found = _safe_rowcount(c) > 0
+        await conn.commit()
+        if not found:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({"title": cleaned or get_text("new_conversation", lang)})
+    finally:
+        await conn.close()
+
+
+@app.get("/history", response_class=HTMLResponse)
+async def conversation_history_page(request: Request):
+    """Dedicated page for browsing, pinning, and tagging all conversations —
+    the sidebar only keeps a "new conversation" shortcut once this exists."""
+    uid = get_user(request)
+    if uid is None:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse(
+        "conversation_history.html",
+        tpl_context(request, conversation_tags=CONVERSATION_TAGS),
+    )
 
 
 @app.post("/conversations/new")
@@ -2402,6 +2557,19 @@ async def create_conversation(request: Request):
         (uid, lang, ts, ts),
     )
     new_id = c.fetchone()["id"]
+    # cleanup_old_conversations() (the batch job that normally enforces this
+    # cap) only runs from run_periodic_tasks(), which is explicitly skipped
+    # on Vercel — so on this deployment target nothing else ever trims a
+    # user's conversation count. Enforce the same cap inline, per-write,
+    # instead of relying on a background loop that doesn't run here.
+    await db_execute(
+        c,
+        "WITH ranked AS ("
+        "  SELECT id, ROW_NUMBER() OVER (ORDER BY updated_at DESC, id DESC) AS rn"
+        "  FROM conversations WHERE user_id = ? AND lang = ? AND is_deleted = FALSE"
+        ") UPDATE conversations SET is_deleted = TRUE WHERE id IN (SELECT id FROM ranked WHERE rn > ?)",
+        (uid, lang, CONVERSATION_MAX_PER_LANG),
+    )
     await conn.commit()
     await conn.close()
     return JSONResponse({"conversation_id": new_id})
@@ -2434,11 +2602,15 @@ async def get_conversation_messages(request: Request, conversation_id: int):
 
 
 @app.get("/health/db")
-async def health_db():
+async def health_db(request: Request):
     """Database connectivity health check: verify PostgreSQL is accessible.
-    
-    Useful for monitoring Vercel deployments. Returns {"ok": true} if DB is reachable.
+
+    Returns a bare {"ok": bool} to unauthenticated callers — infra details
+    (hostname, raw exception text) are only included for a logged-in caller,
+    since this is a public repo/deployment and that's reconnaissance-useful
+    info to hand an anonymous caller for free.
     """
+    uid = get_user(request)
     initialized = await ensure_db_initialized(strict=False)
     conn = None
     try:
@@ -2446,22 +2618,24 @@ async def health_db():
         c = conn.cursor()
         await c.execute("SELECT 1")
         _ = c.fetchone()
-        return JSONResponse({
-            "ok": True,
-            "backend": _RUNTIME_DB_BACKEND,
-            "configured_backend": DB_BACKEND,
-            "db_initialized": initialized,
-            "db_init_error": _db_init_error,
-            "db_url_source": _DB_URL_SOURCE,
-            "db_runtime_label": _DB_RUNTIME_LABEL,
-            "db_hostname": _DB_HOSTNAME,
-            "db_hostaddr": _DB_HOSTADDR,
-            "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
-        })
+        body = {"ok": True}
+        if uid is not None:
+            body.update({
+                "backend": _RUNTIME_DB_BACKEND,
+                "configured_backend": DB_BACKEND,
+                "db_initialized": initialized,
+                "db_init_error": _db_init_error,
+                "db_url_source": _DB_URL_SOURCE,
+                "db_runtime_label": _DB_RUNTIME_LABEL,
+                "db_hostname": _DB_HOSTNAME,
+                "db_hostaddr": _DB_HOSTADDR,
+                "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
+            })
+        return JSONResponse(body)
     except Exception as e:
-        return JSONResponse(
-            {
-                "ok": False,
+        body = {"ok": False}
+        if uid is not None:
+            body.update({
                 "backend": _RUNTIME_DB_BACKEND,
                 "configured_backend": DB_BACKEND,
                 "db_initialized": initialized,
@@ -2472,9 +2646,8 @@ async def health_db():
                 "db_hostaddr": _DB_HOSTADDR,
                 "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
                 "error": str(e),
-            },
-            status_code=500,
-        )
+            })
+        return JSONResponse(body, status_code=500)
     finally:
         if conn is not None:
             await conn.close()
@@ -2482,22 +2655,10 @@ async def health_db():
 
 @app.get("/health")
 async def health():
-    """Basic process-level health probe for uptime checks."""
-    return JSONResponse(
-        {
-            "ok": True,
-            "service": "the-listening-tree",
-            "backend": _RUNTIME_DB_BACKEND,
-            "configured_backend": DB_BACKEND,
-            "db_initialized": _db_initialized,
-            "db_init_error": _db_init_error,
-            "db_url_source": _DB_URL_SOURCE,
-            "db_runtime_label": _DB_RUNTIME_LABEL,
-            "db_hostname": _DB_HOSTNAME,
-            "db_hostaddr": _DB_HOSTADDR,
-            "db_last_pg_attempts": _DB_LAST_PG_ATTEMPTS,
-        }
-    )
+    """Basic process-level health probe for uptime checks — deliberately
+    minimal (no infra details) since this endpoint is public/unauthenticated
+    by design. Use /health/db while logged in for the verbose diagnostic."""
+    return JSONResponse({"ok": True, "service": "the-listening-tree"})
 
 # ---------------------------------------------------------------------------
 # HK Public Holidays 2025-2027
