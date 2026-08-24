@@ -49,13 +49,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 import httpx
 try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    from psycopg2 import IntegrityError as PgIntegrityError
-    from psycopg2 import InterfaceError as PgInterfaceError
+    import asyncpg
+    PgIntegrityError = asyncpg.exceptions.IntegrityConstraintViolationError
+    PgInterfaceError = asyncpg.exceptions.InterfaceError
 except ImportError:
-    psycopg2 = None
-    RealDictCursor = None
+    asyncpg = None
     class PgIntegrityError(Exception):
         pass
     class PgInterfaceError(Exception):
@@ -138,33 +136,40 @@ async def run_periodic_tasks():
             current_time = now.strftime("%H:%M")
 
             # 1. Check Reminders
-            conn = get_db()
-            c = conn.cursor()
-            query = (
-                "SELECT u.email, r.label, r.reminder_time FROM reminders r "
-                "JOIN users u ON r.user_id = u.id "
-                "WHERE r.is_active = TRUE AND DATE(r.created_at) = ?"
-            )
-            db_execute(c, query, (today,))
-            for row in c.fetchall():
-                email = row["email"]
-                label = row["label"]
-                rtime = row["reminder_time"]
-                if rtime == current_time:
-                    # In a real app, this would trigger a push notification or WebSocket msg
-                    _builtins._original_print(f"[REMINDER] ⏰  {email}: {label} at {rtime}")
-            conn.close()
+            # try/finally (not just a trailing close()) matters here specifically:
+            # this loop runs forever and gets `task.cancel()`-ed on every server
+            # shutdown — if CancelledError lands between acquire and close, the
+            # connection never returns to `_DB_POOL`, and the pool's own close()
+            # then hangs waiting for it (reproduced while testing this migration).
+            conn = await get_db()
+            try:
+                c = conn.cursor()
+                query = (
+                    "SELECT u.email, r.label, r.reminder_time FROM reminders r "
+                    "JOIN users u ON r.user_id = u.id "
+                    "WHERE r.is_active = TRUE AND DATE(r.created_at) = ?"
+                )
+                await db_execute(c, query, (today,))
+                for row in c.fetchall():
+                    email = row["email"]
+                    label = row["label"]
+                    rtime = row["reminder_time"]
+                    if rtime == current_time:
+                        # In a real app, this would trigger a push notification or WebSocket msg
+                        _builtins._original_print(f"[REMINDER] ⏰  {email}: {label} at {rtime}")
+            finally:
+                await conn.close()
 
             # 2. Daily Housekeeping (Auto-expire old reminders at 00:00)
             if now.hour == 0 and now.minute == 0:
-                auto_expire_old_reminders()
+                await auto_expire_old_reminders()
 
             # 3. Clean Chat History (Every 10 minutes)
             # Conversation-level cap runs first so a conversation that's
             # about to be dropped wholesale doesn't also get message-pruned.
             if now.minute % 10 == 0:
-                cleanup_old_conversations()
-                cleanup_old_chat_history()
+                await cleanup_old_conversations()
+                await cleanup_old_chat_history()
 
         except asyncio.CancelledError:
             # Allow graceful shutdown to stop this task immediately.
@@ -177,10 +182,19 @@ async def run_periodic_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _DB_POOL
+    _DB_POOL = await asyncpg.create_pool(
+        dsn=_ASYNCPG_DSN,  # sslmode is read from the DSN itself — see _ASYNCPG_DSN's comment
+        min_size=1,
+        max_size=10,
+        statement_cache_size=0,  # required behind Supabase's transaction-pooling PgBouncer
+        command_timeout=15,       # bounds a stuck query instead of freezing the whole server
+    )
+
     # Initialize database schema on app startup (not at import time).
     # This prevents import-time failures in serverless handlers.
     try:
-        ensure_db_initialized(strict=not IN_PRODUCTION)
+        await ensure_db_initialized(strict=not IN_PRODUCTION)
     except Exception as e:
         _builtins._original_print(f"[DB] ❌ Startup initialization failed: {e}")
         raise
@@ -188,19 +202,18 @@ async def lifespan(app: FastAPI):
     # Vercel serverless functions should not run perpetual background loops.
     if os.environ.get("VERCEL"):
         yield
-        return
+    else:
+        # Startup: Start background task
+        # Start the periodic background task. `asyncio.create_all_tasks()` does
+        # not exist — use `create_task` to schedule the coroutine.
+        task = asyncio.create_task(run_periodic_tasks())
+        yield
+        # Shutdown: Clean up task
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
-    # Startup: Start background task
-    # Start the periodic background task. `asyncio.create_all_tasks()` does
-    # not exist — use `create_task` to schedule the coroutine.
-    task = asyncio.create_task(run_periodic_tasks())
-    yield
-    # Shutdown: Clean up task
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
-    # Release pooled database connections held for reuse.
-    close_db_pool()
+    await _DB_POOL.close()
 
 # ---------------------------------------------------------------------------
 # Application initialisation
@@ -300,7 +313,7 @@ if GOOGLE_LOGIN_ENABLED:
 
 
 # ─────────────────────────────────────────────────────────────
-# Database: PostgreSQL (Supabase)
+# Database: PostgreSQL (Supabase), via asyncpg
 # ─────────────────────────────────────────────────────────────
 _POOLER_DATABASE_URL = (
     os.environ.get("SUPABASE_POOLER_URL")
@@ -316,9 +329,7 @@ if not _DATABASE_URL:
 DB_BACKEND = "postgres"
 _DB_URL_SOURCE = "pooler_url" if _POOLER_DATABASE_URL else "database_url"
 _RUNTIME_DB_BACKEND = DB_BACKEND
-_DB_NEXT_PG_RETRY_TS = 0.0
-_DB_LAST_PG_ERROR: Optional[str] = None
-_DB_LAST_PG_ATTEMPTS: List[str] = []
+_DB_LAST_PG_ATTEMPTS: List[str] = []  # kept for /health/db's JSON shape; asyncpg's pool retries internally
 
 
 def _normalize_db_url(raw_url: str) -> str:
@@ -330,164 +341,179 @@ def _normalize_db_url(raw_url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query_string, parts.fragment))
 
 
-def _resolve_ipv4_hostaddr(hostname: str) -> Optional[str]:
-    """Resolve a hostname to one IPv4 address for environments without IPv6 routing."""
-    try:
-        infos = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
-    except Exception:
-        return None
+# asyncpg parses `sslmode` straight out of the DSN itself (same as libpq) —
+# do NOT also pass an explicit `ssl=` kwarg to connect()/create_pool(): an
+# explicit kwarg overrides the DSN and forces asyncpg's negotiated-TLS path,
+# which hangs indefinitely against Supabase's pooler (Supavisor) — a known
+# asyncpg/Supavisor incompatibility, unrelated to any code here. Confirmed by
+# testing ssl=True, ssl="require", and a manual ssl.SSLContext — all hang;
+# ssl=None (DSN-driven) connects in <0.3s. Respecting whatever `sslmode` the
+# DSN already carries (disable locally via .env.local, require in production
+# via .env) is both the fix and the correct behavior — it's exactly what
+# psycopg2 already did here.
+_ASYNCPG_DSN = _normalize_db_url(_DATABASE_URL)
+_DB_HOSTNAME = urlsplit(_ASYNCPG_DSN).hostname
+_DB_HOSTADDR = None  # asyncpg resolves the host itself; no manual IP pinning needed
+_DB_RUNTIME_LABEL = "asyncpg-pool"
+_DB_POOL: Optional["asyncpg.Pool"] = None
 
-    for _family, _socktype, _proto, _canonname, sockaddr in infos:
-        if sockaddr and sockaddr[0]:
-            return sockaddr[0]
-    return None
-
-
-def _connection_options_from_url(db_url: str, force_hostaddr: bool = True) -> dict:
-    """Build psycopg2 options from a URL with stable defaults."""
-    normalized_url = _normalize_db_url(db_url)
-    parts = urlsplit(normalized_url)
-    options = {
-        "dsn": normalized_url,
-        "cursor_factory": RealDictCursor,
-        "connect_timeout": int(os.environ.get("PG_CONNECT_TIMEOUT", "1")),
-        "application_name": "the-listening-tree",
-    }
-
-    if force_hostaddr:
-        hostaddr_override = os.environ.get("PGHOSTADDR")
-        if hostaddr_override:
-            options["hostaddr"] = hostaddr_override
-        elif parts.hostname:
-            resolved = _resolve_ipv4_hostaddr(parts.hostname)
-            if resolved:
-                options["hostaddr"] = resolved
-
-    return options
+if asyncpg is None:
+    raise RuntimeError("asyncpg is required for PostgreSQL connection but is not installed.")
 
 
-def _build_supabase_pooler_candidates(base_url: str) -> List[dict]:
-    """Build candidate Supabase pooler URLs for IPv6-only direct hosts."""
-    candidates: List[dict] = []
-    parts = urlsplit(base_url)
-    hostname = parts.hostname or ""
-    if not hostname.startswith("db.") or not hostname.endswith(".supabase.co"):
-        return candidates
-
-    project_ref = hostname.split(".")[1]
-    username = parts.username or "postgres"
-    password = parts.password or ""
-    database = parts.path or "/postgres"
-    existing_query = dict(parse_qsl(parts.query, keep_blank_values=True))
-
-    username_variants = {
-        os.environ.get("SUPABASE_POOLER_USER", "").strip(),
-        f"postgres.{project_ref}",
-        f"{username}.{project_ref}",
-        username,
-        project_ref,
-    }
-    username_variants = {u for u in username_variants if u}
-    # If username already contains a tenant suffix, also try the bare prefix.
-    if "." in username:
-        username_variants.add(username.split(".", 1)[0])
-
-    pooler_host_override = os.environ.get("SUPABASE_POOLER_HOST")
-    region_candidates = os.environ.get(
-        "SUPABASE_POOLER_REGIONS",
-        "ap-southeast-1,ap-northeast-1,us-east-1,us-west-1,eu-west-1,eu-central-1,ap-south-1",
-    )
-    host_prefixes = [p.strip() for p in os.environ.get("SUPABASE_POOLER_HOST_PREFIXES", "aws-0,aws-1").split(",") if p.strip()]
-    pooler_hosts = []
-    preferred_host = pooler_host_override or "aws-0-ap-southeast-1.pooler.supabase.com"
-    pooler_hosts.append(preferred_host)
-    for region in [r.strip() for r in region_candidates.split(",") if r.strip()]:
-        for prefix in host_prefixes:
-            host = f"{prefix}-{region}.pooler.supabase.com"
-            if host not in pooler_hosts:
-                pooler_hosts.append(host)
-
-    pooler_ports = [p.strip() for p in os.environ.get("SUPABASE_POOLER_PORTS", "6543,5432").split(",") if p.strip()]
-    option_variants = [None]
-    if os.environ.get("SUPABASE_POOLER_TRY_PROJECT_OPTION", "0") == "1":
-        option_variants.append(f"project={project_ref}")
-    ordered_users = sorted(username_variants, key=lambda u: (0 if u.startswith("postgres.") else 1, len(u), u))[:3]
-    for pooler_host in pooler_hosts:
-        for pooler_port in pooler_ports:
-            for user_variant in ordered_users:
-                for extra_option in option_variants:
-                    query = dict(existing_query)
-                    if extra_option:
-                        query["options"] = extra_option
-                    query_string = urlencode(query)
-
-                    encoded_user = quote(user_variant, safe="")
-                    encoded_password = quote(password, safe="")
-                    netloc = f"{encoded_user}:{encoded_password}@{pooler_host}:{pooler_port}"
-                    pooler_url = urlunsplit((parts.scheme, netloc, database, query_string, parts.fragment))
-                    option_suffix = "" if not extra_option else ":opt_project"
-                    candidates.append(
-                        {
-                            "label": f"pooler:{pooler_host}:{pooler_port}:{user_variant}{option_suffix}",
-                            "url": _normalize_db_url(pooler_url),
-                            "force_hostaddr": False,
-                        }
-                    )
-    return candidates
+def _to_dollar_placeholders(query: str) -> str:
+    """Convert `?` or `%s` positional placeholders to asyncpg's `$1, $2, ...`."""
+    out = []
+    n = 0
+    i = 0
+    length = len(query)
+    while i < length:
+        ch = query[i]
+        if ch == "?":
+            n += 1
+            out.append(f"${n}")
+            i += 1
+        elif ch == "%" and i + 1 < length and query[i + 1] == "s":
+            n += 1
+            out.append(f"${n}")
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
 
 
-def _build_db_connection_candidates(raw_url: str) -> List[dict]:
-    """Create an ordered list of DB connection candidates."""
-    base_url = _normalize_db_url(raw_url)
-    candidates = [
-        {
-            "label": "primary",
-            "url": base_url,
-            "force_hostaddr": True,
-        }
-    ]
-
-    if _DB_URL_SOURCE == "database_url":
-        candidates.extend(_build_supabase_pooler_candidates(base_url))
-
-    return candidates
+def _parse_status_rowcount(status: str) -> int:
+    """Parse the trailing row count out of an asyncpg command-complete tag
+    (e.g. "UPDATE 3" -> 3, "INSERT 0 1" -> 1, "CREATE TABLE" -> 0)."""
+    if not status:
+        return 0
+    last = status.split()[-1]
+    return int(last) if last.isdigit() else 0
 
 
-_DB_PATH = _normalize_db_url(_DATABASE_URL)
-_DB_CONNECTION_CANDIDATES = _build_db_connection_candidates(_DATABASE_URL)
-_DB_ACTIVE_CANDIDATE_INDEX = 0
+_DATE_STRING_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATETIME_STRING_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
 
-def _active_db_parts():
-    current = _DB_CONNECTION_CANDIDATES[_DB_ACTIVE_CANDIDATE_INDEX]
-    return current, urlsplit(current["url"]), _connection_options_from_url(current["url"], current["force_hostaddr"])
+def _coerce_param_for_asyncpg(value):
+    """Convert a `strftime('%Y-%m-%d[ %H:%M:%S]')`-formatted string into a real
+    `date`/`datetime` object.
+
+    Every DATE/TIMESTAMP value in this codebase is passed around as a
+    pre-formatted string (matching what psycopg2 accepted — it sends every
+    parameter as text and lets Postgres cast it). asyncpg's typed binary
+    protocol does not: once a query infers a parameter's column type as
+    date/timestamp, it requires an actual Python `date`/`datetime` object and
+    raises on a plain string. Rather than hand-converting dozens of call
+    sites, coerce transparently here — every date/timestamp *column* in this
+    schema is always fed a string in exactly one of these two formats, so
+    the match is unambiguous in practice.
+    """
+    if isinstance(value, str):
+        if _DATETIME_STRING_RE.match(value):
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        if _DATE_STRING_RE.match(value):
+            return datetime.strptime(value, "%Y-%m-%d").date()
+    return value
 
 
-_db_current, _db_parts, _db_options = _active_db_parts()
-_DB_HOSTNAME = _db_parts.hostname
-_DB_HOSTADDR = _db_options.get("hostaddr")
-_DB_RUNTIME_LABEL = _db_current["label"]
+class _CursorShim:
+    """Minimal psycopg2-cursor-shaped wrapper around one asyncpg connection,
+    so the ~45 existing call sites (`db_execute(c, query, params)` then
+    `c.fetchall()`/`c.fetchone()`) keep working almost unchanged."""
 
-if psycopg2 is None:
-    raise RuntimeError("psycopg2 is required for PostgreSQL connection but is not installed.")
+    __slots__ = ("_conn_shim", "_rows", "rowcount")
+
+    def __init__(self, conn_shim: "_ConnShim"):
+        self._conn_shim = conn_shim
+        self._rows: list = []
+        self.rowcount = 0
+
+    async def execute(self, query: str, params: tuple = ()) -> None:
+        await self._conn_shim._ensure_tx()
+        pg_query = _to_dollar_placeholders(query)
+        params = tuple(_coerce_param_for_asyncpg(p) for p in params)
+        if pg_query.strip().upper().startswith("SELECT") or "RETURNING" in pg_query.upper():
+            self._rows = await self._conn_shim._raw.fetch(pg_query, *params)
+            self.rowcount = len(self._rows)
+        else:
+            status = await self._conn_shim._raw.execute(pg_query, *params)
+            self._rows = []
+            self.rowcount = _parse_status_rowcount(status)
+
+    def fetchall(self) -> list:
+        return self._rows
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
 
 
-def _db_param_placeholder(query: str) -> str:
-    """Convert SQLite-style placeholders to PostgreSQL placeholders."""
-    return query.replace("?", "%s")
+class _ConnShim:
+    """Mimics the psycopg2 connection this codebase's ~45 call sites already
+    use (`conn.cursor()`, `conn.commit()`, `conn.close()`), backed by one
+    asyncpg.Connection acquired from `_DB_POOL`.
+
+    Wraps every acquired connection in an explicit transaction on first use,
+    matching psycopg2's default (autocommit=False) behaviour: statements
+    only become durable on `commit()`, and `close()` without a prior
+    `commit()` rolls back — asyncpg itself is autocommit-per-statement
+    unless a transaction is explicitly started.
+    """
+
+    __slots__ = ("_raw", "_in_tx")
+
+    def __init__(self, raw: "asyncpg.Connection"):
+        self._raw = raw
+        self._in_tx = False
+
+    async def _ensure_tx(self) -> None:
+        # Plain SQL BEGIN, not asyncpg's `Transaction` helper object — that
+        # helper tracks its own client-side state and raises "cannot
+        # rollback; the transaction is in error state" once a query inside
+        # it fails, instead of letting a plain ROLLBACK clear the aborted
+        # transaction (which Postgres always accepts, error state or not).
+        if not self._in_tx:
+            await self._raw.execute("BEGIN")
+            self._in_tx = True
+
+    def cursor(self) -> _CursorShim:
+        return _CursorShim(self)
+
+    async def commit(self) -> None:
+        if self._in_tx:
+            await self._raw.execute("COMMIT")
+            self._in_tx = False
+
+    async def close(self) -> None:
+        if self._in_tx:
+            try:
+                await self._raw.execute("ROLLBACK")
+            except Exception:
+                pass  # connection is unusable either way — discard it below
+            self._in_tx = False
+        await _DB_POOL.release(self._raw)
 
 
-def db_execute(cursor, query: str, params: tuple = ()) -> None:
-    """Execute a query using PostgreSQL placeholder style."""
-    cursor.execute(_db_param_placeholder(query), params)
+async def get_db() -> _ConnShim:
+    """Acquire a connection from the pool, wrapped to look like a psycopg2
+    connection. Callers must still call `await conn.close()` when done,
+    which releases it back to `_DB_POOL`."""
+    raw = await _DB_POOL.acquire()
+    return _ConnShim(raw)
 
 
-def db_insert_or_replace_preference(cursor, user_id: int, key: str, value: str, ts: str) -> None:
+async def db_execute(cursor: _CursorShim, query: str, params: tuple = ()) -> None:
+    """Execute a query using the existing `?`-style placeholder convention."""
+    await cursor.execute(query, params)
+
+
+async def db_insert_or_replace_preference(cursor: _CursorShim, user_id: int, key: str, value: str, ts: str) -> None:
     """Insert or update user preference using PostgreSQL UPSERT syntax."""
-    cursor.execute(
+    await cursor.execute(
         """
         INSERT INTO preferences (user_id, pref_key, pref_value, updated_at)
-        VALUES (%s, %s, %s, %s)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT (user_id, pref_key)
         DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = EXCLUDED.updated_at
         """,
@@ -911,226 +937,22 @@ questions = [
 
 # ---------------------------------------------------------------------------
 # Database Setup — PostgreSQL (Supabase)
-# ---------------------------------------------------------------------------
-def _open_new_db_connection():
-    """Open a brand-new PostgreSQL connection with dict-like row access.
-
-    This performs the full TCP + TLS handshake against Supabase, which costs
-    several hundred milliseconds. Callers should normally use `get_db()`
-    instead, which reuses an already-established connection when one is idle.
-    """
-    global _DB_ACTIVE_CANDIDATE_INDEX, _DB_HOSTNAME, _DB_HOSTADDR, _DB_RUNTIME_LABEL
-    global _RUNTIME_DB_BACKEND, _DB_NEXT_PG_RETRY_TS, _DB_LAST_PG_ERROR, _DB_LAST_PG_ATTEMPTS
-
-    now_ts = _time.monotonic()
-    if now_ts < _DB_NEXT_PG_RETRY_TS:
-        wait_seconds = max(1, int(_DB_NEXT_PG_RETRY_TS - now_ts))
-        error_hint = _DB_LAST_PG_ERROR or "PostgreSQL connection retry is currently throttled"
-        raise RuntimeError(f"PostgreSQL retry throttled for {wait_seconds}s: {error_hint}")
-
-    # Try the last successful candidate first, then fall back to others.
-    ordered_indices = [_DB_ACTIVE_CANDIDATE_INDEX] + [
-        idx for idx in range(len(_DB_CONNECTION_CANDIDATES)) if idx != _DB_ACTIVE_CANDIDATE_INDEX
-    ]
-    max_candidates = int(os.environ.get("MAX_DB_CANDIDATES", "20"))
-
-    last_error = None
-    last_error_label = None
-    attempts: List[str] = []
-    for idx in ordered_indices[:max_candidates]:
-        candidate = _DB_CONNECTION_CANDIDATES[idx]
-        options = _connection_options_from_url(candidate["url"], candidate["force_hostaddr"])
-        try:
-            conn = psycopg2.connect(**options)
-            _DB_ACTIVE_CANDIDATE_INDEX = idx
-            _DB_RUNTIME_LABEL = candidate["label"]
-            _DB_HOSTNAME = urlsplit(candidate["url"]).hostname
-            _DB_HOSTADDR = options.get("hostaddr")
-            _RUNTIME_DB_BACKEND = "postgres"
-            _DB_NEXT_PG_RETRY_TS = 0.0
-            _DB_LAST_PG_ERROR = None
-            _DB_LAST_PG_ATTEMPTS = []
-            return conn
-        except Exception as e:
-            last_error = e
-            last_error_label = candidate["label"]
-            attempts.append(f"{candidate['label']} => {str(e).splitlines()[0][:160]}")
-
-    if last_error is not None:
-        retry_after = int(os.environ.get("PG_RETRY_INTERVAL_SEC", "5"))
-        _DB_NEXT_PG_RETRY_TS = now_ts + retry_after
-        label = last_error_label or "unknown-candidate"
-        _DB_LAST_PG_ERROR = f"[{label}] {last_error}"
-        _DB_LAST_PG_ATTEMPTS = attempts[:12]
-        raise RuntimeError(f"PostgreSQL connection failed on {label}; retry in {retry_after}s: {last_error}")
-    raise RuntimeError("No database connection candidates are available.")
-
-
-# ---------------------------------------------------------------------------
-# Connection reuse pool
 #
-# Opening a fresh connection to Supabase costs a full TCP + TLS handshake
-# (measured at ~600ms from Hong Kong), and the app previously paid that on
-# every single request that touched the database. Serverless instances stay
-# warm between requests, so module-level state survives and an already-open
-# connection can be handed to the next request instead.
-#
-# Call sites are unchanged: `get_db()` still returns something that looks like
-# a psycopg2 connection, and `conn.close()` still ends that request's use of
-# it. The difference is that close() now parks the connection in `_DB_IDLE_POOL`
-# for the next request rather than tearing down the socket.
+# Connection pooling itself is handled by `asyncpg.create_pool()` (created in
+# `lifespan()`, stored in `_DB_POOL`) — `get_db()`/`_ConnShim`/`_CursorShim`
+# above just adapt its interface back to the acquire/cursor/commit/close shape
+# the rest of this file already uses.
 # ---------------------------------------------------------------------------
-
-# Idle connections available for reuse, as (raw psycopg2 connection, time parked).
-_DB_IDLE_POOL: List[tuple] = []
-# Guards _DB_IDLE_POOL: the background reminder task and request handlers can
-# both borrow connections, and a connection must never be lent out twice.
-_DB_POOL_LOCK = threading.Lock()
-# Cap on parked connections. Supabase's pooler has a per-project connection
-# limit, so idle connections beyond this are closed for real.
-DB_POOL_MAX_IDLE = int(os.environ.get("DB_POOL_MAX_IDLE", "4"))
-# A connection parked longer than this may have been dropped server-side, so it
-# is validated with a cheap `SELECT 1` before being handed out. Connections
-# reused sooner than this skip the check and cost no extra round trip.
-DB_POOL_HEALTHCHECK_IDLE_SEC = float(os.environ.get("DB_POOL_HEALTHCHECK_IDLE_SEC", "30"))
-
-
-def _discard_raw_connection(raw) -> None:
-    """Close a raw connection, ignoring errors from an already-broken socket."""
-    try:
-        raw.close()
-    except Exception:
-        pass
-
-
-def _is_raw_connection_usable(raw, idle_seconds: float) -> bool:
-    """Check whether a parked connection can still serve a query.
-
-    Connections parked only briefly are trusted as-is. Longer-idle ones are
-    probed with `SELECT 1`, since Supabase's pooler can drop idle connections
-    and a dead socket would otherwise fail inside the caller's own query.
-    """
-    if raw.closed:
-        return False
-    if idle_seconds < DB_POOL_HEALTHCHECK_IDLE_SEC:
-        return True
-    try:
-        with raw.cursor() as probe:
-            probe.execute("SELECT 1")
-            probe.fetchone()
-        return True
-    except Exception:
-        return False
-
-
-class _PooledConnection:
-    """A psycopg2 connection whose `close()` returns it to `_DB_IDLE_POOL`.
-
-    Every attribute other than the ones defined here (`cursor`, `commit`, ...)
-    is delegated straight to the underlying connection, so this behaves like
-    the real thing for all existing call sites.
-    """
-
-    __slots__ = ("_raw", "_returned")
-
-    def __init__(self, raw):
-        self._raw = raw
-        self._returned = False
-
-    def __getattr__(self, name):
-        # Only reached for attributes not defined on this class, i.e. the
-        # entire psycopg2 connection API.
-        if self._returned:
-            # The underlying connection has been handed back and may already be
-            # serving another request. Fail loudly, as a real closed psycopg2
-            # connection would, rather than silently sharing someone else's
-            # transaction.
-            raise PgInterfaceError("connection already closed")
-        return getattr(self._raw, name)
-
-    @property
-    def closed(self):
-        """Report as closed once returned, matching psycopg2's own semantics."""
-        return 1 if self._returned else self._raw.closed
-
-    def close(self) -> None:
-        """Release this connection back to the pool for the next request."""
-        if self._returned:
-            # Double-close is a no-op, as it is on a real connection.
-            return
-        self._returned = True
-        raw = self._raw
-
-        if raw.closed:
-            return
-
-        try:
-            # Clear any transaction the caller left open (for example a route
-            # that raised before committing) so the next borrower starts clean.
-            # This is a local no-op when no transaction is in progress.
-            raw.rollback()
-        except Exception:
-            _discard_raw_connection(raw)
-            return
-
-        with _DB_POOL_LOCK:
-            if len(_DB_IDLE_POOL) >= DB_POOL_MAX_IDLE:
-                # Pool is full — genuinely close this one to respect the
-                # server-side connection limit.
-                _discard_raw_connection(raw)
-                return
-            _DB_IDLE_POOL.append((raw, _time.monotonic()))
-
-    def __enter__(self):
-        # psycopg2 connections are context managers over a *transaction*, not
-        # the connection itself; preserve that behaviour.
-        self._raw.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return self._raw.__exit__(exc_type, exc_value, traceback)
-
-
-def get_db():
-    """Return a PostgreSQL connection with dict-like row access.
-
-    Reuses an idle connection when one is available, otherwise opens a new one.
-    Callers must still call `conn.close()` when done, which returns the
-    connection to the pool instead of closing the socket.
-    """
-    while True:
-        with _DB_POOL_LOCK:
-            if not _DB_IDLE_POOL:
-                break
-            raw, parked_at = _DB_IDLE_POOL.pop()
-
-        if _is_raw_connection_usable(raw, _time.monotonic() - parked_at):
-            return _PooledConnection(raw)
-        # Stale connection — drop it and try the next one in the pool.
-        _discard_raw_connection(raw)
-
-    return _PooledConnection(_open_new_db_connection())
-
-
-def close_db_pool() -> None:
-    """Close every idle connection. Called on application shutdown."""
-    with _DB_POOL_LOCK:
-        parked = list(_DB_IDLE_POOL)
-        _DB_IDLE_POOL.clear()
-    for raw, _parked_at in parked:
-        _discard_raw_connection(raw)
-
-
-def init_db() -> None:
+async def init_db() -> None:
     """Initialize PostgreSQL schema with all required tables and indexes."""
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
 
     id_type = "BIGSERIAL PRIMARY KEY"
     id_ref = "BIGINT"
 
     # Users table
-    c.execute(f"""
+    await c.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
             id {id_type},
             email TEXT UNIQUE NOT NULL,
@@ -1145,19 +967,19 @@ def init_db() -> None:
     # for a brand-new table — this database's `users` table predates the
     # column being added to the schema, so it needs the same explicit
     # ADD COLUMN treatment as the two below.
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP")
+    await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT")
+    await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0")
+    await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP")
     # Google Sign-In: google_id links a row to a Google account; auth_provider
     # is informational only (password login still works for 'google' rows if
     # they ever set one). password stays NOT NULL — Google-only signups get a
     # random unusable hash instead (see /auth/google/callback).
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT")
-    c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'password'")
-    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id) WHERE google_id IS NOT NULL")
+    await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT")
+    await c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'password'")
+    await c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users (google_id) WHERE google_id IS NOT NULL")
 
     # Reminders table
-    c.execute(f"""
+    await c.execute(f"""
         CREATE TABLE IF NOT EXISTS reminders (
             id {id_type},
             user_id {id_ref} NOT NULL,
@@ -1172,7 +994,7 @@ def init_db() -> None:
     """)
     
     # Chat history table
-    c.execute(f"""
+    await c.execute(f"""
         CREATE TABLE IF NOT EXISTS chat_history (
             id {id_type},
             user_id {id_ref} NOT NULL,
@@ -1187,7 +1009,7 @@ def init_db() -> None:
 
     # Conversations table — groups chat_history rows into independent,
     # resumable threads (added after chat_history already had a flat log).
-    c.execute(f"""
+    await c.execute(f"""
         CREATE TABLE IF NOT EXISTS conversations (
             id {id_type},
             user_id {id_ref} NOT NULL,
@@ -1198,15 +1020,15 @@ def init_db() -> None:
             is_deleted BOOLEAN DEFAULT FALSE
         )
     """)
-    c.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS conversation_id BIGINT")
+    await c.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS conversation_id BIGINT")
 
     # One-time backfill: chat_history rows that predate the conversation_id
     # column get grouped into a single "legacy" conversation per (user_id,
     # lang) so existing history stays visible instead of being orphaned.
     # Guarded so it only does work the first time it finds orphaned rows.
-    c.execute("SELECT 1 FROM chat_history WHERE conversation_id IS NULL LIMIT 1")
+    await c.execute("SELECT 1 FROM chat_history WHERE conversation_id IS NULL LIMIT 1")
     if c.fetchone():
-        c.execute("""
+        await c.execute("""
             INSERT INTO conversations (user_id, lang, title, created_at, updated_at)
             SELECT DISTINCT user_id, lang, NULL,
                    MIN(timestamp) OVER (PARTITION BY user_id, lang),
@@ -1214,7 +1036,7 @@ def init_db() -> None:
             FROM chat_history
             WHERE conversation_id IS NULL
         """)
-        c.execute("""
+        await c.execute("""
             UPDATE chat_history AS ch
             SET conversation_id = conv.id
             FROM conversations AS conv
@@ -1225,7 +1047,7 @@ def init_db() -> None:
         """)
 
     # Preferences table
-    c.execute(f"""
+    await c.execute(f"""
         CREATE TABLE IF NOT EXISTS preferences (
             id {id_type},
             user_id {id_ref} NOT NULL,
@@ -1238,7 +1060,7 @@ def init_db() -> None:
     """)
     
     # Email verification codes (registration)
-    c.execute(f"""
+    await c.execute(f"""
         CREATE TABLE IF NOT EXISTS email_verifications (
             id {id_type},
             email TEXT NOT NULL,
@@ -1250,38 +1072,38 @@ def init_db() -> None:
     """)
 
     # Create indexes
-    c.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications ((LOWER(email)))")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, lang, is_deleted)")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_chat_conversation ON chat_history(conversation_id)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users ((LOWER(email)))")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_email_verifications_email ON email_verifications ((LOWER(email)))")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id, is_active)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_history(user_id, timestamp)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_chat_deleted ON chat_history(user_id, is_deleted)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_pref_user ON preferences(user_id, pref_key)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_reminders_date ON reminders(user_id, created_at)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_chat_lang ON chat_history(user_id, lang)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, lang, is_deleted)")
+    await c.execute("CREATE INDEX IF NOT EXISTS idx_chat_conversation ON chat_history(conversation_id)")
 
-    conn.commit()
-    conn.close()
+    await conn.commit()
+    await conn.close()
     print("[DB] ✅ PostgreSQL database initialized")
 
 
 _db_initialized = False
 _db_init_error: Optional[str] = None
-_db_init_lock = threading.Lock()
+_db_init_lock = asyncio.Lock()
 
 
-def ensure_db_initialized(strict: bool = False) -> bool:
+async def ensure_db_initialized(strict: bool = False) -> bool:
     """Initialize DB schema once and cache the result for health checks."""
     global _db_initialized, _db_init_error
     if _db_initialized:
         return True
 
-    with _db_init_lock:
+    async with _db_init_lock:
         if _db_initialized:
             return True
         try:
-            init_db()
+            await init_db()
             _db_initialized = True
             _db_init_error = None
             return True
@@ -1298,7 +1120,7 @@ def ensure_db_initialized(strict: bool = False) -> bool:
 # Background helpers — housekeeping tasks
 # ---------------------------------------------------------------------------
 
-def cleanup_old_conversations() -> None:
+async def cleanup_old_conversations() -> None:
     """Soft-delete whole conversations beyond the per-user/language cap.
 
     Runs before the per-conversation message cleanup below so that a
@@ -1307,79 +1129,83 @@ def cleanup_old_conversations() -> None:
     dropped wholesale rather than gutted message-by-message, so it either
     fully exists or fully doesn't in the sidebar list.
     """
-    conn = get_db()
-    c = conn.cursor()
-    c.execute(
-        """
-        WITH ranked AS (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (
-                    PARTITION BY user_id, lang
-                    ORDER BY updated_at DESC, id DESC
-                ) AS rn
-            FROM conversations
-            WHERE is_deleted = FALSE
+    conn = await get_db()
+    try:
+        c = conn.cursor()
+        await c.execute(
+            """
+            WITH ranked AS (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY user_id, lang
+                        ORDER BY updated_at DESC, id DESC
+                    ) AS rn
+                FROM conversations
+                WHERE is_deleted = FALSE
+            )
+            UPDATE conversations AS conv
+            SET is_deleted = TRUE
+            FROM ranked
+            WHERE conv.id = ranked.id
+              AND ranked.rn > %s
+            """,
+            (CONVERSATION_MAX_PER_LANG,),
         )
-        UPDATE conversations AS conv
-        SET is_deleted = TRUE
-        FROM ranked
-        WHERE conv.id = ranked.id
-          AND ranked.rn > %s
-        """,
-        (CONVERSATION_MAX_PER_LANG,),
-    )
-    deleted_count = _safe_rowcount(c)
-    conn.commit()
-    conn.close()
+        deleted_count = _safe_rowcount(c)
+        await conn.commit()
+    finally:
+        await conn.close()
     if deleted_count > 0:
         print(f"[CLEANUP] 🗑️  Marked {deleted_count} old conversations as deleted")
 
 
-def cleanup_old_chat_history() -> None:
+async def cleanup_old_chat_history() -> None:
     """Soft-delete oldest chat rows beyond the per-conversation cap.
 
     Partitioned by conversation_id (not user_id/lang) so a long-running
     conversation can't crowd out messages belonging to a different,
     still-listed conversation for the same user.
     """
-    conn = get_db()
-    c = conn.cursor()
-    c.execute(
-        """
-        WITH ranked AS (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (
-                    PARTITION BY conversation_id
-                    ORDER BY timestamp DESC, id DESC
-                ) AS rn
-            FROM chat_history
-            WHERE is_deleted = FALSE
+    conn = await get_db()
+    try:
+        c = conn.cursor()
+        await c.execute(
+            """
+            WITH ranked AS (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY conversation_id
+                        ORDER BY timestamp DESC, id DESC
+                    ) AS rn
+                FROM chat_history
+                WHERE is_deleted = FALSE
+            )
+            UPDATE chat_history AS ch
+            SET is_deleted = TRUE
+            FROM ranked
+            WHERE ch.id = ranked.id
+              AND ranked.rn > %s
+            """,
+            (CHAT_HISTORY_MAX_MESSAGES_PER_LANG,),
         )
-        UPDATE chat_history AS ch
-        SET is_deleted = TRUE
-        FROM ranked
-        WHERE ch.id = ranked.id
-          AND ranked.rn > %s
-        """,
-        (CHAT_HISTORY_MAX_MESSAGES_PER_LANG,),
-    )
-    deleted_count = _safe_rowcount(c)
-    conn.commit()
-    conn.close()
+        deleted_count = _safe_rowcount(c)
+        await conn.commit()
+    finally:
+        await conn.close()
     if deleted_count > 0:
         print(f"[CLEANUP] 🗑️  Marked {deleted_count} old chat rows as deleted")
 
 
-def prune_user_chat_history(cursor, conversation_id: int) -> None:
+async def prune_user_chat_history(cursor, conversation_id: int) -> None:
     """Prune oldest rows within one conversation after inserting new messages.
 
     Scoped to `conversation_id` (not just user_id/lang) so sending lots of
     messages in one conversation never soft-deletes rows from another.
     """
     c = cursor
-    c.execute(
+    await c.execute(
         """
         WITH keep_ids AS (
             SELECT id
@@ -1399,24 +1225,26 @@ def prune_user_chat_history(cursor, conversation_id: int) -> None:
     )
 
 
-def auto_expire_old_reminders() -> None:
+async def auto_expire_old_reminders() -> None:
     """Deactivate reminders created before today.
 
     Runs once per hour (top of the hour) from the background thread.
     """
-    conn = get_db()
-    c = conn.cursor()
-    today = datetime.now().strftime("%Y-%m-%d")
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    db_execute(
-        c,
-        "UPDATE reminders SET is_active = FALSE, updated_at = ? "
-        "WHERE DATE(created_at) < ? AND is_active = TRUE",
-        (ts, today),
-    )
-    expired = _safe_rowcount(c)
-    conn.commit()
-    conn.close()
+    conn = await get_db()
+    try:
+        c = conn.cursor()
+        today = datetime.now().strftime("%Y-%m-%d")
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await db_execute(
+            c,
+            "UPDATE reminders SET is_active = FALSE, updated_at = ? "
+            "WHERE DATE(created_at) < ? AND is_active = TRUE",
+            (ts, today),
+        )
+        expired = _safe_rowcount(c)
+        await conn.commit()
+    finally:
+        await conn.close()
     if expired > 0:
         print(f"[EXPIRE] 📅 Marked {expired} old reminders as inactive")
 
@@ -1512,9 +1340,9 @@ async def login_post(
     email = email.strip().lower()
     password = password.strip()
     generic_error = "Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
-    db_execute(
+    await db_execute(
         c,
         "SELECT id, email, password, failed_login_attempts, locked_until FROM users WHERE LOWER(email) = LOWER(?)",
         (email,),
@@ -1522,7 +1350,7 @@ async def login_post(
     user = c.fetchone()
 
     if user and user["locked_until"] and user["locked_until"] > datetime.now():
-        conn.close()
+        await conn.close()
         wait_minutes = max(1, int((user["locked_until"] - datetime.now()).total_seconds() // 60) + 1)
         locked_msg = (
             f"Too many failed attempts. Try again in {wait_minutes} min." if lang == 'en'
@@ -1533,38 +1361,38 @@ async def login_post(
     if user and verify_password(password, user["password"]):
         if not is_password_hashed(user["password"]):
             # Transparent migration for legacy plaintext rows.
-            db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
+            await db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(
+        await db_execute(
             c,
             "UPDATE users SET last_login = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
             (ts, user["id"]),
         )
-        conn.commit()
+        await conn.commit()
         request.session['user_email'] = user["email"]
         request.session['user_id'] = user["id"]
         request.session['remember_me'] = bool(remember_me)
         # Load language preference
-        db_execute(c, "SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
+        await db_execute(c, "SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
         pref = c.fetchone()
         if pref:
             request.session['language'] = pref["pref_value"]
-        conn.close()
+        await conn.close()
         return RedirectResponse(url="/", status_code=303)
 
     if user:
         attempts = (user["failed_login_attempts"] or 0) + 1
         if attempts >= LOGIN_MAX_ATTEMPTS:
             locked_until = (datetime.now() + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
-            db_execute(
+            await db_execute(
                 c,
                 "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
                 (attempts, locked_until, user["id"]),
             )
         else:
-            db_execute(c, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
-        conn.commit()
-    conn.close()
+            await db_execute(c, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
+        await conn.commit()
+    await conn.close()
     return templates.TemplateResponse("login.html", tpl_context(request, error=generic_error))
 
 @app.get("/register", response_class=HTMLResponse)
@@ -1594,25 +1422,25 @@ async def send_verification_code(request: Request):
             status_code=400,
         )
 
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
     try:
-        db_execute(c, "SELECT id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+        await db_execute(c, "SELECT id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
         if c.fetchone():
-            conn.close()
+            await conn.close()
             return JSONResponse(
                 {"success": False, "message": "Email already registered" if lang == 'en' else "電郵已註冊"},
                 status_code=400,
             )
 
-        db_execute(
+        await db_execute(
             c,
             "SELECT created_at FROM email_verifications WHERE LOWER(email) = LOWER(?) ORDER BY created_at DESC LIMIT 1",
             (email,),
         )
         last = c.fetchone()
         if last and (datetime.now() - last["created_at"]).total_seconds() < VERIFICATION_RESEND_COOLDOWN_SECONDS:
-            conn.close()
+            await conn.close()
             return JSONResponse(
                 {"success": False, "message": "Please wait before requesting another code" if lang == 'en' else "請稍等先再發送驗證碼"},
                 status_code=429,
@@ -1622,13 +1450,13 @@ async def send_verification_code(request: Request):
         ts = datetime.now()
         expires_at = ts.timestamp() + VERIFICATION_CODE_TTL_MINUTES * 60
         expires_at_str = datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(
+        await db_execute(
             c,
             "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES (?, ?, ?, ?)",
             (email, code, expires_at_str, ts.strftime('%Y-%m-%d %H:%M:%S')),
         )
-        conn.commit()
-        conn.close()
+        await conn.commit()
+        await conn.close()
 
         sent = send_verification_email(email, code, lang)
         if not sent:
@@ -1638,7 +1466,7 @@ async def send_verification_code(request: Request):
             )
         return JSONResponse({"success": True, "message": "Verification code sent" if lang == 'en' else "驗證碼已發送"})
     except Exception as e:
-        conn.close()
+        await conn.close()
         _builtins._original_print(f"[ERROR] send_verification_code failed: {e}")
         return JSONResponse(
             {"success": False, "message": "Service temporarily unavailable" if lang == 'en' else "服務暫時不可用"},
@@ -1705,39 +1533,39 @@ async def register_post(
     if password != confirm_password:
         return fail("Passwords do not match" if lang == 'en' else "密碼唔一致", field="confirm_password")
 
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
     try:
         # Validate verification code
-        db_execute(
+        await db_execute(
             c,
             "SELECT id FROM email_verifications WHERE LOWER(email) = LOWER(?) AND code = ? AND used = FALSE AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
             (email, verification_code, datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
         )
         verification = c.fetchone()
         if not verification:
-            conn.close()
+            await conn.close()
             return fail("Verification code is incorrect or has expired" if lang == 'en' else "驗證碼錯誤或已過期", field="verification_code")
 
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
-        db_execute(c, "UPDATE email_verifications SET used = TRUE WHERE id = ?", (verification["id"],))
-        conn.commit()
-        db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+        await db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
+        await db_execute(c, "UPDATE email_verifications SET used = TRUE WHERE id = ?", (verification["id"],))
+        await conn.commit()
+        await db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
         created_user = c.fetchone()
         if created_user:
             request.session['user_email'] = created_user["email"]
             request.session['user_id'] = created_user["id"]
             request.session['remember_me'] = True
-        conn.close()
+        await conn.close()
         if wants_json:
             return JSONResponse({"success": True, "redirect": "/"})
         return RedirectResponse(url="/", status_code=303)
     except PgIntegrityError:
-        conn.close()
+        await conn.close()
         return fail("Email already exists" if lang == 'en' else "電郵已存在", field="email")
     except Exception as e:
-        conn.close()
+        await conn.close()
         _builtins._original_print(f"[ERROR] Registration failed: {e}")
         return fail(
             "Service temporarily unavailable. Your account data remains in database; please try again."
@@ -1783,41 +1611,41 @@ async def google_callback(request: Request):
     display_name = _CONTROL_CHAR_PATTERN.sub(" ", userinfo.get("name") or "")
     display_name = " ".join(display_name.split())[:50]
 
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
     try:
-        db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
+        await db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
         user = c.fetchone()
 
         if not user:
-            db_execute(c, "SELECT id, email, google_id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+            await db_execute(c, "SELECT id, email, google_id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
             existing = c.fetchone()
             if existing and existing["google_id"]:
                 # Email matches, but already linked to a different Google account.
-                conn.close()
+                await conn.close()
                 return RedirectResponse(url="/login?error=google_failed", status_code=303)
             if existing:
-                db_execute(c, "UPDATE users SET google_id = ?, auth_provider = 'google' WHERE id = ?", (google_id, existing["id"]))
+                await db_execute(c, "UPDATE users SET google_id = ?, auth_provider = 'google' WHERE id = ?", (google_id, existing["id"]))
                 user = existing
             else:
                 ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 synthetic_password = hash_password(secrets.token_hex(32))
-                db_execute(
+                await db_execute(
                     c,
                     "INSERT INTO users (email, password, username, google_id, auth_provider, created_at) VALUES (?, ?, ?, ?, 'google', ?)",
                     (email, synthetic_password, display_name or None, google_id, ts),
                 )
-                db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
+                await db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
                 user = c.fetchone()
 
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
-        conn.commit()
+        await db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
+        await conn.commit()
         request.session['user_email'] = user["email"]
         request.session['user_id'] = user["id"]
         request.session['remember_me'] = True
     finally:
-        conn.close()
+        await conn.close()
 
     return RedirectResponse(url="/", status_code=303)
 
@@ -1875,12 +1703,12 @@ async def set_language(request: Request, lang: str):
         request.session['language'] = lang
         uid = get_user(request)
         if uid:
-            conn = get_db()
+            conn = await get_db()
             c = conn.cursor()
             ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            db_insert_or_replace_preference(c, uid, 'language', lang, ts)
-            conn.commit()
-            conn.close()
+            await db_insert_or_replace_preference(c, uid, 'language', lang, ts)
+            await conn.commit()
+            await conn.close()
     return RedirectResponse(url=_safe_redirect_target(request), status_code=303)
 
 @app.get("/accessibility", response_class=HTMLResponse)
@@ -1901,11 +1729,11 @@ async def profile_page(request: Request):
     uid = get_user(request)
     if uid is None:
         return RedirectResponse(url="/login", status_code=303)
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
-    db_execute(c, "SELECT username, email FROM users WHERE id = ?", (uid,))
+    await db_execute(c, "SELECT username, email FROM users WHERE id = ?", (uid,))
     user_row = c.fetchone()
-    conn.close()
+    await conn.close()
     return templates.TemplateResponse(
         "profile.html",
         tpl_context(
@@ -1937,11 +1765,11 @@ async def update_profile_name(request: Request, display_name: str = Form(...)):
             status_code=400,
         )
 
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
-    db_execute(c, "UPDATE users SET username = ? WHERE id = ?", (cleaned, uid))
-    conn.commit()
-    conn.close()
+    await db_execute(c, "UPDATE users SET username = ? WHERE id = ?", (cleaned, uid))
+    await conn.commit()
+    await conn.close()
     return JSONResponse({"success": True, "display_name": cleaned, "message": "Name updated" if lang == 'en' else "名稱已更新"})
 
 
@@ -1965,29 +1793,29 @@ async def update_profile_password(
     new_password = new_password.strip()
     confirm_new_password = confirm_new_password.strip()
 
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
-    db_execute(c, "SELECT password FROM users WHERE id = ?", (uid,))
+    await db_execute(c, "SELECT password FROM users WHERE id = ?", (uid,))
     user_row = c.fetchone()
     if not user_row or not verify_password(current_password, user_row["password"]):
-        conn.close()
+        await conn.close()
         return fail("Current password is incorrect" if lang == 'en' else "現時密碼不正確", field="current_password")
 
     is_valid_password, _ = validate_password_strength(new_password)
     if not is_valid_password:
-        conn.close()
+        await conn.close()
         return fail("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", field="new_password")
 
     if new_password != confirm_new_password:
-        conn.close()
+        await conn.close()
         return fail("Passwords do not match" if lang == 'en' else "密碼唔一致", field="confirm_new_password")
 
-    db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), uid))
-    conn.commit()
-    conn.close()
+    await db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), uid))
+    await conn.commit()
+    await conn.close()
     return JSONResponse({"success": True, "message": "Password updated" if lang == 'en' else "密碼已更新"})
 
-def _get_or_create_active_conversation(cursor, user_id: int, lang: str, requested_id: Optional[int]) -> int:
+async def _get_or_create_active_conversation(cursor, user_id: int, lang: str, requested_id: Optional[int]) -> int:
     """Resolve which conversation a new message belongs to.
 
     Trusts `requested_id` only if it exists, belongs to this user, and isn't
@@ -1997,7 +1825,7 @@ def _get_or_create_active_conversation(cursor, user_id: int, lang: str, requeste
     that POST to /get_response directly) working without any changes.
     """
     if requested_id is not None:
-        db_execute(
+        await db_execute(
             cursor,
             "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE",
             (requested_id, user_id),
@@ -2005,7 +1833,7 @@ def _get_or_create_active_conversation(cursor, user_id: int, lang: str, requeste
         if cursor.fetchone():
             return requested_id
 
-    db_execute(
+    await db_execute(
         cursor,
         "SELECT id FROM conversations WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY updated_at DESC LIMIT 1",
         (user_id, lang),
@@ -2015,7 +1843,7 @@ def _get_or_create_active_conversation(cursor, user_id: int, lang: str, requeste
         return row["id"]
 
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    db_execute(
+    await db_execute(
         cursor,
         "INSERT INTO conversations (user_id, lang, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id",
         (user_id, lang, ts, ts),
@@ -2042,16 +1870,16 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
     user_input_lower = user_input_original.lower()
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
 
     # conversation_id is optional so older/other callers (voice shortcuts,
     # the reminder-delete quick action) keep working unchanged — they just
     # land in the user's most recent conversation instead of a specific one.
-    conversation_id = _get_or_create_active_conversation(c, uid, lang, conversation_id)
+    conversation_id = await _get_or_create_active_conversation(c, uid, lang, conversation_id)
 
     # Store user message
-    db_execute(
+    await db_execute(
         c,
         "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, FALSE, ?, FALSE, ?)",
         (uid, lang, timestamp, user_input_original, conversation_id),
@@ -2059,12 +1887,12 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
     # Auto-title from the first message in this conversation; COALESCE makes
     # this a no-op once a title already exists.
     preview_title = user_input_original.replace("\n", " ").replace("\r", " ").strip()[:40]
-    db_execute(
+    await db_execute(
         c,
         "UPDATE conversations SET title = COALESCE(title, ?), updated_at = ? WHERE id = ?",
         (preview_title or None, timestamp, conversation_id),
     )
-    conn.commit()
+    await conn.commit()
 
     response = ""
 
@@ -2104,8 +1932,8 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
                 label = ' '.join(parts[1:-1])
             else:
                 response = "格式：設置提醒 [活動] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, response, conversation_id))
-                conn.commit(); conn.close()
+                await db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, response, conversation_id))
+                await conn.commit(); await conn.close()
                 return JSONResponse({"response": response})
         else:
             parts = user_input_lower.split()
@@ -2114,8 +1942,8 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
                 label = ' '.join(parts[2:-1])
             else:
                 response = "Usage: set reminder [activity] [HH:MM]"
-                db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, response, conversation_id))
-                conn.commit(); conn.close()
+                await db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, response, conversation_id))
+                await conn.commit(); await conn.close()
                 return JSONResponse({"response": response})
 
         try:
@@ -2123,12 +1951,12 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
             h, m = map(int, time_str.split(':'))
             # Ensure valid 24-hour format (0-23 for hours, 0-59 for minutes)
             if 0 <= h <= 23 and 0 <= m <= 59:
-                db_execute(
+                await db_execute(
                     c,
                     "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, TRUE, ?)",
                     (uid, label, time_str, timestamp),
                 )
-                conn.commit()
+                await conn.commit()
                 response = f"提醒已設置：{label}，時間 {time_str}" if lang == 'zh-HK' else f"Reminder set: {label} at {time_str}"
             else:
                 response = "時間無效。請用24小時格式 HH:MM" if lang == 'zh-HK' else "Invalid time. Use 24-hour format HH:MM"
@@ -2144,12 +1972,12 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
             parts = user_input_lower.split(maxsplit=2)
             label = parts[2] if len(parts) == 3 else None
         if label:
-            db_execute(c, "DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
+            await db_execute(c, "DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
             if _safe_rowcount(c) > 0:
                 response = f"已刪除提醒：{label}" if lang == 'zh-HK' else f"Deleted reminder: {label}"
             else:
                 response = "搵唔到呢個提醒。" if lang == 'zh-HK' else "No reminder found with that name."
-            conn.commit()
+            await conn.commit()
         else:
             response = "格式：刪除提醒 [活動]" if lang == 'zh-HK' else "Usage: delete reminder [activity]"
 
@@ -2158,8 +1986,8 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
         parts = user_input_lower.split(maxsplit=4)
         if len(parts) >= 4:
             key, value = parts[2], parts[3]
-            db_insert_or_replace_preference(c, uid, key, value, timestamp)
-            conn.commit()
+            await db_insert_or_replace_preference(c, uid, key, value, timestamp)
+            await conn.commit()
             response = f"Preference updated: {key} = {value}"
         else:
             response = "Usage: set preference [key] [value]"
@@ -2202,7 +2030,7 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
         # most recent bot message in chat_history and restore game mode.
         if not game.get('is_game_mode'):
             try:
-                db_execute(
+                await db_execute(
                     c,
                     "SELECT message FROM chat_history WHERE user_id = ? AND lang = ? AND is_bot = TRUE ORDER BY timestamp DESC LIMIT 1",
                     (uid, game_lang),
@@ -2292,22 +2120,22 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
 
         # ---- Normal AI Chat ----
         else:
-            db_execute(c, "SELECT username FROM users WHERE id = ?", (uid,))
+            await db_execute(c, "SELECT username FROM users WHERE id = ?", (uid,))
             user_row = c.fetchone()
             display_name = user_row["username"] if user_row else None
             response = await call_ai(user_input_original, uid, lang, display_name=display_name)
 
     # Store bot response
-    db_execute(
+    await db_execute(
         c,
         "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)",
         (uid, lang, timestamp, response, conversation_id),
     )
 
     # Keep recent history stable across Vercel/local/mobile by pruning oldest rows.
-    prune_user_chat_history(c, conversation_id)
-    conn.commit()
-    conn.close()
+    await prune_user_chat_history(c, conversation_id)
+    await conn.commit()
+    await conn.close()
 
     return JSONResponse({"response": response})
 
@@ -2423,12 +2251,12 @@ async def deactivate_reminder(request: Request, label: str = Form(...)):
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"success": False}, status_code=401)
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    db_execute(c, "UPDATE reminders SET is_active = FALSE, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
-    conn.commit()
-    conn.close()
+    await db_execute(c, "UPDATE reminders SET is_active = FALSE, updated_at = ? WHERE user_id = ? AND label = ?", (ts, uid, label))
+    await conn.commit()
+    await conn.close()
     return JSONResponse({"success": True})
 
 @app.get("/get_reminders")
@@ -2436,26 +2264,26 @@ async def get_reminders(request: Request):
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"reminders": []})
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
     today = datetime.now().strftime('%Y-%m-%d')
-    db_execute(
+    await db_execute(
         c,
         "SELECT label, reminder_time, is_active FROM reminders WHERE user_id = ? AND DATE(created_at) = ? ORDER BY created_at DESC",
         (uid, today),
     )
     reminders = [{"label": r["label"], "time": r["reminder_time"], "active": bool(r["is_active"])} for r in c.fetchall()]
-    conn.close()
+    await conn.close()
     return JSONResponse({"reminders": reminders})
 
-def _load_conversation_messages(cursor, conn, conversation_id: int, lang: str) -> list:
+async def _load_conversation_messages(cursor, conn, conversation_id: int, lang: str) -> list:
     """Shared history-loading logic for one conversation.
 
     Extracted so both the legacy `/get_chat_history` endpoint and the new
     per-conversation endpoint return identical shapes and share the
     stale-greeting cleanup behaviour.
     """
-    db_execute(
+    await db_execute(
         cursor,
         "SELECT id, timestamp, is_bot, message FROM chat_history WHERE conversation_id = ? AND is_deleted = FALSE ORDER BY timestamp",
         (conversation_id,),
@@ -2471,8 +2299,8 @@ def _load_conversation_messages(cursor, conn, conversation_id: int, lang: str) -
     if len(rows) == 1 and rows[0]["is_bot"]:
         all_welcome_variants = {get_text("welcome_chat", l) for l in TRANSLATIONS}
         if rows[0]["message"] in all_welcome_variants and rows[0]["message"] != current_welcome:
-            db_execute(cursor, "UPDATE chat_history SET is_deleted = TRUE WHERE id = ?", (rows[0]["id"],))
-            conn.commit()
+            await db_execute(cursor, "UPDATE chat_history SET is_deleted = TRUE WHERE id = ?", (rows[0]["id"],))
+            await conn.commit()
             rows = []
 
     history = [
@@ -2509,11 +2337,11 @@ async def get_chat_history(request: Request):
     lang = get_lang(request)
     conn = None
     try:
-        conn = get_db()
+        conn = await get_db()
         c = conn.cursor()
-        conversation_id = _get_or_create_active_conversation(c, uid, lang, None)
-        conn.commit()
-        history = _load_conversation_messages(c, conn, conversation_id, lang)
+        conversation_id = await _get_or_create_active_conversation(c, uid, lang, None)
+        await conn.commit()
+        history = await _load_conversation_messages(c, conn, conversation_id, lang)
         return JSONResponse({"history": history})
     except Exception as e:
         # Graceful degradation for transient DB/network failures.
@@ -2522,7 +2350,7 @@ async def get_chat_history(request: Request):
         return JSONResponse({"history": [{"timestamp": ts, "sender": "bot", "message": get_text("welcome_chat", lang)}], "degraded": True})
     finally:
         if conn is not None:
-            conn.close()
+            await conn.close()
 
 
 @app.get("/conversations")
@@ -2532,9 +2360,9 @@ async def list_conversations(request: Request):
     if uid is None:
         return JSONResponse({"conversations": []})
     lang = get_lang(request)
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
-    db_execute(
+    await db_execute(
         c,
         "SELECT id, title, updated_at FROM conversations WHERE user_id = ? AND lang = ? AND is_deleted = FALSE ORDER BY updated_at DESC",
         (uid, lang),
@@ -2547,7 +2375,7 @@ async def list_conversations(request: Request):
         }
         for r in c.fetchall()
     ]
-    conn.close()
+    await conn.close()
     return JSONResponse({"conversations": conversations})
 
 
@@ -2559,16 +2387,16 @@ async def create_conversation(request: Request):
         return JSONResponse({"error": "not authenticated"}, status_code=401)
     lang = get_lang(request)
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    conn = get_db()
+    conn = await get_db()
     c = conn.cursor()
-    db_execute(
+    await db_execute(
         c,
         "INSERT INTO conversations (user_id, lang, created_at, updated_at) VALUES (?, ?, ?, ?) RETURNING id",
         (uid, lang, ts, ts),
     )
     new_id = c.fetchone()["id"]
-    conn.commit()
-    conn.close()
+    await conn.commit()
+    await conn.close()
     return JSONResponse({"conversation_id": new_id})
 
 
@@ -2581,21 +2409,21 @@ async def get_conversation_messages(request: Request, conversation_id: int):
     lang = get_lang(request)
     conn = None
     try:
-        conn = get_db()
+        conn = await get_db()
         c = conn.cursor()
         # Ownership check — a conversation_id belonging to another user (or a
         # deleted one) is treated as not found rather than leaking its rows.
-        db_execute(c, "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE", (conversation_id, uid))
+        await db_execute(c, "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE", (conversation_id, uid))
         if not c.fetchone():
             return JSONResponse({"history": [], "error": "not found"}, status_code=404)
-        history = _load_conversation_messages(c, conn, conversation_id, lang)
+        history = await _load_conversation_messages(c, conn, conversation_id, lang)
         return JSONResponse({"history": history})
     except Exception as e:
         _builtins._original_print(f"[CONVERSATIONS] fallback due to DB error: {e}")
         return JSONResponse({"history": [], "degraded": True})
     finally:
         if conn is not None:
-            conn.close()
+            await conn.close()
 
 
 @app.get("/health/db")
@@ -2604,12 +2432,12 @@ async def health_db():
     
     Useful for monitoring Vercel deployments. Returns {"ok": true} if DB is reachable.
     """
-    initialized = ensure_db_initialized(strict=False)
+    initialized = await ensure_db_initialized(strict=False)
     conn = None
     try:
-        conn = get_db()
+        conn = await get_db()
         c = conn.cursor()
-        c.execute("SELECT 1")
+        await c.execute("SELECT 1")
         _ = c.fetchone()
         return JSONResponse({
             "ok": True,
@@ -2642,7 +2470,7 @@ async def health_db():
         )
     finally:
         if conn is not None:
-            conn.close()
+            await conn.close()
 
 
 @app.get("/health")
