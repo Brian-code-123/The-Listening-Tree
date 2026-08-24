@@ -22,6 +22,23 @@ class _FakeCursor:
             self._one = {"?column?": 1}
             return
 
+        # Registration requires a verification_code (email_verifications
+        # table) — the fake accepts any code for any email rather than
+        # tracking real inserts/expiry, since these tests exercise the
+        # register→login→chat flow, not the verification-code logic itself.
+        if "select id from email_verifications where lower(email) = lower(?) and code = ?" in normalized:
+            self._one = {"id": 1}
+            return
+        if "insert into email_verifications" in normalized:
+            self.rowcount = 1
+            return
+        if "update email_verifications set used = true where id = ?" in normalized:
+            self.rowcount = 1
+            return
+        if "select created_at from email_verifications" in normalized:
+            self._one = None
+            return
+
         if "insert into users" in normalized:
             email, password, created_at = params
             if email in self.state["users_by_email"]:
@@ -34,10 +51,24 @@ class _FakeCursor:
                 "password": password,
                 "created_at": created_at,
                 "last_login": None,
+                "failed_login_attempts": 0,
+                "locked_until": None,
             }
             self.state["users_by_email"][email] = user
             self.state["users_by_id"][user_id] = user
             self.rowcount = 1
+            return
+
+        if "select id, email, password, failed_login_attempts, locked_until from users where lower(email) = lower(?)" in normalized:
+            email = params[0].lower()
+            user = self.state["users_by_email"].get(email)
+            self._one = {
+                "id": user["id"],
+                "email": user["email"],
+                "password": user["password"],
+                "failed_login_attempts": user["failed_login_attempts"],
+                "locked_until": user["locked_until"],
+            } if user else None
             return
 
         if "select id, email, password from users where lower(email) = lower(?)" in normalized:
@@ -58,11 +89,23 @@ class _FakeCursor:
                 self.rowcount = 1
             return
 
-        if "update users set last_login = ? where id = ?" in normalized:
-            ts, user_id = params
+        if "update users set last_login" in normalized:
+            ts, user_id = params[0], params[-1]
             user = self.state["users_by_id"].get(user_id)
             if user:
                 user["last_login"] = ts
+                user["failed_login_attempts"] = 0
+                user["locked_until"] = None
+                self.rowcount = 1
+            return
+
+        if "update users set failed_login_attempts" in normalized:
+            user_id = params[-1]
+            user = self.state["users_by_id"].get(user_id)
+            if user:
+                user["failed_login_attempts"] = params[0]
+                if len(params) == 3:
+                    user["locked_until"] = params[1]
                 self.rowcount = 1
             return
 
@@ -72,6 +115,32 @@ class _FakeCursor:
 
         if "insert into chat_history" in normalized:
             self.state["chat_history"].append(params)
+            self.rowcount = 1
+            return
+
+        if "select id from conversations where id = ? and user_id = ? and is_deleted = false" in normalized:
+            conv_id, user_id = params
+            match = next(
+                (c for c in self.state["conversations"] if c["id"] == conv_id and c["user_id"] == user_id),
+                None,
+            )
+            self._one = {"id": match["id"]} if match else None
+            return
+
+        if "select id from conversations where user_id = ? and lang = ? and is_deleted = false" in normalized:
+            user_id, lang = params
+            matches = [c for c in self.state["conversations"] if c["user_id"] == user_id and c["lang"] == lang]
+            self._one = {"id": matches[-1]["id"]} if matches else None
+            return
+
+        if "insert into conversations" in normalized:
+            user_id, lang, created_at, updated_at = params
+            conv_id = self.state["next_conversation_id"]
+            self.state["next_conversation_id"] += 1
+            self.state["conversations"].append(
+                {"id": conv_id, "user_id": user_id, "lang": lang, "updated_at": updated_at}
+            )
+            self._one = {"id": conv_id}
             self.rowcount = 1
             return
 
@@ -155,6 +224,8 @@ def fake_db_for_tests(monkeypatch):
         "users_by_id": {},
         "reminders": [],
         "chat_history": [],
+        "conversations": [],
+        "next_conversation_id": 1,
     }
 
     async def _fake_ensure_db_initialized(strict=False):

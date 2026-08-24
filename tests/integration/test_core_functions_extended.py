@@ -144,7 +144,7 @@ def test_cognitive_game_command_flow():
 
 
 def test_ai_chat_response_with_mocked_model(monkeypatch):
-    async def fake_call_ai(user_input: str, user_id: int, lang: str = 'en'):
+    async def fake_call_ai(user_input: str, user_id: int, lang: str = 'en', display_name=None):
         assert user_input
         assert user_id
         assert lang in ('en', 'zh-HK')

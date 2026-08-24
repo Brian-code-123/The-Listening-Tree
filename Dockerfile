@@ -1,4 +1,12 @@
-# ===========================================================================\n# The Listening Tree — Dockerfile (production)\n#\n# Single-stage build.  No ML models are bundled; voice recognition\n# is handled client-side by the browser's Web Speech API.\n#\n# Build:  docker build -t the-listening-tree .\n# Run:    docker run -p 5000:5000 the-listening-tree\n# ===========================================================================
+# ===========================================================================
+# The Listening Tree — Dockerfile (production)
+#
+# Single-stage build.  No ML models are bundled; voice recognition
+# is handled client-side by the browser's Web Speech API.
+#
+# Build:  docker build -t the-listening-tree .
+# Run:    docker run -p 5000:5000 the-listening-tree
+# ===========================================================================
 
 FROM python:3.12-slim
 
