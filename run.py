@@ -185,7 +185,11 @@ async def lifespan(app: FastAPI):
     global _DB_POOL
     _DB_POOL = await asyncpg.create_pool(
         dsn=_ASYNCPG_DSN,  # sslmode is read from the DSN itself — see _ASYNCPG_DSN's comment
-        min_size=1,
+        # min_size=0: connections open lazily on first use instead of the
+        # pool eagerly dialing Postgres at creation time. Keeps app startup
+        # (and CI, which monkeypatches get_db() but not pool creation) from
+        # requiring a reachable database just to construct the pool object.
+        min_size=0,
         max_size=10,
         statement_cache_size=0,  # required behind Supabase's transaction-pooling PgBouncer
         command_timeout=15,       # bounds a stuck query instead of freezing the whole server
