@@ -32,6 +32,10 @@ jobs:
     env:
       SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
       MINIMAL_STARTUP: "1"
+      # These tests never touch a real database (conftest.py provides a fake
+      # DB shim), but run.py requires DATABASE_URL to be set at import time
+      # regardless — give it a placeholder so `import run` doesn't blow up.
+      DATABASE_URL: postgresql://postgres@localhost:5432/unused?sslmode=disable
     steps:
       - name: Checkout
         uses: actions/checkout@v4

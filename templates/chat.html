@@ -287,8 +287,42 @@
                     StatusBar.setBackgroundColor({ color: th === 'dark' ? '#0F1923' : '#5B9A7D' }).catch(() => {});
                 }).observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
             }).catch(() => {});
+            // Native reminder alarms — fire even if the app is backgrounded/closed
+            import('@capacitor/local-notifications').then(({ LocalNotifications }) => {
+                window.__localNotifications = LocalNotifications;
+                LocalNotifications.requestPermissions().catch(() => {});
+            }).catch(() => {});
         }
     })();
+
+    // Reschedule native OS notifications to match the current active reminder list.
+    // Called from checkReminders() (chat.js below) after every /get_reminders fetch.
+    window.syncNativeReminders = function(reminders) {
+        const LocalNotifications = window.__localNotifications;
+        if (!LocalNotifications) return;
+        LocalNotifications.getPending().then(({ notifications }) => {
+            if (notifications.length) {
+                return LocalNotifications.cancel({ notifications: notifications.map(n => ({ id: n.id })) });
+            }
+        }).then(() => {
+            const active = (reminders || []).filter(r => r.active && /^\d{1,2}:\d{2}$/.test(r.time));
+            if (!active.length) return;
+            const toSchedule = active.map((r, i) => {
+                const [h, m] = r.time.split(':').map(Number);
+                const when = new Date();
+                when.setHours(h, m, 0, 0);
+                if (when <= new Date()) when.setDate(when.getDate() + 1);
+                return {
+                    id: i + 1,
+                    title: currentLang === 'zh-HK' ? '⏰ 提醒' : '⏰ Reminder',
+                    body: r.label,
+                    schedule: { at: when },
+                    sound: 'notification.mp3',
+                };
+            });
+            LocalNotifications.schedule({ notifications: toSchedule }).catch(() => {});
+        }).catch(() => {});
+    };
     </script>
 
     <script>
@@ -1018,6 +1052,7 @@
         // ========== Reminder Management ==========
         function checkReminders() {
             $.get('/get_reminders', function(data) {
+                if (window.syncNativeReminders) window.syncNativeReminders(data.reminders);
                 $('#reminderList').empty();
                 if (!data.reminders || data.reminders.length === 0) {
                     const noReminders = '{{ translations.no_reminders if translations else "No active reminders" }}';
