@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev:backend": "python run.py",
-    "dev": "npm run dev:5001",
+    "dev": "npm run dev:3000",
+    "dev:3000": "PORT=3000 python run.py",
     "test:backend": "pytest -q tests/test_basic.py tests/test_core_flows.py tests/test_session_persistence_unit.py",
     "test:unit": "npx vitest run --config vitest.config.ts",
     "test:integration": "PYTHONPATH=. pytest -q tests/integration",
@@ -38,6 +39,7 @@
     "@capacitor/haptics": "^6.0.0",
     "@capacitor/ios": "^6.2.1",
     "@capacitor/keyboard": "^6.0.0",
+    "@capacitor/local-notifications": "^6.1.3",
     "@capacitor/push-notifications": "^6.0.5",
     "@capacitor/splash-screen": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0",

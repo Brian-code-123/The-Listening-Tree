@@ -1412,7 +1412,7 @@ async def login_post(
             f"Too many failed attempts. Try again in {wait_minutes} min." if lang == 'en'
             else f"登入失敗次數過多，請 {wait_minutes} 分鐘後再試"
         )
-        return templates.TemplateResponse("login.html", tpl_context(request, error=locked_msg), status_code=429)
+        return templates.TemplateResponse("login.html", tpl_context(request, error=locked_msg, google_enabled=GOOGLE_LOGIN_ENABLED), status_code=429)
 
     if user and verify_password(password, user["password"]):
         if not is_password_hashed(user["password"]):
@@ -1449,7 +1449,7 @@ async def login_post(
             await db_execute(c, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
         await conn.commit()
     await conn.close()
-    return templates.TemplateResponse("login.html", tpl_context(request, error=generic_error))
+    return templates.TemplateResponse("login.html", tpl_context(request, error=generic_error, google_enabled=GOOGLE_LOGIN_ENABLED))
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):

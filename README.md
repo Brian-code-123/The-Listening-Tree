@@ -43,7 +43,8 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 - Bilingual AI chatbot: warm, patient conversations powered by Zhipu AI GLM-4 LLM in English and Cantonese.
 - Voice interaction: Web Speech API for real-time speech recognition and synthesis.
-- Smart reminder system: CRUD-managed medication and activity reminders, checked server-side every 60 seconds (in-app; push/local notification delivery is not yet wired up).
+- Smart reminder system: CRUD-managed medication and activity reminders. In-browser polling drives an in-app alarm (sound + on-screen alert); on the native mobile build, reminders are also scheduled as local OS notifications so they still fire while the app is backgrounded or closed.
+- Conversation history: dedicated history page for browsing, pinning, tagging, and renaming past conversations, separate from the always-current active chat.
 - Cross-platform support: responsive web app plus native iOS and Android builds via Capacitor.
 - Accessibility optimization: large typography, high-contrast themes, and simplified navigation.
 - Cognitive wellness tools: bilingual memory games and daily wellness prompts.
@@ -57,7 +58,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Framework: Bootstrap 5 for responsive layout
 - Libraries: jQuery, FullCalendar.js, Font Awesome
 - Voice: Web Speech API for browser-native speech-to-text and text-to-speech, with a server-side `/transcribe` fallback (Hugging Face Whisper, then legacy Google Web Speech via `SpeechRecognition`) for browsers without Web Speech API support
-- Mobile build: Capacitor 6 for iOS and Android packaging
+- Mobile build: Capacitor 6 for iOS and Android packaging, with `@capacitor/local-notifications` for background reminder alarms
 - Deployment: Vercel
 
 ### Backend
