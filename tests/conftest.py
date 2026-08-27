@@ -114,8 +114,29 @@ class _FakeCursor:
             return
 
         if "insert into chat_history" in normalized:
-            self.state["chat_history"].append(params)
+            user_id, lang, timestamp, message, conversation_id = params
+            is_bot = "values (?, ?, ?, true," in normalized
+            self.state["chat_history"].append({
+                "user_id": user_id,
+                "lang": lang,
+                "timestamp": timestamp,
+                "message": message,
+                "is_bot": is_bot,
+                "conversation_id": conversation_id,
+                "is_deleted": False,
+            })
             self.rowcount = 1
+            return
+
+        if "select is_bot, message from chat_history" in normalized:
+            conversation_id, limit = params
+            matching = [
+                row for row in self.state["chat_history"]
+                if row["conversation_id"] == conversation_id and not row["is_deleted"]
+            ]
+            recent = matching[-limit:]
+            recent.reverse()
+            self._rows = [{"is_bot": r["is_bot"], "message": r["message"]} for r in recent]
             return
 
         if "select id from conversations where id = ? and user_id = ? and is_deleted = false" in normalized:
@@ -237,4 +258,3 @@ def fake_db_for_tests(monkeypatch):
     monkeypatch.setattr(run, "ensure_db_initialized", _fake_ensure_db_initialized)
     monkeypatch.setattr(run, "get_db", _fake_get_db)
     run.user_game_states.clear()
-    run.user_api_histories.clear()
