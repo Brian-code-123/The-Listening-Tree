@@ -2,7 +2,9 @@ import os
 
 import pytest
 
-import run
+from app.core import config
+from app.db import queries as db
+from app.db import schema
 
 
 class _FakeCursor:
@@ -42,7 +44,7 @@ class _FakeCursor:
         if "insert into users" in normalized:
             email, password, created_at = params
             if email in self.state["users_by_email"]:
-                raise run.PgIntegrityError("duplicate email")
+                raise db.PgIntegrityError("duplicate email")
             user_id = self.state["next_user_id"]
             self.state["next_user_id"] += 1
             user = {
@@ -234,7 +236,7 @@ def fake_db_for_tests(monkeypatch):
     async def _fake_get_db():
         return _FakeConn(state)
 
-    monkeypatch.setattr(run, "ensure_db_initialized", _fake_ensure_db_initialized)
-    monkeypatch.setattr(run, "get_db", _fake_get_db)
-    run.user_game_states.clear()
-    run.user_api_histories.clear()
+    monkeypatch.setattr(schema, "ensure_db_initialized", _fake_ensure_db_initialized)
+    monkeypatch.setattr(db, "get_db", _fake_get_db)
+    config.user_game_states.clear()
+    config.user_api_histories.clear()

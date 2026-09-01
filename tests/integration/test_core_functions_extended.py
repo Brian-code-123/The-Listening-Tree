@@ -24,7 +24,9 @@ import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
-import run
+from app.db import pool as db_pool
+from app.routers import chat as chat_router
+from app.services import transcription as stt
 from run import app
 
 
@@ -36,12 +38,12 @@ def _new_user_email() -> str:
 
 
 def _seed_verification_code(email: str, code: str = "123456") -> str:
-    # A standalone connection, not `run.get_db()` — the app's `_DB_POOL` is
-    # bound to TestClient's own event loop, and `asyncio.run()` here spins up
-    # a separate one, so reusing the pool across them would break asyncpg's
-    # per-loop binding.
+    # A standalone connection, not `app.db.queries.get_db()` — the app's
+    # pool is bound to TestClient's own event loop, and `asyncio.run()` here
+    # spins up a separate one, so reusing the pool across them would break
+    # asyncpg's per-loop binding.
     async def _seed():
-        conn = await asyncpg.connect(dsn=run._ASYNCPG_DSN, statement_cache_size=0)
+        conn = await asyncpg.connect(dsn=db_pool.ASYNCPG_DSN, statement_cache_size=0)
         ts = datetime.now()
         await conn.execute(
             "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES ($1, $2, $3, $4)",
@@ -104,7 +106,7 @@ def test_voice_transcribe_endpoint_with_mocked_stt(monkeypatch):
         UnknownValueError=Exception,
         RequestError=Exception,
     )
-    monkeypatch.setattr(run, 'sr', fake_sr)
+    monkeypatch.setattr(stt, 'sr', fake_sr)
 
     email = _new_user_email()
     password = 'TestPass123!'
@@ -150,7 +152,7 @@ def test_ai_chat_response_with_mocked_model(monkeypatch):
         assert lang in ('en', 'zh-HK')
         return 'Mock AI response for testing.'
 
-    monkeypatch.setattr(run, 'call_ai', fake_call_ai)
+    monkeypatch.setattr(chat_router, 'call_ai', fake_call_ai)
 
     email = _new_user_email()
     password = 'TestPass123!'

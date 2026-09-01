@@ -13,7 +13,9 @@ sequenceDiagram
 
 from fastapi.testclient import TestClient
 
-import run
+from app.db import queries as db
+from app.db import schema
+from run import app
 
 
 class _FakeCursor:
@@ -36,7 +38,7 @@ class _FakeCursor:
         if "insert into users" in normalized:
             email, password, _ts = params
             if email in self.state["users"]:
-                raise run.PgIntegrityError("duplicate")
+                raise db.PgIntegrityError("duplicate")
             new_id = len(self.state["users"]) + 1
             self.state["users"][email] = {
                 "id": new_id,
@@ -113,10 +115,10 @@ def test_existing_user_can_login_without_reregister(monkeypatch):
     async def _fake_get_db():
         return _FakeConn(state)
 
-    monkeypatch.setattr(run, "ensure_db_initialized", _fake_ensure_db_initialized)
-    monkeypatch.setattr(run, "get_db", _fake_get_db)
+    monkeypatch.setattr(schema, "ensure_db_initialized", _fake_ensure_db_initialized)
+    monkeypatch.setattr(db, "get_db", _fake_get_db)
 
-    with TestClient(run.app) as client:
+    with TestClient(app) as client:
         register_resp = client.post(
             "/register",
             data={
