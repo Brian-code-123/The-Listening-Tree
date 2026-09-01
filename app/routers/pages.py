@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.core import config
 from app.core.session import get_lang, get_user, safe_redirect_target, tpl_context
 from app.core.templates import templates
 from app.db import queries as db
@@ -15,7 +16,7 @@ router = APIRouter()
 async def index(request: Request):
     uid = get_user(request)
     if uid is None:
-        return templates.TemplateResponse("login.html", tpl_context(request))
+        return templates.TemplateResponse("login.html", tpl_context(request, google_enabled=config.GOOGLE_LOGIN_ENABLED))
     return templates.TemplateResponse("chat.html", tpl_context(request))
 
 
