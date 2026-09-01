@@ -93,6 +93,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
+      - name: Apply Alembic migrations to the ephemeral CI database
+        run: alembic upgrade head
+
       - name: Run integration tests
         run: PYTHONPATH=. pytest -q tests/integration
 
