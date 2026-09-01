@@ -75,6 +75,11 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Database: PostgreSQL for secure relational persistence
 - Core tables: `users`, `chat_history`, `reminders`, `preferences`, `email_verifications`, `conversations`
 - Hosting: Supabase (managed PostgreSQL with connection pooler)
+- Schema migrations: Alembic (`alembic/versions/`) — run `alembic upgrade
+  head` after pulling a change that touches the schema; `python run.py`
+  also bootstraps a brand-new database on its own for local dev
+  convenience, but ongoing schema changes are written as Alembic revisions,
+  not edits to that bootstrap code
 
 ### DevOps & Testing
 
