@@ -28,6 +28,15 @@ from app.services.email import (
     generate_verification_code,
     send_verification_email,
 )
+from app.services.rate_limit import check_and_increment, client_key
+
+# Generous enough for a real user's occasional retry (wrong password, typo'd
+# email, browser autofill double-submit), tight enough to slow down
+# scripted brute-forcing. Per-IP, 60s fixed window.
+LOGIN_RATE_LIMIT = 10
+REGISTER_RATE_LIMIT = 5
+SEND_CODE_RATE_LIMIT = 5
+RATE_LIMIT_WINDOW_SECONDS = 60
 
 router = APIRouter()
 
@@ -75,6 +84,9 @@ async def login_post(
         HTMLResponse: Redirect to / (home) on success, or login.html with error message on failure
     """
     lang = get_lang(request)
+    if not await check_and_increment(client_key(request, "login"), LOGIN_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
+        too_many_msg = "Too many login attempts. Please wait a moment and try again." if lang == 'en' else "登入嘗試次數過多，請稍等再試"
+        return templates.TemplateResponse("login.html", tpl_context(request, error=too_many_msg, google_enabled=config.GOOGLE_LOGIN_ENABLED), status_code=429)
     email = email.strip().lower()
     password = password.strip()
     generic_error = "Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"
@@ -149,6 +161,11 @@ async def send_verification_code(request: Request):
     Returns JSON {"success": bool, "message": str}
     """
     lang = get_lang(request)
+    if not await check_and_increment(client_key(request, "send_verification_code"), SEND_CODE_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
+        return JSONResponse(
+            {"success": False, "message": "Too many requests. Please wait a moment and try again." if lang == 'en' else "請求次數過多，請稍等再試"},
+            status_code=429,
+        )
     try:
         body = await request.json()
     except Exception:
@@ -253,6 +270,12 @@ async def register_post(
         if wants_json:
             return JSONResponse({"success": False, "field": field, "message": message}, status_code=status_code)
         return templates.TemplateResponse("register.html", tpl_context(request, error=message))
+
+    if not await check_and_increment(client_key(request, "register"), REGISTER_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
+        too_many_msg = "Too many attempts. Please wait a moment and try again." if lang == 'en' else "嘗試次數過多，請稍等再試"
+        if wants_json:
+            return JSONResponse({"success": False, "field": "email", "message": too_many_msg}, status_code=429)
+        return templates.TemplateResponse("register.html", tpl_context(request, error=too_many_msg), status_code=429)
 
     email = email.strip().lower()
     password = password.strip()

@@ -10,6 +10,7 @@ from datetime import datetime
 
 from app.core import config
 from app.db import queries as db
+from app.services.rate_limit import cleanup_old_rate_limit_events
 
 
 async def run_periodic_tasks():
@@ -59,6 +60,7 @@ async def run_periodic_tasks():
             if now.minute % 10 == 0:
                 await cleanup_old_conversations()
                 await cleanup_old_chat_history()
+                await cleanup_old_rate_limit_events()
 
         except asyncio.CancelledError:
             # Allow graceful shutdown to stop this task immediately.
