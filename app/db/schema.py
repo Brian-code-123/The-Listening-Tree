@@ -1,8 +1,19 @@
 """Database schema setup — table/index DDL, run idempotently on startup.
 
-No migration tool yet (see Alembic phase of the SDLC plan) — every
+Schema changes now belong in `alembic/` (see `alembic/versions/`), not
+here — this function is kept only as a local-dev bootstrap convenience (so
+`python run.py` against a brand-new Postgres works without first knowing to
+run `alembic upgrade head`) and stays deliberately frozen at the schema
+`alembic/versions/4b1eb8a60471_..._baseline...py` already captures. Every
 statement here is `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD
-COLUMN IF NOT EXISTS`, safe to re-run on every process start.
+COLUMN IF NOT EXISTS`, safe to re-run on every process start, and harmless
+to run alongside Alembic-managed migrations since it never touches anything
+Alembic wouldn't also consider already-applied. Do NOT add new columns/
+tables/indexes here going forward — write an Alembic revision instead
+(`alembic revision -m "..."`, hand-write the `op.execute(...)` calls — there
+are no ORM models to autogenerate from) so schema changes get a version
+number and a rollback path, which is the whole reason Alembic exists in
+this project.
 """
 import asyncio
 import builtins as _builtins
