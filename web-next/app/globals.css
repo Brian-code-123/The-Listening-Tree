@@ -1,0 +1,330 @@
+/* Ported from /static/style.css in the main app (The-Listening-Tree repo
+   root). Only the tokens and page-scoped rules this /history proof of
+   concept actually needs — not the whole stylesheet. Keep this in sync by
+   hand if the source tokens change; there's no build-time sharing between
+   the two apps yet (see docs/FRONTEND_ROADMAP.md at the repo root for why
+   this is a separate app rather than a shared package at this stage). */
+
+:root, [data-theme='light'] {
+  --bg-primary: #f0f4f8;
+  --bg-secondary: #e8eef4;
+  --bg-card: rgba(255, 255, 255, 0.72);
+  --bg-input: rgba(255, 255, 255, 0.85);
+  --bg-glass-strong: rgba(255, 255, 255, 0.7);
+  --text-primary: #1d2939;
+  --text-secondary: #475467;
+  --text-muted: #98a2b3;
+  --accent: #e07a5f;
+  --primary: #5b9a7d;
+  --primary-light: rgba(91, 154, 125, 0.12);
+  --warm: #f2cc8f;
+  --warm-light: rgba(242, 204, 143, 0.18);
+  --border: rgba(0, 0, 0, 0.08);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --radius-sm: 14px;
+  --radius-xs: 10px;
+  --gradient-bg: linear-gradient(145deg, #d4e4d9 0%, #e8d5c4 30%, #f0f4f8 60%, #d4dfe8 100%);
+  --glass-blur: 16px;
+  --glass-border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+[data-theme='dark'] {
+  --bg-primary: #0f1923;
+  --bg-secondary: #162231;
+  --bg-card: rgba(22, 34, 49, 0.75);
+  --bg-input: rgba(30, 45, 65, 0.8);
+  --bg-glass-strong: rgba(30, 45, 65, 0.7);
+  --text-primary: #e8e0d8;
+  --text-secondary: #b8afa8;
+  --text-muted: #6b7280;
+  --accent: #f2955e;
+  --primary: #6db88c;
+  --primary-light: rgba(109, 184, 140, 0.15);
+  --warm: #f2cc8f;
+  --warm-light: rgba(242, 204, 143, 0.12);
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --gradient-bg: linear-gradient(145deg, #0f1923 0%, #162231 40%, #1a2a3a 70%, #0f1923 100%);
+  --glass-blur: 20px;
+  --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  font-family: 'Inter', 'Noto Sans HK', -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif;
+  background: var(--gradient-bg);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  transition: background 0.5s, color 0.3s;
+}
+
+.theme-toggle {
+  position: fixed;
+  top: 18px;
+  right: 24px;
+  z-index: 9999;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: var(--glass-border);
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-glass);
+  transition: all 0.3s;
+}
+.theme-toggle:hover {
+  transform: scale(1.1);
+  background: var(--primary);
+  color: white;
+}
+
+.hk-guide-nav {
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 15px;
+}
+.hk-guide-nav-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+.hk-guide-back-btn {
+  text-decoration: none;
+  color: var(--primary);
+  font-size: 1.1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: 0.2s;
+}
+.hk-guide-back-btn:hover {
+  color: var(--accent);
+}
+.hk-guide-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hk-guide-lang {
+  display: flex;
+  gap: 8px;
+  margin-right: 48px;
+}
+.chat-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text-primary);
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.25s;
+  white-space: nowrap;
+}
+.chat-nav-btn:hover,
+.chat-nav-btn.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.page-history {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  background: var(--gradient-bg);
+}
+.page-history main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+.filter-chip.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+.filter-chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.conv-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: var(--glass-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.conv-pin-btn {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 1rem;
+}
+.conv-pin-btn.pinned {
+  background: var(--warm-light);
+  border-color: var(--warm);
+  color: #c99a2e;
+}
+.conv-main {
+  flex: 1;
+  min-width: 0;
+}
+.conv-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.conv-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  transition: color 0.2s;
+  min-width: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  text-align: left;
+}
+.conv-title:hover {
+  color: var(--primary);
+}
+.conv-edit-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+.conv-edit-btn:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.conv-title-input {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-xs);
+  border: 1.5px solid var(--primary);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+.conv-meta {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.conv-tag-select {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  padding: 5px 8px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  max-width: 110px;
+}
+.empty-state {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 20px;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 480px) {
+  .conv-card {
+    flex-wrap: wrap;
+  }
+  .conv-tag-select {
+    margin-left: 50px;
+  }
+}

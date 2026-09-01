@@ -2,12 +2,13 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.core import config
 from app.core.session import get_lang, get_user, safe_redirect_target, tpl_context
 from app.core.templates import templates
 from app.db import queries as db
+from translations import get_all_translations
 
 router = APIRouter()
 
@@ -44,3 +45,14 @@ async def accessibility_mode(request: Request):
     if uid is None:
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("accessibility.html", tpl_context(request))
+
+
+@router.get("/translations/{lang}")
+async def translations_json(lang: str):
+    """JSON translations for non-Jinja frontends (e.g. the web-next/ Next.js
+    proof of concept) — the Jinja templates get theirs via tpl_context()
+    instead, this is the only other consumer. Falls back to English for an
+    unrecognized lang code, same as get_text()/tpl_context() do."""
+    if lang not in ('en', 'zh-HK'):
+        lang = 'en'
+    return JSONResponse(get_all_translations(lang))

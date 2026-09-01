@@ -77,6 +77,10 @@ app.add_middleware(
         "http://localhost",
         "http://localhost:5000",
         "http://localhost:5001",
+        # web-next/ — local-only Next.js proof of concept (see
+        # docs/FRONTEND_ROADMAP.md), never deployed. Safe to add since
+        # allow_origins is an explicit allowlist, not a wildcard.
+        "http://localhost:3001",
     ],
     allow_credentials=True,
     allow_methods=["*"],
