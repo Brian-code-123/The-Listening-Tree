@@ -46,7 +46,7 @@ def tpl_context(request: Request, **kwargs) -> dict:
 
 
 _SAFE_REDIRECT_PATHS = {
-    "/", "/chat", "/accessibility", "/hk_guide", "/login", "/register", "/profile",
+    "/", "/chat", "/accessibility", "/hk_guide", "/login", "/register", "/profile", "/history",
 }
 
 
