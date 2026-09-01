@@ -93,9 +93,6 @@ if GOOGLE_LOGIN_ENABLED:
 # Per-user quiz progress: { user_id: { is_game_mode, current_index, ... } }
 user_game_states: dict = {}
 
-# Per-(user, lang) conversation context sent to the LLM
-user_api_histories: dict = {}
-
 # Keep only the most recent chat messages per user/language.
 # Older rows are soft-deleted to bound table growth while preserving continuity.
 CHAT_HISTORY_MAX_MESSAGES_PER_LANG = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES_PER_LANG", "200"))
