@@ -101,30 +101,33 @@ async def test_mobile_guide_button_inline_in_header():
                 print(f"✓ Guide Button Right CSS: {right_value}")
                 print(f"✓ Guide Button Bounding Box: x={x}, y={y}, width={width}, height={height}")
 
-                if position == "fixed" and y > 250:
-                    print("ℹ️ Detected floating helper on non-chat page context; skipping strict chat-header assertions.")
-                    return
-
-                assert position != "fixed", f"Guide button should not be fixed; got '{position}'"
+                assert position != "fixed", f"Guide button should not be fixed; got '{position}' at y={y}"
                 assert y < 180, f"Guide button should stay near header top area, got y={y}"
 
             with allure.step("Verify header controls do not overlap"):
+                # Only the authenticated chat page has a logout link in this
+                # header area — login/register (unauthenticated) legitimately
+                # don't have one at all, so this check is conditional on it
+                # actually being present, not a reason to skip the guide
+                # button's own position assertions above.
                 logout_btn = page.locator('a[href="/logout"]')
-                logout_visible = await logout_btn.is_visible(timeout=5000)
-                assert logout_visible, "Logout button should be visible on mobile viewport"
-                logout_box = await logout_btn.bounding_box()
-                assert logout_box is not None, "Logout button bounding box could not be determined"
+                logout_visible = await logout_btn.is_visible(timeout=3000)
+                if not logout_visible:
+                    print("ℹ️ No logout button on this page context; skipping overlap-with-logout check.")
+                else:
+                    logout_box = await logout_btn.bounding_box()
+                    assert logout_box is not None, "Logout button bounding box could not be determined"
 
-                def overlaps(a, b):
-                    return not (
-                        a["x"] + a["width"] <= b["x"]
-                        or b["x"] + b["width"] <= a["x"]
-                        or a["y"] + a["height"] <= b["y"]
-                        or b["y"] + b["height"] <= a["y"]
-                    )
+                    def overlaps(a, b):
+                        return not (
+                            a["x"] + a["width"] <= b["x"]
+                            or b["x"] + b["width"] <= a["x"]
+                            or a["y"] + a["height"] <= b["y"]
+                            or b["y"] + b["height"] <= a["y"]
+                        )
 
-                guide_box = {"x": x, "y": y, "width": width, "height": height}
-                assert not overlaps(guide_box, logout_box), "Guide button must not overlap logout button"
+                    guide_box = {"x": x, "y": y, "width": width, "height": height}
+                    assert not overlaps(guide_box, logout_box), "Guide button must not overlap logout button"
 
                 toggle_btn = page.locator('#sidebarToggleHeader')
                 if await toggle_btn.is_visible(timeout=3000):

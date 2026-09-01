@@ -36,6 +36,7 @@
     <div class="auth-lang-switch">
         <a href="/set_language/en" class="{{ 'active' if lang == 'en' or not lang else '' }}">EN</a>
         <a href="/set_language/zh-HK" class="{{ 'active' if lang == 'zh-HK' else '' }}">繁中</a>
+        <button type="button" class="auth-lang-switch-guide" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">?</button>
     </div>
 
     <div class="auth-container">
@@ -173,8 +174,7 @@
         </div>
     </div>
 
-    <!-- Guide Helper FAB -->
-    <button class="guide-fab" id="guideFab" title="{{ translations.guide_helper if translations else 'Guide Helper' }}">?</button>
+    <!-- Guide Helper panel (trigger button now lives inline in .auth-lang-switch above) -->
     <div class="guide-panel" id="guidePanel">
         <div class="guide-panel-header">
             <h3><i class="fas fa-book-open"></i> {{ translations.guide_title if translations else 'Operation Guide' }}</h3>
