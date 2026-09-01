@@ -760,13 +760,26 @@ body {
 .page-register .btn-primary:hover { background: var(--accent-hover); transform: translateY(-2px); }
 .page-login .form-link, .page-register .form-link { color: var(--primary); text-decoration: none; font-weight: 500; }
 .page-login .form-link:hover, .page-register .form-link:hover { text-decoration: underline; }
-.page-login .auth-lang-switch, .page-register .auth-lang-switch { position: fixed; top: 20px; right: 80px; z-index: 1000; }
+.page-login .auth-lang-switch, .page-register .auth-lang-switch { position: fixed; top: 20px; right: 80px; z-index: 1000; display: flex; align-items: center; gap: 4px; }
 .page-login .auth-lang-switch a, .page-register .auth-lang-switch a {
     padding: 8px 16px; margin: 0 4px; border-radius: 20px; text-decoration: none;
     color: var(--text-primary); background: var(--bg-glass-strong); backdrop-filter: blur(8px);
     border: 1px solid var(--border); transition: all 0.3s; font-weight: 600; font-size: 0.85rem;
 }
 .page-login .auth-lang-switch a.active, .page-register .auth-lang-switch a.active {
+    background: var(--primary); color: white; border-color: var(--primary);
+}
+/* Guide-helper button, moved inline here (not its own fixed floating
+   button) so it sits in the same top controls row as the language switch
+   instead of overlapping content lower on the page — see
+   tests/test_mobile_fab_position.py for the layout contract this satisfies. */
+.page-login .auth-lang-switch-guide, .page-register .auth-lang-switch-guide {
+    width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--bg-glass-strong); backdrop-filter: blur(8px); color: var(--text-primary);
+    font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: all 0.3s;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.page-login .auth-lang-switch-guide:hover, .page-register .auth-lang-switch-guide:hover {
     background: var(--primary); color: white; border-color: var(--primary);
 }
 .page-login .help-section, .page-register .help-section {
@@ -839,6 +852,9 @@ body {
     border: 2px solid transparent; transition: all 0.3s; font-weight: 600;
 }
 .page-accessibility .lang-btn.active, .page-accessibility .lang-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+/* .nav-guide-btn reuses .lang-btn's look (it's a <button>, not an <a>, so
+   reset the default button chrome the browser would otherwise add). */
+.page-accessibility .nav-guide-btn { cursor: pointer; font-size: 1rem; }
 .page-accessibility .btn-accessible {
     padding: 15px 25px; min-width: 140px; font-size: 1.05rem; font-weight: 600;
     border: 2px solid transparent; border-radius: var(--radius-sm); cursor: pointer;
