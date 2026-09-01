@@ -5,11 +5,16 @@ from typing import Optional
 
 import httpx
 
-from app.core import config
+from app.db import queries as db
 
 ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY")
 ZHIPU_BASE_URL = os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
 ZHIPU_MODEL = os.environ.get("ZHIPU_MODEL", "glm-4-flash")
+# How many recent chat_history rows (~half that many round-trips) are sent
+# to the LLM as conversation memory. Read from chat_history rather than an
+# in-memory dict so it survives restarts and is shared across serverless
+# instances instead of silently resetting.
+CHAT_CONTEXT_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MESSAGES", "20"))
 
 if ZHIPU_API_KEY:
     print(f"[AI] ✅ {ZHIPU_MODEL} configured (Zhipu AI)")
@@ -88,7 +93,7 @@ WARM_FALLBACK_EN = [
 ]
 
 
-async def call_ai(user_input: str, user_id: int, lang: str = 'en', display_name: Optional[str] = None):
+async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', display_name: Optional[str] = None, conversation_id: Optional[int] = None):
     """Call Zhipu AI (智谱AI) for warm elderly conversation."""
     import builtins as _builtins
 
@@ -109,13 +114,30 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', display_name:
     if not ZHIPU_API_KEY:
         return random.choice(fallback)
 
-    history_key = (user_id, lang)
-    if history_key not in config.user_api_histories:
-        config.user_api_histories[history_key] = []
-    history = config.user_api_histories[history_key]
-
     messages = [{"role": "system", "content": system_prompt}]
-    messages.extend(history[-10:])
+
+    if conversation_id is not None:
+        # Conversation memory comes from chat_history itself instead of an
+        # in-memory dict, so it survives restarts and is consistent across
+        # serverless instances. The caller already inserted the current user
+        # message into this conversation before calling us, so it's the
+        # newest row here — fetch one extra and drop it to get the *prior*
+        # turns only.
+        await db.db_execute(
+            cursor,
+            """
+            SELECT is_bot, message FROM chat_history
+            WHERE conversation_id = ? AND is_deleted = FALSE
+            ORDER BY id DESC LIMIT ?
+            """,
+            (conversation_id, CHAT_CONTEXT_MESSAGES + 1),
+        )
+        history_rows = cursor.fetchall()[1:]
+        history_rows.reverse()
+        messages.extend(
+            {"role": "assistant" if row["is_bot"] else "user", "content": row["message"]}
+            for row in history_rows
+        )
 
     messages.append({"role": "user", "content": user_input})
 
@@ -144,10 +166,6 @@ async def call_ai(user_input: str, user_id: int, lang: str = 'en', display_name:
         reply = message.get("content", "")
 
         if reply.strip():
-            history.append({"role": "user", "content": user_input})
-            history.append({"role": "assistant", "content": reply})
-            if len(history) > 20:
-                config.user_api_histories[history_key] = history[-10:]
             return reply
         else:
             raise ValueError("Empty response from API")

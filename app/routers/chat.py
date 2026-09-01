@@ -294,7 +294,7 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
             await db.db_execute(c, "SELECT username FROM users WHERE id = ?", (uid,))
             user_row = c.fetchone()
             display_name = user_row["username"] if user_row else None
-            response = await call_ai(user_input_original, uid, lang, display_name=display_name)
+            response = await call_ai(c, user_input_original, uid, lang, display_name=display_name, conversation_id=conversation_id)
 
     # Store bot response
     await db.db_execute(
