@@ -10,6 +10,7 @@ import os
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.background import run_periodic_tasks
@@ -58,6 +59,28 @@ app = FastAPI(
     description="Bilingual AI companion chatbot for elderly wellness",
     version="2.0.0",
     lifespan=lifespan
+)
+
+# The app is currently only ever called same-origin (Jinja-rendered pages'
+# own AJAX calls, and the Capacitor mobile build's WebView navigates
+# directly to the deployed URL via `server.url` in capacitor.config.ts,
+# rather than serving templates locally and calling out) — so this is
+# defense-in-depth against a *future* cross-origin caller, not a fix for
+# anything currently broken. An explicit allowlist, not a wildcard, since
+# `allow_credentials=True` is required for the session cookie to work and
+# browsers refuse to combine that with `allow_origins=["*"]` anyway.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://the-listening-tree.vercel.app",
+        "capacitor://localhost",
+        "http://localhost",
+        "http://localhost:5000",
+        "http://localhost:5001",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.add_middleware(

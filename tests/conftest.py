@@ -3,8 +3,33 @@ import os
 import pytest
 
 from app.core import config
+from app.db import pool as db_pool
 from app.db import queries as db
 from app.db import schema
+
+# Safety guard: RUN_LIVE_DB=1 tests are meant to run against a disposable
+# LOCAL Postgres. .env.local is loaded with override=True (see
+# app/core/config.py), which silently wins over any DATABASE_URL exported
+# on the command line — so a .env.local pointed at production (as this
+# project's local dev setup has been) makes "run the integration tests
+# locally" silently run them against production instead. That happened for
+# real (see the SDLC-plan commit that cleaned up the resulting test data) —
+# this check exists so it can never happen again silently. If this fires,
+# either point .env.local's DATABASE_URL/SUPABASE_POOLER_URL at a local
+# Postgres, or temporarily move .env.local aside before running tests.
+if os.environ.get("RUN_LIVE_DB") == "1":
+    _resolved_host = (db_pool.DB_HOSTNAME or "").lower()
+    _safe_hosts = {"localhost", "127.0.0.1", "::1"}
+    if _resolved_host not in _safe_hosts:
+        pytest.exit(
+            f"RUN_LIVE_DB=1 tests would connect to '{_resolved_host}', which "
+            f"is not a recognized local host ({sorted(_safe_hosts)}). Refusing "
+            f"to run — this almost certainly means .env.local's DATABASE_URL/"
+            f"SUPABASE_POOLER_URL points at a real (production) database. "
+            f"Point it at a local Postgres, or move .env.local aside, before "
+            f"running RUN_LIVE_DB=1 tests.",
+            returncode=1,
+        )
 
 
 class _FakeCursor:

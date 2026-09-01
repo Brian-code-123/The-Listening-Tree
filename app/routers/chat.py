@@ -17,9 +17,17 @@ from app.routers.conversations import get_or_create_active_conversation
 from app.services.ai import call_ai
 from app.services.quiz import is_quiz_answer_correct, questions, questions_zh
 from app.services import transcription as stt
+from app.services.rate_limit import check_and_increment, client_key
 from translations import get_text
 
 router = APIRouter()
+
+# Voice clips are naturally chunky (a few seconds of audio each) and the
+# elderly-friendly UI encourages retries, so this is looser than the auth
+# routes' limits — generous enough for real use, still bounds a script
+# hammering the Whisper/SpeechRecognition backends.
+TRANSCRIBE_RATE_LIMIT = 20
+RATE_LIMIT_WINDOW_SECONDS = 60
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +330,9 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang
     """
     if get_user(request) is None:
         return JSONResponse({"text": "", "error": "Not authenticated"}, status_code=401)
+
+    if not await check_and_increment(client_key(request, "transcribe"), TRANSCRIBE_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
+        return JSONResponse({"text": "", "error": "Too many requests. Please wait a moment."}, status_code=429)
 
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > stt.MAX_TRANSCRIBE_UPLOAD_BYTES:
