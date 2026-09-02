@@ -16,6 +16,7 @@ from app.db import queries as db
 from app.routers.conversations import get_or_create_active_conversation
 from app.services.ai import call_ai
 from app.services.quiz import is_quiz_answer_correct, questions, questions_zh
+from app.services.reminders import create_reminder, delete_reminder_by_label
 from app.services import transcription as stt
 from app.services.rate_limit import check_and_increment, client_key
 from translations import get_text
@@ -130,12 +131,7 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
             h, m = map(int, time_str.split(':'))
             # Ensure valid 24-hour format (0-23 for hours, 0-59 for minutes)
             if 0 <= h <= 23 and 0 <= m <= 59:
-                await db.db_execute(
-                    c,
-                    "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, TRUE, ?)",
-                    (uid, label, time_str, timestamp),
-                )
-                await conn.commit()
+                await create_reminder(uid, label, time_str)
                 response = f"提醒已設置：{label}，時間 {time_str}" if lang == 'zh-HK' else f"Reminder set: {label} at {time_str}"
             else:
                 response = "時間無效。請用24小時格式 HH:MM" if lang == 'zh-HK' else "Invalid time. Use 24-hour format HH:MM"
@@ -151,12 +147,11 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
             parts = user_input_lower.split(maxsplit=2)
             label = parts[2] if len(parts) == 3 else None
         if label:
-            await db.db_execute(c, "DELETE FROM reminders WHERE user_id = ? AND label = ?", (uid, label))
-            if db._safe_rowcount(c) > 0:
+            found = await delete_reminder_by_label(uid, label)
+            if found:
                 response = f"已刪除提醒：{label}" if lang == 'zh-HK' else f"Deleted reminder: {label}"
             else:
                 response = "搵唔到呢個提醒。" if lang == 'zh-HK' else "No reminder found with that name."
-            await conn.commit()
         else:
             response = "格式：刪除提醒 [活動]" if lang == 'zh-HK' else "Usage: delete reminder [activity]"
 

@@ -81,12 +81,24 @@ async def login_post(
         remember_me: Present (any value) when the "remember me" checkbox was checked
 
     Returns:
-        HTMLResponse: Redirect to / (home) on success, or login.html with error message on failure
+        HTMLResponse: Redirect to / (home) on success, or login.html with error message on failure.
+        JSONResponse: if the request declares `Accept: application/json` (the
+        Next.js login page), mirroring /register's {success, message} / 429
+        / {success: true, redirect} contract instead of re-rendering HTML.
     """
     lang = get_lang(request)
+    wants_json = "application/json" in request.headers.get("accept", "")
+
+    def fail(message: str, status_code: int = 200):
+        if wants_json:
+            return JSONResponse({"success": False, "message": message}, status_code=status_code)
+        return templates.TemplateResponse(
+            "login.html", tpl_context(request, error=message, google_enabled=config.GOOGLE_LOGIN_ENABLED), status_code=status_code
+        )
+
     if not await check_and_increment(client_key(request, "login"), LOGIN_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
         too_many_msg = "Too many login attempts. Please wait a moment and try again." if lang == 'en' else "登入嘗試次數過多，請稍等再試"
-        return templates.TemplateResponse("login.html", tpl_context(request, error=too_many_msg, google_enabled=config.GOOGLE_LOGIN_ENABLED), status_code=429)
+        return fail(too_many_msg, status_code=429)
     email = email.strip().lower()
     password = password.strip()
     generic_error = "Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"
@@ -106,7 +118,7 @@ async def login_post(
             f"Too many failed attempts. Try again in {wait_minutes} min." if lang == 'en'
             else f"登入失敗次數過多，請 {wait_minutes} 分鐘後再試"
         )
-        return templates.TemplateResponse("login.html", tpl_context(request, error=locked_msg, google_enabled=config.GOOGLE_LOGIN_ENABLED), status_code=429)
+        return fail(locked_msg, status_code=429)
 
     if user and verify_password(password, user["password"]):
         if not is_password_hashed(user["password"]):
@@ -128,6 +140,8 @@ async def login_post(
         if pref:
             request.session['language'] = pref["pref_value"]
         await conn.close()
+        if wants_json:
+            return JSONResponse({"success": True, "redirect": "/"})
         return RedirectResponse(url="/", status_code=303)
 
     if user:
@@ -143,7 +157,7 @@ async def login_post(
             await db.db_execute(c, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
         await conn.commit()
     await conn.close()
-    return templates.TemplateResponse("login.html", tpl_context(request, error=generic_error, google_enabled=config.GOOGLE_LOGIN_ENABLED))
+    return fail(generic_error)
 
 
 @router.get("/register", response_class=HTMLResponse)

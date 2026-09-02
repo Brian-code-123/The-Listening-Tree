@@ -49,10 +49,19 @@ async def accessibility_mode(request: Request):
 
 @router.get("/translations/{lang}")
 async def translations_json(lang: str):
-    """JSON translations for non-Jinja frontends (e.g. the web-next/ Next.js
-    proof of concept) — the Jinja templates get theirs via tpl_context()
-    instead, this is the only other consumer. Falls back to English for an
-    unrecognized lang code, same as get_text()/tpl_context() do."""
+    """JSON translations for non-Jinja frontends (e.g. web-next/'s Next.js
+    pages) — the Jinja templates get theirs via tpl_context() instead, this
+    is the only other consumer. Falls back to English for an unrecognized
+    lang code, same as get_text()/tpl_context() do."""
     if lang not in ('en', 'zh-HK'):
         lang = 'en'
     return JSONResponse(get_all_translations(lang))
+
+
+@router.get("/config")
+async def client_config():
+    """Non-translation app config for non-Jinja frontends (currently just
+    whether Google Sign-In is enabled). Deliberately separate from
+    /translations/{lang} — that endpoint's contract is display strings,
+    not feature flags, and mixing the two in one payload muddies both."""
+    return JSONResponse({"google_enabled": config.GOOGLE_LOGIN_ENABLED})

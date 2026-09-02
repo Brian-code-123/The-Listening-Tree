@@ -194,8 +194,11 @@ class _FakeCursor:
 
         if "insert into reminders" in normalized:
             user_id, label, reminder_time, created_at = params
+            reminder_id = self.state["next_reminder_id"]
+            self.state["next_reminder_id"] += 1
             self.state["reminders"].append(
                 {
+                    "id": reminder_id,
                     "user_id": user_id,
                     "label": label,
                     "reminder_time": reminder_time,
@@ -203,6 +206,7 @@ class _FakeCursor:
                     "created_at": created_at,
                 }
             )
+            self._one = {"id": reminder_id}
             self.rowcount = 1
             return
 
@@ -217,6 +221,17 @@ class _FakeCursor:
             self.rowcount = before - len(self.state["reminders"])
             return
 
+        if "delete from reminders where user_id = ? and id = ?" in normalized:
+            user_id, reminder_id = params
+            before = len(self.state["reminders"])
+            self.state["reminders"] = [
+                r
+                for r in self.state["reminders"]
+                if not (r["user_id"] == user_id and r["id"] == reminder_id)
+            ]
+            self.rowcount = before - len(self.state["reminders"])
+            return
+
         if "update reminders set is_active = false" in normalized:
             _ts, user_id, label = params
             updated = 0
@@ -227,10 +242,11 @@ class _FakeCursor:
             self.rowcount = updated
             return
 
-        if "select label, reminder_time, is_active from reminders" in normalized:
+        if "select id, label, reminder_time, is_active from reminders" in normalized:
             user_id, _today = params
             self._rows = [
                 {
+                    "id": r["id"],
                     "label": r["label"],
                     "reminder_time": r["reminder_time"],
                     "is_active": 1 if r["is_active"] else 0,
@@ -271,6 +287,7 @@ def fake_db_for_tests(monkeypatch):
         "users_by_email": {},
         "users_by_id": {},
         "reminders": [],
+        "next_reminder_id": 1,
         "chat_history": [],
         "conversations": [],
         "next_conversation_id": 1,
