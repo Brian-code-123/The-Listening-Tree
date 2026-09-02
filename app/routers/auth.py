@@ -444,6 +444,29 @@ async def logout(request: Request):
 # ---------------------------------------------------------------------------
 # Profile — display name + password
 # ---------------------------------------------------------------------------
+@router.get("/me")
+async def current_user(request: Request):
+    """Session-identity check + current user info for non-Jinja frontends —
+    used both as the Next.js port's "am I logged in" auth-wrapper check and
+    as /profile's data source (the Jinja page gets the same data for free
+    via tpl_context(); this is the only other consumer)."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"authenticated": False}, status_code=401)
+    conn = await db.get_db()
+    c = conn.cursor()
+    await db.db_execute(c, "SELECT username, email FROM users WHERE id = ?", (uid,))
+    user_row = c.fetchone()
+    await conn.close()
+    return JSONResponse(
+        {
+            "authenticated": True,
+            "display_name": (user_row["username"] if user_row else None) or "",
+            "email": user_row["email"] if user_row else "",
+        }
+    )
+
+
 @router.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request):
     uid = get_user(request)
