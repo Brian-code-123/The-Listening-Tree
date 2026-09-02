@@ -1,37 +1,39 @@
-# web-next — Next.js proof of concept for `/history`
+# web-next — Next.js `/history` (production)
 
-Local-dev-only proof of concept for the Jinja2+jQuery → Next.js migration
-described in [`../docs/FRONTEND_ROADMAP.md`](../docs/FRONTEND_ROADMAP.md)
-(Stage 2). It reimplements the existing `/history` conversation-history
-page against the real backend API — no mocking — to validate the
-architecture (routing, data fetching, component structure) before
-committing to migrating anything else. The existing Jinja `/history` page
-at `templates/conversation_history.html` is untouched and keeps working
-exactly as it does today; this runs alongside it, not instead of it.
+Started as a local-only proof of concept for the Jinja2+jQuery → Next.js
+migration described in
+[`../docs/FRONTEND_ROADMAP.md`](../docs/FRONTEND_ROADMAP.md) (Stage 2),
+now deployed to production as a second Vercel `service` alongside the
+FastAPI app — see `vercel.json` at the repo root. Both services sit behind
+the same `the-listening-tree.vercel.app` origin, routed by path (`/history`
+and `/_next/*` go to this app, everything else to the Python one), so the
+`lt_session` session cookie works the same way it always has — no
+cross-origin auth workaround needed in production. It reimplements the
+`/history` conversation-history page against the real backend API — no
+mocking. The old Jinja `/history` route/template
+(`templates/conversation_history.html`) is left in place but no longer
+reachable once the `services` rewrite is live, since `GET /history` now
+resolves to this app instead — see the SDLC plan for why it wasn't deleted
+in the same pass as this deployment.
 
-**Not deployed.** Making this live would need `vercel.json` restructured
-into a multi-builder config (currently a single catch-all routing
-everything to the Python function) and — since Vercel projects on
-different `*.vercel.app` subdomains are different sites for cookie
-purposes, and this project has no custom domain to share a cookie domain
-across two deployments — a real plan for how auth works across two
-separately-deployed apps. Both are real, solvable problems, just
-deliberately out of scope for a local proof of concept.
-
-## Running it
+## Running it locally
 
 1. Start the backend first, from the repo root: `python run.py` (port 5000).
 2. Log in normally at `http://localhost:5000/login` in your browser.
 3. From this directory: `npm install && npm run dev` (port 3001).
 4. Open `http://localhost:3001/history`.
 
-Step 2 matters: this app has no login page of its own. It relies on the
-`lt_session` cookie already being set in your browser from step 2 —
-`localhost` cookies are host-scoped without a port component, so the
-cookie set while on `localhost:5000` is also sent along with this app's
-`credentials: 'include'` fetches to `localhost:5000` from `localhost:3001`.
-If you see a fetch error mentioning the backend, you're probably not
-logged in at `localhost:5000` yet.
+Locally the two apps are still separate dev servers on different ports —
+`web-next/.env.local` (gitignored) sets `NEXT_PUBLIC_API_BASE=http://localhost:5000`
+so this app's fetches/links point at the right place; in production that
+variable is unset, which makes `API_BASE` an empty string and every
+request/link resolve same-origin instead. Step 2 above matters locally:
+this app has no login page of its own, and relies on the `lt_session`
+cookie already being set in your browser — `localhost` cookies are
+host-scoped without a port component, so the cookie set on `localhost:5000`
+is also sent along with this app's `credentials: 'include'` fetches from
+`localhost:3001`. If you see a fetch error mentioning the backend, you're
+probably not logged in at `localhost:5000` yet.
 
 ## What's ported vs. what isn't
 

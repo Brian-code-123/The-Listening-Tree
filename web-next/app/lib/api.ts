@@ -1,15 +1,17 @@
-// Talks to the FastAPI backend running locally on port 5000. This POC is
-// local-dev-only (see docs/FRONTEND_ROADMAP.md and the SDLC plan) — the
-// base URL is hardcoded rather than configurable since there's no
-// deployed target yet.
-export const API_BASE = "http://localhost:5000";
+// In production this app is deployed as a Vercel `services` route
+// alongside the FastAPI app under the same origin (see vercel.json at the
+// repo root) — same-origin means a relative/empty base is correct there.
+// Locally the two run as separate dev servers on different ports, so
+// NEXT_PUBLIC_API_BASE (set in web-next/.env.local, gitignored) points
+// this at the FastAPI dev server instead.
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    // Required for the lt_session cookie (set by logging in at
-    // localhost:5000/login) to be sent along with cross-port requests from
-    // localhost:3001 — see the CORS allowlist in app/main.py at the repo
-    // root, which explicitly permits this origin with allow_credentials.
+    // Same-origin in production, so this is a no-op there — kept for local
+    // dev, where it's required for the lt_session cookie (set by logging
+    // in at localhost:5000/login) to cross ports to localhost:3001. See
+    // the CORS allowlist in app/main.py at the repo root.
     credentials: "include",
     ...init,
   });

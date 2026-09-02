@@ -1,9 +1,13 @@
 {
-  "builds": [
-    { "src": "api/index.py", "use": "@vercel/python" }
-  ],
-  "routes": [
-    { "src": "^/(.*)$", "dest": "/api/index.py" }
-  ],
-  "regions": ["hkg1"]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "api": { "root": ".", "entrypoint": "api/index.py" },
+    "history": { "root": "web-next" }
+  },
+  "rewrites": [
+    { "source": "/_next/(.*)", "destination": { "service": "history" } },
+    { "source": "/history", "destination": { "service": "history" } },
+    { "source": "/history/(.*)", "destination": { "service": "history" } },
+    { "source": "/(.*)", "destination": { "service": "api" } }
+  ]
 }
