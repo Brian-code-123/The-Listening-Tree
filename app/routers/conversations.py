@@ -6,11 +6,10 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 
 from app.core import config
-from app.core.session import _CONTROL_CHAR_PATTERN, get_lang, get_user, tpl_context
-from app.core.templates import templates
+from app.core.session import _CONTROL_CHAR_PATTERN, get_lang, get_user
 from app.db import queries as db
 from translations import TRANSLATIONS, get_text
 
@@ -237,19 +236,6 @@ async def rename_conversation(request: Request, conversation_id: int, title: str
         return JSONResponse({"title": cleaned or get_text("new_conversation", lang)})
     finally:
         await conn.close()
-
-
-@router.get("/history", response_class=HTMLResponse)
-async def conversation_history_page(request: Request):
-    """Dedicated page for browsing, pinning, and tagging all conversations —
-    the sidebar only keeps a "new conversation" shortcut once this exists."""
-    uid = get_user(request)
-    if uid is None:
-        return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse(
-        "conversation_history.html",
-        tpl_context(request, conversation_tags=config.CONVERSATION_TAGS),
-    )
 
 
 @router.post("/conversations/new")
