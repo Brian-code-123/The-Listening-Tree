@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchConversations, type Conversation } from "../lib/api";
+import { API_BASE, fetchConversations, type Conversation } from "../lib/api";
 import { fetchTranslations, type Translations } from "../lib/translations";
 import FilterBar from "./components/FilterBar";
 import ConversationCard from "./components/ConversationCard";
@@ -34,11 +34,10 @@ export default function HistoryPage() {
         setTranslations(tData);
       } catch (e) {
         if (!cancelled) {
-          setError(
-            e instanceof Error
-              ? `${e.message} — is the backend running at localhost:5000, and are you logged in there?`
-              : "Failed to load."
-          );
+          const hint = API_BASE
+            ? `is the backend running at ${API_BASE}, and are you logged in there?`
+            : "are you logged in?";
+          setError(e instanceof Error ? `${e.message} — ${hint}` : "Failed to load.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -76,7 +75,7 @@ export default function HistoryPage() {
 
       <nav className="hk-guide-nav">
         <div className="hk-guide-nav-inner">
-          <a href="http://localhost:5000/" className="hk-guide-back-btn" title={translations.conversation_history_back ?? "Back to Chat"}>
+          <a href={`${API_BASE}/`} className="hk-guide-back-btn" title={translations.conversation_history_back ?? "Back to Chat"}>
             <i className="fas fa-arrow-left" />
             <span>{translations.conversation_history_back ?? "Back to Chat"}</span>
           </a>
