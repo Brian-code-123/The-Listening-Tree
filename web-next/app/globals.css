@@ -925,3 +925,268 @@ body {
     text-align: center;
   }
 }
+
+/* ================================================================
+   /accessibility — a simplified chat UI (not a settings page), ported
+   from static/style.css's .page-accessibility rules.
+   ================================================================ */
+.page-accessibility {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  background: var(--gradient-bg);
+}
+.page-accessibility .skip-link {
+  position: absolute;
+  top: -100px;
+  left: 0;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  padding: 8px 16px;
+  z-index: 10000;
+  border-radius: 0 0 5px 0;
+}
+.page-accessibility .skip-link:focus {
+  top: 0;
+}
+.page-accessibility .accessibility-banner {
+  background: var(--bg-card);
+  backdrop-filter: blur(var(--glass-blur));
+  padding: 20px;
+  margin: 20px auto;
+  max-width: 900px;
+  border-radius: 20px;
+  text-align: center;
+  border: var(--glass-border);
+}
+.page-accessibility .accessibility-banner-icon {
+  font-size: 3rem;
+  color: var(--primary);
+  margin-bottom: 10px;
+}
+.page-accessibility .nav-bar {
+  background: var(--bg-card);
+  backdrop-filter: blur(var(--glass-blur));
+  padding: 20px;
+  margin: 0 auto 20px;
+  max-width: 900px;
+  border-radius: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  border: var(--glass-border);
+}
+.page-accessibility .nav-title {
+  font-size: 1.4rem;
+  color: var(--text-primary);
+  margin: 0;
+}
+.page-accessibility .lang-switch {
+  display: flex;
+  gap: 10px;
+}
+.page-accessibility .lang-btn {
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 2px solid transparent;
+  transition: all 0.3s;
+  font-weight: 600;
+}
+.page-accessibility .lang-btn.active,
+.page-accessibility .lang-btn:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.page-accessibility .btn-accessible {
+  padding: 15px 25px;
+  min-width: 140px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.3s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+}
+.page-accessibility .btn-primary-accessible {
+  background: var(--primary);
+  color: white;
+}
+.page-accessibility .btn-success-accessible {
+  background: var(--primary);
+  color: white;
+}
+.page-accessibility .btn-danger-accessible {
+  background: var(--accent);
+  color: white;
+}
+.page-accessibility .btn-secondary-accessible {
+  background: var(--text-muted);
+  color: white;
+}
+.page-accessibility .btn-accessible:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.page-accessibility .btn-accessible:focus {
+  outline: 3px solid var(--warm);
+  outline-offset: 2px;
+}
+.page-accessibility .chat-container {
+  background: var(--bg-card);
+  backdrop-filter: blur(var(--glass-blur));
+  border-radius: 20px;
+  padding: 30px;
+  max-width: 900px;
+  margin: 0 auto;
+  box-shadow: var(--shadow);
+  border: var(--glass-border);
+}
+.page-accessibility .chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  color: var(--text-primary);
+}
+.page-accessibility .messages-area {
+  min-height: 380px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--bg-chat, var(--bg-secondary));
+  border-radius: var(--radius-sm);
+  margin-bottom: 20px;
+  border: 2px solid var(--border);
+}
+.page-accessibility .message {
+  padding: 15px;
+  margin-bottom: 15px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border-left: 4px solid var(--primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+.page-accessibility .message-bot {
+  border-left-color: var(--primary);
+}
+.page-accessibility .message-user {
+  border-left-color: var(--accent);
+}
+.page-accessibility .message-label {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+.page-accessibility .message-time {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+.page-accessibility .input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.page-accessibility .input-wrapper {
+  display: flex;
+  gap: 10px;
+}
+.page-accessibility .input-field {
+  flex: 1;
+  padding: 15px;
+  font-size: 1.1rem;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+.page-accessibility .input-field:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(91, 154, 125, 0.15);
+}
+.page-accessibility .voice-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.page-accessibility .voice-btn {
+  padding: 15px 25px;
+  font-size: 1.1rem;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.3s;
+  font-weight: 600;
+}
+.page-accessibility .voice-btn-record {
+  background: var(--accent);
+  color: white;
+}
+.page-accessibility .voice-btn-stop {
+  background: #888;
+  color: white;
+}
+.page-accessibility .voice-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.page-accessibility .voice-btn.recording {
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.page-accessibility .status-message {
+  padding: 15px;
+  border-radius: var(--radius-sm);
+  margin-top: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+.page-accessibility .status-success {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+.page-accessibility .status-error {
+  background: rgba(224, 122, 95, 0.12);
+  color: var(--accent);
+}
+.page-accessibility .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 768px) {
+  .page-accessibility .nav-bar {
+    flex-direction: column;
+    text-align: center;
+  }
+  .page-accessibility .chat-header {
+    flex-direction: column;
+    gap: 15px;
+  }
+  .page-accessibility .input-wrapper {
+    flex-direction: column;
+  }
+}
