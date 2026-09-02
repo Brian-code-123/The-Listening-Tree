@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Conversation } from "../../lib/api";
-import { renameConversation, setConversationTag, togglePin } from "../../lib/api";
+import { API_BASE, renameConversation, setConversationTag, togglePin } from "../../lib/api";
 import { CONVERSATION_TAGS, type Translations } from "../../lib/translations";
 
 interface ConversationCardProps {
@@ -100,7 +100,7 @@ export default function ConversationCard({
             />
           ) : (
             <>
-              <a className="conv-title" href={`http://localhost:5000/?conversation_id=${conversation.id}`}>
+              <a className="conv-title" href={`${API_BASE}/?conversation_id=${conversation.id}`}>
                 {conversation.title}
               </a>
               <button
