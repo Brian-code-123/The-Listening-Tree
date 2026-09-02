@@ -99,6 +99,32 @@ jobs:
       - name: Run integration tests
         run: PYTHONPATH=. pytest -q tests/integration
 
+  web-next-build:
+    name: Build + lint web-next (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web-next/package-lock.json
+
+      - name: Install web-next dependencies
+        working-directory: web-next
+        run: npm ci
+
+      - name: Lint
+        working-directory: web-next
+        run: npm run lint
+
+      - name: Build (catches TypeScript errors too)
+        working-directory: web-next
+        run: npm run build
+
   vercel-manifest-check:
     name: Verify api/requirements.txt boots the app
     runs-on: ubuntu-latest
