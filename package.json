@@ -4,9 +4,7 @@
   "description": "The Listening Tree — Elderly Companion Chatbot (Capacitor Mobile App)",
   "main": "index.js",
   "scripts": {
-    "dev:backend": "python run.py",
-    "dev": "npm run dev:3000",
-    "dev:3000": "PORT=3000 python run.py",
+    "dev": "python run.py",
     "test:backend": "pytest -q tests/test_basic.py tests/test_core_flows.py tests/test_session_persistence_unit.py",
     "test:unit": "npx vitest run --config vitest.config.ts",
     "test:integration": "PYTHONPATH=. pytest -q tests/integration",
@@ -27,8 +25,7 @@
     "dev:android": "bash scripts/mobile-dev.sh android",
     "cap:copy": "npx cap copy",
     "build": "npm run cap:sync",
-    "build-and-sync": "npm run cap:sync && npx cap copy ios && npx cap copy android",
-    "dev:5001": "PORT=5001 python run.py"
+    "build-and-sync": "npm run cap:sync && npx cap copy ios && npx cap copy android"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
