@@ -15,6 +15,7 @@ Elderly-friendly AI companion for English and Cantonese conversations, reminders
 - [Security & Privacy](#security--privacy)
 - [Deployment](#deployment)
 - [Future Improvements](#future-improvements)
+- [Engineering Journal](#engineering-journal)
 - [License](#license)
 
 ## Overview
@@ -161,6 +162,15 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 - Advanced analytics dashboard for usage and wellness tracking.
 - Offline mode support for low-connectivity environments.
 - Multi-language expansion for additional regional dialects.
+
+## Engineering Journal
+
+[`docs/ENGINEERING_JOURNAL.md`](docs/ENGINEERING_JOURNAL.md) documents a
+specific round of structural work on this codebase — a senior engineer
+review followed by a monolith split, Alembic migrations, a
+serverless-aware rate limiter, and a staged Next.js frontend migration —
+written to explain the reasoning behind each decision, not just list the
+diffs.
 
 ## License
 
