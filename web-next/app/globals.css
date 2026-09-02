@@ -701,3 +701,227 @@ body {
     padding: 36px 24px;
   }
 }
+
+/* ================================================================
+   /profile — entirely page-scoped in the original template, none of
+   this exists in static/style.css, so it's copied wholesale.
+   ================================================================ */
+.page-profile {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  background: var(--gradient-bg);
+}
+.page-profile main {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+}
+.profile-hero {
+  max-width: 560px;
+  margin: 20px auto;
+  padding: 32px 28px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #5b9a7d 0%, #4a8369 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.1);
+}
+.profile-avatar {
+  flex-shrink: 0;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.profile-hero-text h1 {
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+}
+.profile-hero-text p {
+  margin: 0;
+  opacity: 0.9;
+  font-size: 0.95rem;
+  word-break: break-all;
+}
+.page-profile .nav-bar {
+  background: var(--bg-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  padding: 16px 20px;
+  margin: 0 auto 24px;
+  max-width: 560px;
+  border-radius: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  border: var(--glass-border);
+  box-shadow: var(--shadow);
+}
+.page-profile .lang-switch {
+  display: flex;
+  gap: 8px;
+}
+.page-profile .lang-btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-xs);
+  text-decoration: none;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 2px solid transparent;
+  transition: all 0.2s;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.page-profile .lang-btn.active,
+.page-profile .lang-btn:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.page-profile .nav-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.page-profile .btn-accessible {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: var(--radius-xs);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+  border: none;
+  cursor: pointer;
+}
+.page-profile .btn-secondary-accessible {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.page-profile .btn-danger-accessible {
+  background: var(--accent);
+  color: white;
+}
+.page-profile .btn-accessible:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.page-profile .profile-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: var(--glass-border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 28px;
+  margin-bottom: 20px;
+}
+.page-profile .profile-card-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.page-profile .profile-card-icon {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--primary-light);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+.page-profile .profile-card h2 {
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  margin: 0;
+}
+.page-profile .profile-card .card-desc {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 2px 0 0;
+}
+.page-profile .form-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.page-profile .form-control {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: var(--radius-xs);
+  padding: 10px 14px;
+  width: 100%;
+}
+.page-profile .form-control:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+  outline: none;
+}
+.page-profile .btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  border-radius: var(--radius-xs);
+  padding: 10px 22px;
+  font-weight: 600;
+  transition: all 0.2s;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+.page-profile .btn-primary:hover {
+  background: var(--primary-hover, #4a8369);
+  transform: translateY(-1px);
+}
+.page-profile .btn-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+.page-profile .field-error {
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin-top: 4px;
+  min-height: 1em;
+}
+.page-profile .form-status {
+  font-size: 0.9rem;
+  margin-top: 12px;
+  min-height: 1.2em;
+  font-weight: 500;
+}
+.page-profile .form-status.success {
+  color: var(--primary);
+}
+.page-profile .form-status.error {
+  color: var(--accent);
+}
+
+@media (max-width: 480px) {
+  .profile-hero {
+    flex-direction: column;
+    text-align: center;
+    padding: 28px 20px;
+  }
+  .page-profile .nav-bar {
+    flex-direction: column;
+    text-align: center;
+  }
+}
