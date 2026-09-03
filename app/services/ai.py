@@ -9,13 +9,13 @@ import httpx
 from app.db import queries as db
 
 ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY")
-ZHIPU_BASE_URL = os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
-ZHIPU_MODEL = os.environ.get("ZHIPU_MODEL", "glm-4-flash")
+ZHIPU_BASE_URL = os.environ.get("ZHIPU_BASE_URL") or "https://open.bigmodel.cn/api/paas/v4"
+ZHIPU_MODEL = os.environ.get("ZHIPU_MODEL") or "glm-4-flash"
 # How many recent chat_history rows (~half that many round-trips) are sent
 # to the LLM as conversation memory. Read from chat_history rather than an
 # in-memory dict so it survives restarts and is shared across serverless
 # instances instead of silently resetting.
-CHAT_CONTEXT_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MESSAGES", "20"))
+CHAT_CONTEXT_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MESSAGES") or 20)
 
 logger = logging.getLogger(__name__)
 

@@ -38,7 +38,7 @@ if env_local_path.exists():
 # print-suppression hack.
 # ---------------------------------------------------------------------------
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO"),
+    level=os.environ.get("LOG_LEVEL") or "INFO",
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -90,12 +90,12 @@ user_game_states: dict = {}
 
 # Keep only the most recent chat messages per user/language.
 # Older rows are soft-deleted to bound table growth while preserving continuity.
-CHAT_HISTORY_MAX_MESSAGES_PER_LANG = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES_PER_LANG", "200"))
+CHAT_HISTORY_MAX_MESSAGES_PER_LANG = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES_PER_LANG") or 200)
 # Per-conversation cap on top of the per-conversation message cap above —
 # without this, a user with hundreds of conversations would keep them all
 # forever. Oldest conversations (by updated_at) beyond this count are
 # soft-deleted wholesale rather than having their messages pruned piecemeal.
-CONVERSATION_MAX_PER_LANG = int(os.environ.get("CONVERSATION_MAX_PER_LANG", "50"))
+CONVERSATION_MAX_PER_LANG = int(os.environ.get("CONVERSATION_MAX_PER_LANG") or 50)
 
 # Fixed, small set of everyday-life labels a conversation can be tagged
 # with — deliberately not free-text (elderly-friendly: pick from a short

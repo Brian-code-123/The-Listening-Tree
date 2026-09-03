@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 # Hugging Face Inference API — Whisper large-v3 for server-side STT.
 HF_API_KEY = os.environ.get("HF_API_KEY")
-HF_WHISPER_MODEL = os.environ.get("HF_WHISPER_MODEL", "openai/whisper-large-v3")
+HF_WHISPER_MODEL = os.environ.get("HF_WHISPER_MODEL") or "openai/whisper-large-v3"
 # Generous for a short voice-input clip; caps /transcribe's exposure to a
 # memory-exhaustion DoS from a large repeated upload.
-MAX_TRANSCRIBE_UPLOAD_BYTES = int(os.environ.get("MAX_TRANSCRIBE_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+MAX_TRANSCRIBE_UPLOAD_BYTES = int(os.environ.get("MAX_TRANSCRIBE_UPLOAD_BYTES") or 10 * 1024 * 1024)
 HF_WHISPER_URL = f"https://router.huggingface.co/hf-inference/models/{HF_WHISPER_MODEL}"
 
 if HF_API_KEY:
