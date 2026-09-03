@@ -4,13 +4,11 @@ more than one router. Feature-specific config (Zhipu AI, Azure email,
 Hugging Face STT, NewsAPI) lives next to the service that uses it instead.
 
 This module is deliberately the first thing `app/main.py`'s import chain
-touches (directly, and transitively via app.background) — the
-MINIMAL_STARTUP print-suppression patch below must run before any other
-module's top-level `print(...)` calls (services/ai.py, services/email.py,
-services/transcription.py all print a one-line config summary at import
-time), so it has to be the earliest thing imported.
+touches (directly, and transitively via app.background) — logging is
+configured here so every other module's `logging.getLogger(__name__)`
+call picks up the same level/format from the moment it's created.
 """
-import builtins as _builtins
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -34,19 +32,16 @@ if env_local_path.exists():
     load_dotenv(env_local_path, override=True)
 
 # ---------------------------------------------------------------------------
-# Minimal startup output
-# By default we suppress module-level print() calls so running the server
-# doesn't flood the console. Set MINIMAL_STARTUP=0 in the environment to
-# retain the verbose messages during development.
+# Logging
+# LOG_LEVEL controls verbosity (default INFO); set LOG_LEVEL=WARNING in
+# production to get the old "quiet by default" behavior without a
+# print-suppression hack.
 # ---------------------------------------------------------------------------
-_MINIMAL_STARTUP = os.environ.get("MINIMAL_STARTUP", "1") != "0"
-if not hasattr(_builtins, "_original_print"):
-    _builtins._original_print = _builtins.print
-if _MINIMAL_STARTUP:
-    # keep original print available for later (restored in run.py's __main__)
-    def _silent_print(*args, **kwargs):
-        return None
-    _builtins.print = _silent_print
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Detect Vercel environment (serverless — no persistent filesystem)
 ON_VERCEL = bool(os.environ.get("VERCEL"))
@@ -60,9 +55,9 @@ SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or
 if IN_PRODUCTION and not (os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET")):
     raise RuntimeError("SECRET_KEY (or SESSION_SECRET/FASTAPI_SECRET) is required in production to prevent session loss across restarts.")
 if SECRET_KEY and len(SECRET_KEY) >= 16:
-    print("[SECURITY] 🔑 SECRET_KEY is set")
+    logger.info("[SECURITY] SECRET_KEY is set")
 else:
-    print("[SECURITY] ⚠ No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
+    logger.warning("[SECURITY] No SECRET_KEY/SESSION_SECRET/FASTAPI_SECRET set — using ephemeral key")
 
 REMEMBER_ME_MAX_AGE = 60 * 60 * 24 * 90
 

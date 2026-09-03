@@ -16,10 +16,12 @@ number and a rollback path, which is the whole reason Alembic exists in
 this project.
 """
 import asyncio
-import builtins as _builtins
+import logging
 from typing import Optional
 
 from app.db import queries as db
+
+logger = logging.getLogger(__name__)
 
 
 async def init_db() -> None:
@@ -179,7 +181,7 @@ async def init_db() -> None:
 
     await conn.commit()
     await conn.close()
-    print("[DB] ✅ PostgreSQL database initialized")
+    logger.info("[DB] PostgreSQL database initialized")
 
 
 _db_initialized = False
@@ -204,7 +206,7 @@ async def ensure_db_initialized(strict: bool = False) -> bool:
         except Exception as e:
             _db_initialized = False
             _db_init_error = str(e)
-            _builtins._original_print(f"[DB] ❌ Initialization failed: {e}")
+            logger.error(f"[DB] Initialization failed: {e}")
             if strict:
                 raise
             return False

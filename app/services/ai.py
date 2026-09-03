@@ -1,4 +1,5 @@
 """Zhipu AI (智谱AI) chat completion — the warm elderly-companion persona."""
+import logging
 import os
 import random
 from typing import Optional
@@ -16,10 +17,12 @@ ZHIPU_MODEL = os.environ.get("ZHIPU_MODEL", "glm-4-flash")
 # instances instead of silently resetting.
 CHAT_CONTEXT_MESSAGES = int(os.environ.get("CHAT_CONTEXT_MESSAGES", "20"))
 
+logger = logging.getLogger(__name__)
+
 if ZHIPU_API_KEY:
-    print(f"[AI] ✅ {ZHIPU_MODEL} configured (Zhipu AI)")
+    logger.info(f"[AI] {ZHIPU_MODEL} configured (Zhipu AI)")
 else:
-    print("[AI] ⚠ ZHIPU_API_KEY not set — using warm fallback responses")
+    logger.warning("[AI] ZHIPU_API_KEY not set — using warm fallback responses")
 
 # System prompt — Cantonese elderly companion (Chinese)
 # Guides the LLM to reply in warm, patient Cantonese with simple vocabulary.
@@ -95,8 +98,6 @@ WARM_FALLBACK_EN = [
 
 async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', display_name: Optional[str] = None, conversation_id: Optional[int] = None):
     """Call Zhipu AI (智谱AI) for warm elderly conversation."""
-    import builtins as _builtins
-
     system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
     fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
@@ -171,5 +172,5 @@ async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', displ
             raise ValueError("Empty response from API")
 
     except Exception as e:
-        _builtins._original_print(f"[AI] Error calling Zhipu ({lang}): {e}")
+        logger.error(f"[AI] Error calling Zhipu ({lang}): {e}")
         return random.choice(fallback)

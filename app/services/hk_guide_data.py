@@ -2,11 +2,14 @@
 NewsAPI proxy with an in-memory cache — all the mostly-static HK-specific
 content this app serves.
 """
+import logging
 import os
 import time
 from datetime import datetime
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # HK Public Holidays 2025-2027
@@ -108,7 +111,7 @@ async def fetch_hk_news(lang: str = 'en'):
                         "image": a.get("urlToImage", ""),
                     })
         except Exception as e:
-            print(f"[News] NewsAPI error: {e}")
+            logger.error(f"[News] NewsAPI error: {e}")
 
     # Fallback: use hardcoded recent HK news placeholders
     if not articles:

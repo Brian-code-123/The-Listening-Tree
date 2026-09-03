@@ -2,6 +2,7 @@
 one conversation's messages. Also the shared helpers chat.py uses to resolve
 which conversation a new message belongs to.
 """
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -12,6 +13,8 @@ from app.core import config
 from app.core.session import _CONTROL_CHAR_PATTERN, get_lang, get_user
 from app.db import queries as db
 from translations import TRANSLATIONS, get_text
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -121,8 +124,7 @@ async def get_chat_history(request: Request):
         return JSONResponse({"history": history})
     except Exception as e:
         # Graceful degradation for transient DB/network failures.
-        import builtins as _builtins
-        _builtins._original_print(f"[CHAT_HISTORY] fallback due to DB error: {e}")
+        logger.error(f"[CHAT_HISTORY] fallback due to DB error: {e}")
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         return JSONResponse({"history": [{"timestamp": ts, "sender": "bot", "message": get_text("welcome_chat", lang)}], "degraded": True})
     finally:
@@ -291,8 +293,7 @@ async def get_conversation_messages(request: Request, conversation_id: int):
         history = await load_conversation_messages(c, conn, conversation_id, lang)
         return JSONResponse({"history": history})
     except Exception as e:
-        import builtins as _builtins
-        _builtins._original_print(f"[CONVERSATIONS] fallback due to DB error: {e}")
+        logger.error(f"[CONVERSATIONS] fallback due to DB error: {e}")
         return JSONResponse({"history": [], "degraded": True})
     finally:
         if conn is not None:

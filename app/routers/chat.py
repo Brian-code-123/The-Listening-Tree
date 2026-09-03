@@ -2,7 +2,7 @@
 state machine, and the AI fallthrough — plus voice transcription and
 device-token registration.
 """
-import builtins as _builtins
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -20,6 +20,8 @@ from app.services.reminders import create_reminder, delete_reminder_by_label
 from app.services import transcription as stt
 from app.services.rate_limit import check_and_increment, client_key
 from translations import get_text
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -361,7 +363,7 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang
                 status_code=422,
             )
         except Exception as e:
-            _builtins._original_print(f"[STT] Whisper (HF) error, falling back: {e}")
+            logger.warning(f"[STT] Whisper (HF) error, falling back: {e}")
 
     if stt.sr is None:
         return JSONResponse(
@@ -378,13 +380,13 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang
             status_code=422,
         )
     except stt.sr.RequestError as e:
-        _builtins._original_print(f"[STT] upstream request error: {e}")
+        logger.error(f"[STT] upstream request error: {e}")
         return JSONResponse(
             {"text": "", "error": get_text("error_network", get_lang(request))},
             status_code=503,
         )
     except Exception as e:
-        _builtins._original_print(f"[STT] transcribe error: {e}")
+        logger.error(f"[STT] transcribe error: {e}")
         return JSONResponse(
             {"text": "", "error": get_text("error_voice", get_lang(request))},
             status_code=500,
@@ -399,7 +401,7 @@ async def register_device(request: Request):
         uid = get_user(request)
         if uid and token:
             # In a real setup, save this `token` to the database for this user
-            print(f"[Push] Registered device token for {uid}: {token}")
+            logger.info(f"[Push] Registered device token for {uid}: {token}")
             return JSONResponse({"status": "ok"})
     except Exception:
         pass

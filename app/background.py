@@ -5,12 +5,14 @@ Skipped entirely on Vercel (see `app/main.py`'s lifespan) since serverless
 functions can't run a perpetual loop.
 """
 import asyncio
-import builtins as _builtins
+import logging
 from datetime import datetime
 
 from app.core import config
 from app.db import queries as db
 from app.services.rate_limit import cleanup_old_rate_limit_events
+
+logger = logging.getLogger(__name__)
 
 
 async def run_periodic_tasks():
@@ -46,7 +48,7 @@ async def run_periodic_tasks():
                     rtime = row["reminder_time"]
                     if rtime == current_time:
                         # In a real app, this would trigger a push notification or WebSocket msg
-                        _builtins._original_print(f"[REMINDER] ⏰  {email}: {label} at {rtime}")
+                        logger.info(f"[REMINDER] {email}: {label} at {rtime}")
             finally:
                 await conn.close()
 
@@ -67,7 +69,7 @@ async def run_periodic_tasks():
             raise
 
         except Exception as e:
-            _builtins._original_print(f"[ERROR] periodic_tasks: {e}")
+            logger.error(f"periodic_tasks: {e}")
 
         await asyncio.sleep(60)
 
@@ -109,7 +111,7 @@ async def cleanup_old_conversations() -> None:
     finally:
         await conn.close()
     if deleted_count > 0:
-        print(f"[CLEANUP] 🗑️  Marked {deleted_count} old conversations as deleted")
+        logger.info(f"[CLEANUP] Marked {deleted_count} old conversations as deleted")
 
 
 async def cleanup_old_chat_history() -> None:
@@ -147,7 +149,7 @@ async def cleanup_old_chat_history() -> None:
     finally:
         await conn.close()
     if deleted_count > 0:
-        print(f"[CLEANUP] 🗑️  Marked {deleted_count} old chat rows as deleted")
+        logger.info(f"[CLEANUP] Marked {deleted_count} old chat rows as deleted")
 
 
 async def prune_user_chat_history(cursor, conversation_id: int) -> None:
@@ -198,4 +200,4 @@ async def auto_expire_old_reminders() -> None:
     finally:
         await conn.close()
     if expired > 0:
-        print(f"[EXPIRE] 📅 Marked {expired} old reminders as inactive")
+        logger.info(f"[EXPIRE] Marked {expired} old reminders as inactive")
