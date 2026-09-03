@@ -4,7 +4,7 @@ import os
 import secrets
 
 AZURE_COMMUNICATION_CONNECTION_STRING = os.environ.get("AZURE_COMMUNICATION_CONNECTION_STRING")
-AZURE_SENDER_EMAIL = os.environ.get("AZURE_SENDER_EMAIL", "DoNotReply@yourdomain.azurecomm.net")
+AZURE_SENDER_EMAIL = os.environ.get("AZURE_SENDER_EMAIL") or "DoNotReply@yourdomain.azurecomm.net"
 VERIFICATION_CODE_TTL_MINUTES = 5
 VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
 

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT") or 5000)
     url = f"http://localhost:{port}"
     logger.info(f"Server running: {url}")
 
