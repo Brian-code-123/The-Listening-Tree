@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
-      MINIMAL_STARTUP: "1"
+      LOG_LEVEL: "WARNING"
       # These tests never touch a real database (conftest.py provides a fake
       # DB shim), but run.py requires DATABASE_URL to be set at import time
       # regardless — give it a placeholder so `import run` doesn't blow up.
@@ -62,7 +62,7 @@ jobs:
       DATABASE_URL: postgresql://postgres@localhost:5432/ci_db?sslmode=disable
       SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
       ZHIPU_API_KEY: ""
-      MINIMAL_STARTUP: "1"
+      LOG_LEVEL: "WARNING"
       RUN_LIVE_DB: "1"
     services:
       postgres:
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
-      MINIMAL_STARTUP: "1"
+      LOG_LEVEL: "WARNING"
       # No live DB here — this job only proves the trimmed Vercel manifest
       # has everything import-time needs, not that every route works.
       DATABASE_URL: postgresql://postgres@localhost:5432/unused?sslmode=disable
