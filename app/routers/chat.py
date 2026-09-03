@@ -401,6 +401,6 @@ async def register_device(request: Request):
             # In a real setup, save this `token` to the database for this user
             print(f"[Push] Registered device token for {uid}: {token}")
             return JSONResponse({"status": "ok"})
-    except:
+    except Exception:
         pass
     return JSONResponse({"status": "ignored"})
