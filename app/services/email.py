@@ -1,5 +1,5 @@
 """Registration verification-code emails via Azure Communication Services."""
-import builtins as _builtins
+import logging
 import os
 import secrets
 
@@ -8,10 +8,12 @@ AZURE_SENDER_EMAIL = os.environ.get("AZURE_SENDER_EMAIL", "DoNotReply@yourdomain
 VERIFICATION_CODE_TTL_MINUTES = 5
 VERIFICATION_RESEND_COOLDOWN_SECONDS = 60
 
+logger = logging.getLogger(__name__)
+
 if AZURE_COMMUNICATION_CONNECTION_STRING:
-    print("[Email] ✅ Azure Communication Services configured for verification codes")
+    logger.info("[Email] Azure Communication Services configured for verification codes")
 else:
-    print("[Email] ⚠ AZURE_COMMUNICATION_CONNECTION_STRING not set — verification emails will not be sent")
+    logger.warning("[Email] AZURE_COMMUNICATION_CONNECTION_STRING not set — verification emails will not be sent")
 
 
 def generate_verification_code() -> str:
@@ -22,7 +24,7 @@ def generate_verification_code() -> str:
 def send_verification_email(to_email: str, code: str, lang: str = "en") -> bool:
     """Send a verification-code email via Azure Communication Services. Returns True on success."""
     if not AZURE_COMMUNICATION_CONNECTION_STRING:
-        _builtins._original_print("[Email] ⚠ AZURE_COMMUNICATION_CONNECTION_STRING not set — skipping send")
+        logger.warning("[Email] AZURE_COMMUNICATION_CONNECTION_STRING not set — skipping send")
         return False
 
     brand_color = "#5B9A7D"
@@ -93,9 +95,9 @@ def send_verification_email(to_email: str, code: str, lang: str = "en") -> bool:
         result = poller.result()
         status = result.get("status") if isinstance(result, dict) else getattr(result, "status", None)
         if status and str(status).lower() not in ("succeeded", "running"):
-            _builtins._original_print(f"[Email] ❌ Azure Email send status: {status}")
+            logger.error(f"[Email] Azure Email send status: {status}")
             return False
         return True
     except Exception as e:
-        _builtins._original_print(f"[Email] ❌ Failed to send verification email: {e}")
+        logger.error(f"[Email] Failed to send verification email: {e}")
         return False

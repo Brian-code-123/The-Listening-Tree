@@ -1,7 +1,7 @@
 """Auth routes: login/register/logout, Google Sign-In, and the profile
 (display name + password) settings that live alongside them.
 """
-import builtins as _builtins
+import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -28,7 +28,10 @@ from app.services.email import (
     generate_verification_code,
     send_verification_email,
 )
+
 from app.services.rate_limit import check_and_increment, client_key
+
+logger = logging.getLogger(__name__)
 
 # Generous enough for a real user's occasional retry (wrong password, typo'd
 # email, browser autofill double-submit), tight enough to slow down
@@ -238,7 +241,7 @@ async def send_verification_code(request: Request):
         return JSONResponse({"success": True, "message": "Verification code sent" if lang == 'en' else "驗證碼已發送"})
     except Exception as e:
         await conn.close()
-        _builtins._original_print(f"[ERROR] send_verification_code failed: {e}")
+        logger.error(f"send_verification_code failed: {e}")
         return JSONResponse(
             {"success": False, "message": "Service temporarily unavailable" if lang == 'en' else "服務暫時不可用"},
             status_code=500,
@@ -343,7 +346,7 @@ async def register_post(
         return fail("Email already exists" if lang == 'en' else "電郵已存在", field="email")
     except Exception as e:
         await conn.close()
-        _builtins._original_print(f"[ERROR] Registration failed: {e}")
+        logger.error(f"Registration failed: {e}")
         return fail(
             "Service temporarily unavailable. Your account data remains in database; please try again."
             if lang == 'en'

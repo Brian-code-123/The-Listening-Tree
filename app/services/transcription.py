@@ -2,6 +2,7 @@
 Speech (via SpeechRecognition) fallback.
 """
 import io
+import logging
 import os
 
 import httpx
@@ -10,6 +11,8 @@ try:
     import speech_recognition as sr
 except ImportError:
     sr = None
+
+logger = logging.getLogger(__name__)
 
 # Hugging Face Inference API — Whisper large-v3 for server-side STT.
 HF_API_KEY = os.environ.get("HF_API_KEY")
@@ -20,9 +23,9 @@ MAX_TRANSCRIBE_UPLOAD_BYTES = int(os.environ.get("MAX_TRANSCRIBE_UPLOAD_BYTES", 
 HF_WHISPER_URL = f"https://router.huggingface.co/hf-inference/models/{HF_WHISPER_MODEL}"
 
 if HF_API_KEY:
-    print(f"[STT] ✅ {HF_WHISPER_MODEL} configured (Hugging Face Inference API)")
+    logger.info(f"[STT] {HF_WHISPER_MODEL} configured (Hugging Face Inference API)")
 else:
-    print("[STT] ⚠ HF_API_KEY not set — falling back to Google Web Speech / browser STT")
+    logger.warning("[STT] HF_API_KEY not set — falling back to Google Web Speech / browser STT")
 
 
 async def transcribe_with_hf_whisper(content: bytes) -> str:

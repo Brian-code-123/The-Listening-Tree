@@ -5,7 +5,7 @@ This is the single source of truth for the ASGI `app` object — both
 import `app` from here.
 """
 import asyncio
-import builtins as _builtins
+import logging
 import os
 from contextlib import asynccontextmanager, suppress
 
@@ -21,6 +21,8 @@ from app.db import pool as db_pool
 from app.db import schema
 from app.routers import auth, chat, conversations, health, hk_guide, pages, reminders
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,7 +33,7 @@ async def lifespan(app: FastAPI):
     try:
         await schema.ensure_db_initialized(strict=not config.IN_PRODUCTION)
     except Exception as e:
-        _builtins._original_print(f"[DB] ❌ Startup initialization failed: {e}")
+        logger.error(f"[DB] Startup initialization failed: {e}")
         raise
 
     # Vercel serverless functions should not run perpetual background loops.
