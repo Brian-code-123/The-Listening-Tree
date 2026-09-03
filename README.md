@@ -10,12 +10,12 @@ Elderly-friendly AI companion for English and Cantonese conversations, reminders
 - [Key Features](#key-features)
 - [Tech Stack](#tech-stack)
 - [System Architecture](#system-architecture)
+- [Quick Start](#quick-start)
 - [Core Workflow](#core-workflow)
 - [Testing & Evaluation Methodology](#testing--evaluation-methodology)
 - [Security & Privacy](#security--privacy)
 - [Deployment](#deployment)
 - [Future Improvements](#future-improvements)
-- [Engineering Journal](#engineering-journal)
 - [License](#license)
 
 ## Overview
@@ -96,6 +96,42 @@ The project follows a modular three-layer architecture designed for stability an
 - Backend API layer: FastAPI service handling business logic, LLM integration, authentication, and database operations.
 - Database layer: PostgreSQL storing user profiles, chat history, reminders, and preferences with optimized indexing.
 
+## Quick Start
+
+The frontend is currently split across two stacks during an in-progress
+migration: `/history`, `/register`, `/login`, `/profile`, `/accessibility`,
+and `/hk_guide` are served by the Next.js app in `web-next/`; everything
+else — including `/` (the main chat page), until `/chat` ships — is still
+the FastAPI/Jinja app in `templates/`. Both need to run for local dev.
+
+### Backend
+
+```bash
+pip install -r requirements.txt
+python run.py            # http://localhost:5000
+PORT=5001 python run.py  # or on a different port
+```
+
+### `web-next/`
+
+```bash
+cd web-next
+npm install
+npm run dev               # http://localhost:3001
+```
+
+Locally the two run as separate origins, so `web-next/.env.local`
+(gitignored) needs `NEXT_PUBLIC_API_BASE` pointed at wherever the
+backend is running, e.g.:
+
+```
+NEXT_PUBLIC_API_BASE=http://localhost:5000
+```
+
+In production both are deployed together behind one origin via
+`vercel.json`'s `services`/`rewrites` config, so this env var is unset
+there (same-origin relative fetches).
+
 ## Core Workflow
 
 ### 1. User Onboarding
@@ -162,15 +198,6 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 - Advanced analytics dashboard for usage and wellness tracking.
 - Offline mode support for low-connectivity environments.
 - Multi-language expansion for additional regional dialects.
-
-## Engineering Journal
-
-[`docs/ENGINEERING_JOURNAL.md`](docs/ENGINEERING_JOURNAL.md) documents a
-specific round of structural work on this codebase — a senior engineer
-review followed by a monolith split, Alembic migrations, a
-serverless-aware rate limiter, and a staged Next.js frontend migration —
-written to explain the reasoning behind each decision, not just list the
-diffs.
 
 ## License
 
