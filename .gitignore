@@ -89,3 +89,4 @@ test-results/
 .kittify/.dashboard
 .vercel
 supabase/.temp
+docs/ENGINEERING_JOURNAL.md
