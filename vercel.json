@@ -8,6 +8,11 @@
     { "source": "/_next/(.*)", "destination": { "service": "history" } },
     { "source": "/history", "destination": { "service": "history" } },
     { "source": "/history/(.*)", "destination": { "service": "history" } },
+    { "source": "/register", "destination": { "service": "history" } },
+    { "source": "/login", "destination": { "service": "history" } },
+    { "source": "/profile", "destination": { "service": "history" } },
+    { "source": "/accessibility", "destination": { "service": "history" } },
+    { "source": "/hk_guide", "destination": { "service": "history" } },
     { "source": "/(.*)", "destination": { "service": "api" } }
   ]
 }
