@@ -1,6 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": null,
   "services": {
     "api": { "root": ".", "entrypoint": "api/index.py" },
     "web": { "root": "web-next" }
