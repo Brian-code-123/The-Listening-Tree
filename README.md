@@ -55,9 +55,10 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 ### Frontend
 
-- Core: HTML5, CSS3, JavaScript (ES6+)
-- Framework: Bootstrap 5 for responsive layout
-- Libraries: jQuery, FullCalendar.js, Font Awesome
+- Core: Next.js 16 (App Router) with React 19 and TypeScript, in `web-next/`
+- Styling: plain CSS (`web-next/app/globals.css`), ported from the original stylesheet. No CSS framework — the ported markup still carries Bootstrap's utility class names, so the handful actually used are defined directly rather than pulling in the framework
+- Libraries: FullCalendar (`@fullcalendar/react`) for the holiday calendar; Font Awesome and Google Fonts from CDN
+- Legacy: the original Jinja2 templates (`templates/`, Bootstrap 5 + jQuery + FullCalendar via CDN) are still in the repo and still served by their FastAPI routes, kept until the migrated pages have proven stable in production
 - Voice: Web Speech API for browser-native speech-to-text and text-to-speech, with a server-side `/transcribe` fallback (Hugging Face Whisper, then legacy Google Web Speech via `SpeechRecognition`) for browsers without Web Speech API support
 - Mobile build: Capacitor 6 for iOS and Android packaging, with `@capacitor/local-notifications` for background reminder alarms
 - Deployment: Vercel
