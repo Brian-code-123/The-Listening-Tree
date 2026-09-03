@@ -58,6 +58,12 @@ async def login_page(request: Request, error: Optional[str] = None):
     )
 
 
+# /auth/login is the path the Next.js pages POST to. It has to differ from
+# the page path: in production vercel.json rewrites GET /login to the
+# Next.js service, and a rewrite applies to every method, so a POST to
+# /login reaches the static page and comes back 405. /login stays
+# registered for the existing tests and the (now unrouted) Jinja form.
+@router.post("/auth/login", response_class=HTMLResponse)
 @router.post("/login", response_class=HTMLResponse)
 async def login_post(
     request: Request,
@@ -248,6 +254,8 @@ async def send_verification_code(request: Request):
         )
 
 
+# Same page-path collision as /auth/login above.
+@router.post("/auth/register", response_class=HTMLResponse)
 @router.post("/register", response_class=HTMLResponse)
 async def register_post(
     request: Request,
