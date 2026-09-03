@@ -31,8 +31,12 @@ async function postForm(path: string, fields: Record<string, string>): Promise<{
   return { status: res.status, body };
 }
 
+// Posts go to /auth/login/-register, not /login//register: those page paths
+// are rewritten to this app in production, and a rewrite covers every method,
+// so posting to the page path returns 405 from the static page instead of
+// reaching the backend.
 export function login(email: string, password: string, rememberMe: boolean) {
-  return postForm("/login", {
+  return postForm("/auth/login", {
     email,
     password,
     ...(rememberMe ? { remember_me: "on" } : {}),
@@ -40,7 +44,7 @@ export function login(email: string, password: string, rememberMe: boolean) {
 }
 
 export function register(email: string, password: string, confirmPassword: string, verificationCode: string) {
-  return postForm("/register", {
+  return postForm("/auth/register", {
     email,
     password,
     confirm_password: confirmPassword,
