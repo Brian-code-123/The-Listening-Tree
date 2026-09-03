@@ -4,6 +4,9 @@ export interface CurrentUser {
   authenticated: boolean;
   display_name?: string;
   email?: string;
+  /** Session language ("en" | "zh-HK") — drives TTS voice, calendar
+   * locale, and which language button renders as active. */
+  lang?: string;
 }
 
 /** GET /me — session identity check + basic user info. Never throws on a
