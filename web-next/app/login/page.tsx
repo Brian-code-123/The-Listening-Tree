@@ -1,41 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_BASE } from "../lib/api";
 import { login } from "../lib/auth";
 import { fetchConfig } from "../lib/config";
 import { useTranslations } from "../lib/i18n";
+import { API_BASE } from "../lib/api";
 
 export default function LoginPage() {
   const { t } = useTranslations();
-  const [googleEnabled, setGoogleEnabled] = useState(false);
-
-  useEffect(() => {
-    fetchConfig()
-      .then((c) => setGoogleEnabled(c.google_enabled))
-      .catch(() => {});
-  }, []);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+
+  const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+
+  useEffect(() => {
+    fetchConfig()
+      .then((cfg) => setGoogleEnabled(cfg.google_enabled))
+      .catch(() => {
+        // Leave the Google button hidden if /config can't be reached.
+      });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError("");
+    setFormError("");
     setSubmitting(true);
     try {
       const { body } = await login(email, password, rememberMe);
       if (body.success) {
-        window.location.href = body.redirect || `${API_BASE}/`;
+        window.location.href = body.redirect || "/";
         return;
       }
-      setError(body.message ?? "");
+      setFormError(body.message ?? "");
     } catch {
-      setError(t("network_error", "Network error, please try again"));
+      setFormError(t("network_error", "Network error, please try again"));
     } finally {
       setSubmitting(false);
     }
@@ -70,12 +73,6 @@ export default function LoginPage() {
             <h2>{t("sign_in", "Sign In")}</h2>
             <p className="auth-subtitle">{t("sign_in_desc", "Please enter your details to continue")}</p>
           </div>
-
-          {error && (
-            <div className="alert alert-danger" role="alert">
-              {error}
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="auth-form">
             <div className="form-group mb-3">
@@ -138,6 +135,12 @@ export default function LoginPage() {
                 {t("remember_me", "Keep me signed in for 90 days")}
               </label>
             </div>
+
+            {formError && (
+              <div className="alert alert-danger" role="alert">
+                {formError}
+              </div>
+            )}
 
             <button type="submit" className="btn btn-primary w-100" disabled={submitting}>
               {t("sign_in", "Sign In")}
