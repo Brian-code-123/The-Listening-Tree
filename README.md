@@ -92,17 +92,18 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 The project follows a modular three-layer architecture designed for stability and maintainability:
 
-- Frontend layer: Jinja2-templated pages (`templates/`) for chat, login, register, accessibility, and HK guide, plus a standalone Capacitor shell (`www/`) for the mobile build — handling user interactions, voice input and output, and dynamic content rendering.
+- Frontend layer: a Next.js (App Router, TypeScript) app in `web-next/` serving every page — chat, login, register, profile, accessibility, HK guide, and conversation history — plus a standalone Capacitor shell (`www/`) for the mobile build. The original Jinja2 templates (`templates/`) are still in the repo and still rendered by their FastAPI routes; they're kept until the migrated pages have proven stable in production, then removed.
 - Backend API layer: FastAPI service handling business logic, LLM integration, authentication, and database operations.
 - Database layer: PostgreSQL storing user profiles, chat history, reminders, and preferences with optimized indexing.
 
 ## Quick Start
 
-The frontend is currently split across two stacks during an in-progress
-migration: `/history`, `/register`, `/login`, `/profile`, `/accessibility`,
-and `/hk_guide` are served by the Next.js app in `web-next/`; everything
-else — including `/` (the main chat page), until `/chat` ships — is still
-the FastAPI/Jinja app in `templates/`. Both need to run for local dev.
+Two processes run side by side: the FastAPI backend, and the Next.js app
+in `web-next/` that serves every page. In production a single
+`vercel.json` `services`/`rewrites` config puts both behind one origin —
+page routes go to `web-next`, everything else (the JSON API, `/static`,
+OAuth, language switching) to FastAPI. Locally they're two dev servers,
+so you need both running.
 
 ### Backend
 
