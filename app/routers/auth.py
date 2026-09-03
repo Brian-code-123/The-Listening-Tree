@@ -466,6 +466,11 @@ async def current_user(request: Request):
             "authenticated": True,
             "display_name": (user_row["username"] if user_row else None) or "",
             "email": user_row["email"] if user_row else "",
+            # The Jinja pages read the session language straight off
+            # tpl_context(); a non-Jinja frontend has no other way to learn
+            # it, and it drives real behavior there (TTS voice, calendar
+            # locale, which language button renders as active).
+            "lang": get_lang(request),
         }
     )
 
