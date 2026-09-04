@@ -6,6 +6,7 @@
   },
   "rewrites": [
     { "source": "/_next/(.*)", "destination": { "service": "web" } },
+    { "source": "/_vercel/insights/(.*)", "destination": { "service": "web" } },
     { "source": "/", "destination": { "service": "web" } },
     { "source": "/chat", "destination": { "service": "web" } },
     { "source": "/history", "destination": { "service": "web" } },
