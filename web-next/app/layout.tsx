@@ -1,10 +1,16 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "The Listening Tree",
   description: "Next.js pages for The Listening Tree — see docs/FRONTEND_ROADMAP.md for migration status.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 // Build-time constant (Next.js inlines NEXT_PUBLIC_* vars even in a server

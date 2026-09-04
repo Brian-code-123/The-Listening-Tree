@@ -64,7 +64,7 @@ export default function HkGuidePage() {
             <i className="fas fa-arrow-left" /> <span>{t("hk_guide_back", "Back to Chat")}</span>
           </a>
           <h1 className="hk-guide-title">
-            <i className="fas fa-map-marked-alt" /> {t("hk_guide_title", "Hong Kong Local Guide")}
+            <i className="fas fa-map-marked-alt" /> <span>{t("hk_guide_title", "Hong Kong Local Guide")}</span>
           </h1>
           <div className="hk-guide-lang">
             <a href="/set_language/en" className="chat-nav-btn active">
