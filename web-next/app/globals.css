@@ -1581,6 +1581,30 @@ body {
 .modal-speak-btn:hover {
   background: var(--primary-hover, #4a8369);
 }
+@media (max-width: 576px) {
+  .hk-guide-nav-inner {
+    gap: 8px;
+  }
+  .hk-guide-back-btn span {
+    display: none;
+  }
+  .hk-guide-title {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .hk-guide-title span {
+    display: inline-block;
+    max-width: 100%;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+  }
+  .hk-guide-lang {
+    margin-right: 0;
+  }
+}
 @media (max-width: 768px) {
   .hk-guide-title {
     font-size: 1.1rem;
@@ -1695,7 +1719,7 @@ body {
     overflow: hidden; 
 }
 
-@media (max-width: 992px) {
+@media (max-width: 576px) {
     .page-chat {
         height: auto;
         min-height: 100vh;
@@ -2120,8 +2144,15 @@ body {
 .page-chat .news-loading i { animation: spin 1s linear infinite; margin-right: 8px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---- Responsive ---- */
-@media (max-width: 992px) {
+/* ---- Responsive: tablet (577px–1024px) keeps the 2-column layout,
+   just narrows the sidebar column instead of stacking it ---- */
+@media (min-width: 577px) and (max-width: 1024px) {
+    .page-chat .main-layout { grid-template-columns: 1fr 260px; gap: 12px; }
+    .page-chat .btn.d-lg-none { display: none; }
+}
+
+/* ---- Responsive: phone (<=576px) stacks the sidebar below the chat ---- */
+@media (max-width: 576px) {
     .page-chat .main-layout { grid-template-columns: 1fr; height: auto; min-height: 100vh; }
     .page-chat .chat-column { height: calc(100vh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
     .page-chat .sidebar-column { height: auto; overflow: visible; padding-bottom: 80px; }

@@ -81,10 +81,7 @@ export default function HistoryPage() {
           </a>
           <h1 className="hk-guide-title">
             <i className="fas fa-clock-rotate-left" />
-            {translations.conversation_history_title ?? "Conversation History"}
-            <span style={{ fontSize: "0.6em", fontWeight: 400, color: "var(--text-muted)", marginLeft: 8 }}>
-              (Next.js POC)
-            </span>
+            <span>{translations.conversation_history_title ?? "Conversation History"}</span>
           </h1>
           <div className="hk-guide-lang">
             <span className="chat-nav-btn active">EN</span>
