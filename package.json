@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "python run.py",
+    "sync:translations": "python3 scripts/sync-translations.py",
     "test:backend": "pytest -q tests/test_basic.py tests/test_core_flows.py tests/test_session_persistence_unit.py",
     "test:unit": "npx vitest run --config vitest.config.ts",
     "test:integration": "PYTHONPATH=. pytest -q tests/integration",
