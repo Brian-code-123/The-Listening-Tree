@@ -2,6 +2,8 @@
 
 Elderly-friendly AI companion for English and Cantonese conversations, reminders, wellness support, and accessible voice-first interaction.
 
+![The Listening Tree demo](docs/assets/demo.gif)
+
 ## Table of Contents
 
 - [Overview](#overview)
