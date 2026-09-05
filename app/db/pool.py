@@ -7,6 +7,8 @@ here is visible everywhere without needing a `global` across module
 boundaries (which doesn't work) or a mutable-container workaround.
 """
 import os
+import sys
+from pathlib import Path
 from typing import List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -56,6 +58,41 @@ LAST_PG_ATTEMPTS: List[str] = []  # kept for /health/db's JSON shape; asyncpg's 
 # psycopg2 already did here.
 ASYNCPG_DSN = _normalize_db_url(_DATABASE_URL)
 DB_HOSTNAME = urlsplit(ASYNCPG_DSN).hostname
+
+
+# Guard: a local run must never end up connected to the deployed database.
+# This lives here rather than in conftest.py because every path that reaches
+# Postgres resolves its target from ASYNCPG_DSN — the app's pool, `python
+# run.py`, the Playwright suite's backend, and the integration tests' own
+# standalone `asyncpg.connect(dsn=pool.ASYNCPG_DSN)` seed helpers, which
+# deliberately bypass the fake-DB fixture and so would slip past a
+# conftest-only check (they did: they wrote verification rows straight into
+# production).
+#
+# Detection is positive — it looks for evidence of a dev machine rather than
+# trying to recognise the deployment — so a missing or renamed platform
+# environment variable can never take the real backend down. `.env.local` is
+# gitignored and therefore never exists in a deployment.
+_DEPLOYED_DB_HOST_MARKERS = ("supabase.co", "supabase.com", "neon.tech")
+
+
+def _running_outside_the_deployment() -> bool:
+    if "pytest" in sys.modules:
+        return True
+    return (Path(__file__).resolve().parents[2] / ".env.local").exists()
+
+
+if (
+    DB_HOSTNAME
+    and any(marker in DB_HOSTNAME for marker in _DEPLOYED_DB_HOST_MARKERS)
+    and _running_outside_the_deployment()
+    and os.environ.get("ALLOW_PRODUCTION_DB") != "1"
+):
+    raise RuntimeError(
+        f"Refusing to connect to the deployed database ({DB_HOSTNAME}) from a local run. "
+        "Point DATABASE_URL at a local Postgres in .env.local. To read production "
+        "deliberately, re-run with ALLOW_PRODUCTION_DB=1."
+    )
 DB_HOSTADDR = None  # asyncpg resolves the host itself; no manual IP pinning needed
 DB_RUNTIME_LABEL = "asyncpg-pool"
 
