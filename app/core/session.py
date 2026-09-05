@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request
 
 from translations import get_all_translations
 
-_CONTROL_CHAR_PATTERN = re.compile(r"[\r\n\t\x00-\x1f]")
+_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1f]")
 
 
 def get_user(request: Request) -> int | None:

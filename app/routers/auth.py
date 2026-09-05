@@ -41,6 +41,8 @@ REGISTER_RATE_LIMIT = 5
 SEND_CODE_RATE_LIMIT = 5
 RATE_LIMIT_WINDOW_SECONDS = 60
 
+LOGIN_PATH = "/login"
+
 router = APIRouter()
 
 
@@ -308,12 +310,12 @@ async def register_post(
     verification_code = verification_code.strip()
 
     # Validate email format
-    is_valid_email, email_error = validate_email(email)
+    is_valid_email, _ = validate_email(email)
     if not is_valid_email:
         return fail("Invalid email format" if lang == 'en' else "電郵格式無效", field="email")
 
     # Validate password strength
-    is_valid_password, password_error = validate_password_strength(password)
+    is_valid_password, _ = validate_password_strength(password)
     if not is_valid_password:
         return fail("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", field="password")
 
@@ -391,13 +393,13 @@ async def google_callback(request: Request):
     try:
         token = await config.oauth.google.authorize_access_token(request)
     except OAuthError:
-        return RedirectResponse(url="/login?error=google_failed", status_code=303)
+        return RedirectResponse(url=f"{LOGIN_PATH}?error=google_failed", status_code=303)
 
     userinfo = token.get("userinfo") or {}
     google_id = userinfo.get("sub")
     email = (userinfo.get("email") or "").strip().lower()
     if not google_id or not email or not userinfo.get("email_verified"):
-        return RedirectResponse(url="/login?error=google_failed", status_code=303)
+        return RedirectResponse(url=f"{LOGIN_PATH}?error=google_failed", status_code=303)
 
     display_name = _CONTROL_CHAR_PATTERN.sub(" ", userinfo.get("name") or "")
     display_name = " ".join(display_name.split())[:50]
@@ -414,7 +416,7 @@ async def google_callback(request: Request):
             if existing and existing["google_id"]:
                 # Email matches, but already linked to a different Google account.
                 await conn.close()
-                return RedirectResponse(url="/login?error=google_failed", status_code=303)
+                return RedirectResponse(url=f"{LOGIN_PATH}?error=google_failed", status_code=303)
             if existing:
                 await db.db_execute(c, "UPDATE users SET google_id = ?, auth_provider = 'google' WHERE id = ?", (google_id, existing["id"]))
                 user = existing
@@ -443,13 +445,13 @@ async def google_callback(request: Request):
 
 @router.get("/forgot_password")
 async def forgot_password(request: Request):
-    return RedirectResponse(url="/login", status_code=303)
+    return RedirectResponse(url=LOGIN_PATH, status_code=303)
 
 
 @router.get("/logout")
 async def logout(request: Request):
     request.session.clear()
-    return RedirectResponse(url="/login", status_code=303)
+    return RedirectResponse(url=LOGIN_PATH, status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +489,7 @@ async def current_user(request: Request):
 async def profile_page(request: Request):
     uid = get_user(request)
     if uid is None:
-        return RedirectResponse(url="/login", status_code=303)
+        return RedirectResponse(url=LOGIN_PATH, status_code=303)
     conn = await db.get_db()
     c = conn.cursor()
     await db.db_execute(c, "SELECT username, email FROM users WHERE id = ?", (uid,))
