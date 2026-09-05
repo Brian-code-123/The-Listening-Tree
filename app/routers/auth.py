@@ -387,6 +387,41 @@ async def google_login(request: Request):
     return await config.oauth.google.authorize_redirect(request, redirect_uri)
 
 
+class _GoogleAccountConflict(Exception):
+    """The Google email matches a local account already linked elsewhere."""
+
+
+async def _resolve_or_create_google_user(c, google_id: str, email: str, display_name: str):
+    """Find the user behind a Google identity, creating them if needed.
+
+    Works on the caller's cursor and never opens or closes a connection —
+    google_callback owns that.
+    """
+    await db.db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
+    user = c.fetchone()
+    if user:
+        return user
+
+    await db.db_execute(c, "SELECT id, email, google_id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+    existing = c.fetchone()
+    if existing and existing["google_id"]:
+        raise _GoogleAccountConflict()
+
+    if existing:
+        await db.db_execute(c, "UPDATE users SET google_id = ?, auth_provider = 'google' WHERE id = ?", (google_id, existing["id"]))
+        return existing
+
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    synthetic_password = hash_password(secrets.token_hex(32))
+    await db.db_execute(
+        c,
+        "INSERT INTO users (email, password, username, google_id, auth_provider, created_at) VALUES (?, ?, ?, ?, 'google', ?)",
+        (email, synthetic_password, display_name or None, google_id, ts),
+    )
+    await db.db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
+    return c.fetchone()
+
+
 @router.get("/auth/google/callback", name="google_callback")
 async def google_callback(request: Request):
     """Handle Google's redirect back: verify the ID token, then find-or-create
@@ -419,29 +454,10 @@ async def google_callback(request: Request):
     conn = await db.get_db()
     c = conn.cursor()
     try:
-        await db.db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
-        user = c.fetchone()
-
-        if not user:
-            await db.db_execute(c, "SELECT id, email, google_id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
-            existing = c.fetchone()
-            if existing and existing["google_id"]:
-                # Email matches, but already linked to a different Google account.
-                await conn.close()
-                return RedirectResponse(url=f"{LOGIN_PATH}?error=google_failed", status_code=303)
-            if existing:
-                await db.db_execute(c, "UPDATE users SET google_id = ?, auth_provider = 'google' WHERE id = ?", (google_id, existing["id"]))
-                user = existing
-            else:
-                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                synthetic_password = hash_password(secrets.token_hex(32))
-                await db.db_execute(
-                    c,
-                    "INSERT INTO users (email, password, username, google_id, auth_provider, created_at) VALUES (?, ?, ?, ?, 'google', ?)",
-                    (email, synthetic_password, display_name or None, google_id, ts),
-                )
-                await db.db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
-                user = c.fetchone()
+        try:
+            user = await _resolve_or_create_google_user(c, google_id, email, display_name)
+        except _GoogleAccountConflict:
+            return RedirectResponse(url=f"{LOGIN_PATH}?error=google_failed", status_code=303)
 
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         await db.db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
