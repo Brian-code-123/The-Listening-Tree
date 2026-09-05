@@ -256,6 +256,27 @@ async def send_verification_code(request: Request):
         )
 
 
+def _validate_registration_fields(email: str, password: str, confirm_password: str, lang: str) -> Optional[tuple[str, str]]:
+    """First failing field check as (message, field), or None if all pass.
+
+    Only the checks that need no database — the verification code and the
+    email-uniqueness constraint stay with the registration handler, which
+    owns the connection.
+    """
+    is_valid_email, _ = validate_email(email)
+    if not is_valid_email:
+        return ("Invalid email format" if lang == 'en' else "電郵格式無效", "email")
+
+    is_valid_password, _ = validate_password_strength(password)
+    if not is_valid_password:
+        return ("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", "password")
+
+    if password != confirm_password:
+        return ("Passwords do not match" if lang == 'en' else "密碼唔一致", "confirm_password")
+
+    return None
+
+
 # Same page-path collision as /auth/login above.
 @router.post("/auth/register", response_class=HTMLResponse)
 @router.post("/register", response_class=HTMLResponse)
@@ -309,19 +330,10 @@ async def register_post(
     confirm_password = confirm_password.strip()
     verification_code = verification_code.strip()
 
-    # Validate email format
-    is_valid_email, _ = validate_email(email)
-    if not is_valid_email:
-        return fail("Invalid email format" if lang == 'en' else "電郵格式無效", field="email")
-
-    # Validate password strength
-    is_valid_password, _ = validate_password_strength(password)
-    if not is_valid_password:
-        return fail("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", field="password")
-
-    # Validate password confirmation
-    if password != confirm_password:
-        return fail("Passwords do not match" if lang == 'en' else "密碼唔一致", field="confirm_password")
+    field_error = _validate_registration_fields(email, password, confirm_password, lang)
+    if field_error is not None:
+        message, field = field_error
+        return fail(message, field=field)
 
     conn = await db.get_db()
     c = conn.cursor()
