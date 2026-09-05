@@ -62,7 +62,13 @@ export default function NewsCard({ t, onSpeak }: NewsCardProps) {
           <p style={{ textAlign: "center", color: "var(--text-muted)", padding: 20, fontSize: "0.9rem" }}>{t("no_news", "No news available.")}</p>
         ) : (
           articles.map((article, i) => (
-            <div key={i} className="news-item fade-in" onClick={() => window.open(article.url, "_blank")}>
+            <a
+              key={i}
+              className="news-item fade-in"
+              href={article.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               <div className="news-title">{article.title}</div>
               <div className="news-desc">{article.description || ""}</div>
               <div className="news-meta">
@@ -71,6 +77,7 @@ export default function NewsCard({ t, onSpeak }: NewsCardProps) {
                   className="news-voice-btn"
                   title={t("voice_read", "Read aloud")}
                   onClick={(e) => {
+                    e.preventDefault();
                     e.stopPropagation();
                     onSpeak(`${article.title}. ${article.description || ""}`);
                   }}
@@ -78,7 +85,7 @@ export default function NewsCard({ t, onSpeak }: NewsCardProps) {
                   <i className="fas fa-volume-up" />
                 </button>
               </div>
-            </div>
+            </a>
           ))
         )}
       </div>
