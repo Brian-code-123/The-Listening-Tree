@@ -42,6 +42,7 @@ SEND_CODE_RATE_LIMIT = 5
 RATE_LIMIT_WINDOW_SECONDS = 60
 
 LOGIN_PATH = "/login"
+REGISTER_TEMPLATE = "register.html"
 
 router = APIRouter()
 
@@ -175,7 +176,7 @@ async def login_post(
 async def register_page(request: Request):
     if get_user(request) is not None:
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("register.html", tpl_context(request))
+    return templates.TemplateResponse(REGISTER_TEMPLATE, tpl_context(request))
 
 
 @router.post("/send_verification_code")
@@ -317,13 +318,13 @@ async def register_post(
     def fail(message: str, field: str = "email", status_code: int = 400):
         if wants_json:
             return JSONResponse({"success": False, "field": field, "message": message}, status_code=status_code)
-        return templates.TemplateResponse("register.html", tpl_context(request, error=message))
+        return templates.TemplateResponse(REGISTER_TEMPLATE, tpl_context(request, error=message))
 
     if not await check_and_increment(client_key(request, "register"), REGISTER_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
         too_many_msg = "Too many attempts. Please wait a moment and try again." if lang == 'en' else "嘗試次數過多，請稍等再試"
         if wants_json:
             return JSONResponse({"success": False, "field": "email", "message": too_many_msg}, status_code=429)
-        return templates.TemplateResponse("register.html", tpl_context(request, error=too_many_msg), status_code=429)
+        return templates.TemplateResponse(REGISTER_TEMPLATE, tpl_context(request, error=too_many_msg), status_code=429)
 
     email = email.strip().lower()
     password = password.strip()
