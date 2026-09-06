@@ -363,47 +363,50 @@ async def get_response(request: Request, msg: str = Form(...), conversation_id: 
 # ---------------------------------------------------------------------------
 # Voice Transcription
 # ---------------------------------------------------------------------------
-@router.post("/transcribe")
-async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang: str = Form("en-US")):
-    """Server-side STT. Primary engine: Whisper large-v3 (Hugging Face Inference
-    API). Falls back to Google Web Speech (via SpeechRecognition) if no HF key
-    is configured or the HF call fails.
+STT_LANGUAGE_ALIASES = {
+    "en": "en-US",
+    "en-us": "en-US",
+    "zh": "zh-HK",
+    "zh-hk": "zh-HK",
+    "zh_HK": "zh-HK",
+}
+
+
+def _reject_upload_before_reading(request: Request, audio: UploadFile) -> Optional[JSONResponse]:
+    """Checks that can run off the headers alone, so an oversized or
+    non-audio upload is turned away without reading the body first.
     """
-    if get_user(request) is None:
-        return JSONResponse({"text": "", "error": "Not authenticated"}, status_code=401)
-
-    if not await check_and_increment(client_key(request, "transcribe"), TRANSCRIBE_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
-        return JSONResponse({"text": "", "error": "Too many requests. Please wait a moment."}, status_code=429)
-
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > stt.MAX_TRANSCRIBE_UPLOAD_BYTES:
         return JSONResponse({"text": "", "error": "Audio file too large."}, status_code=413)
     if audio.content_type and not audio.content_type.startswith("audio/"):
         return JSONResponse({"text": "", "error": "Expected an audio file."}, status_code=415)
+    return None
 
-    language = (lang or get_lang(request) or "en").strip()
-    lang_map = {
-        "en": "en-US",
-        "en-us": "en-US",
-        "zh": "zh-HK",
-        "zh-hk": "zh-HK",
-        "zh_HK": "zh-HK",
-    }
-    language = lang_map.get(language.lower(), language)
 
-    content = await audio.read()
+def _reject_audio_payload(content: bytes) -> Optional[JSONResponse]:
+    """Checks that need the bytes. Takes the already-read payload rather than
+    the UploadFile: its stream can only be consumed once, and a second read()
+    returns empty bytes instead of raising.
+    """
     if not content:
         return JSONResponse({"text": "", "error": "Empty audio payload."}, status_code=400)
     if len(content) > stt.MAX_TRANSCRIBE_UPLOAD_BYTES:
         return JSONResponse({"text": "", "error": "Audio file too large."}, status_code=413)
+    return None
 
+
+async def _run_stt(content: bytes, language: str, lang: str) -> JSONResponse:
+    """Whisper first, Google Web Speech as the fallback. `language` is the
+    speech locale for Google; `lang` is the UI language for error messages.
+    """
     if stt.HF_API_KEY:
         try:
             text = await stt.transcribe_with_hf_whisper(content)
             if text:
                 return JSONResponse({"text": text, "engine": stt.HF_WHISPER_MODEL})
             return JSONResponse(
-                {"text": "", "error": get_text("no_speech_detected", get_lang(request))},
+                {"text": "", "error": get_text("no_speech_detected", lang)},
                 status_code=422,
             )
         except Exception as e:
@@ -420,21 +423,49 @@ async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang
         return JSONResponse({"text": text, "engine": "google-web-speech"})
     except stt.sr.UnknownValueError:
         return JSONResponse(
-            {"text": "", "error": get_text("no_speech_detected", get_lang(request))},
+            {"text": "", "error": get_text("no_speech_detected", lang)},
             status_code=422,
         )
     except stt.sr.RequestError as e:
         logger.error(f"[STT] upstream request error: {e}")
         return JSONResponse(
-            {"text": "", "error": get_text("error_network", get_lang(request))},
+            {"text": "", "error": get_text("error_network", lang)},
             status_code=503,
         )
     except Exception as e:
         logger.error(f"[STT] transcribe error: {e}")
         return JSONResponse(
-            {"text": "", "error": get_text("error_voice", get_lang(request))},
+            {"text": "", "error": get_text("error_voice", lang)},
             status_code=500,
         )
+
+
+@router.post("/transcribe")
+async def transcribe_audio(request: Request, audio: UploadFile = File(...), lang: str = Form("en-US")):
+    """Server-side STT. Primary engine: Whisper large-v3 (Hugging Face Inference
+    API). Falls back to Google Web Speech (via SpeechRecognition) if no HF key
+    is configured or the HF call fails.
+    """
+    if get_user(request) is None:
+        return JSONResponse({"text": "", "error": "Not authenticated"}, status_code=401)
+
+    if not await check_and_increment(client_key(request, "transcribe"), TRANSCRIBE_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
+        return JSONResponse({"text": "", "error": "Too many requests. Please wait a moment."}, status_code=429)
+
+    rejected = _reject_upload_before_reading(request, audio)
+    if rejected is not None:
+        return rejected
+
+    ui_lang = get_lang(request)
+    language = (lang or ui_lang or "en").strip()
+    language = STT_LANGUAGE_ALIASES.get(language.lower(), language)
+
+    content = await audio.read()
+    rejected = _reject_audio_payload(content)
+    if rejected is not None:
+        return rejected
+
+    return await _run_stt(content, language, ui_lang)
 
 
 @router.post("/register_device")
