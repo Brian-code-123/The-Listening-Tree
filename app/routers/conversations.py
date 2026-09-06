@@ -16,6 +16,9 @@ from translations import TRANSLATIONS, get_text
 
 logger = logging.getLogger(__name__)
 
+ERROR_NOT_AUTHENTICATED = "not authenticated"
+ERROR_NOT_FOUND = "not found"
+
 router = APIRouter()
 
 
@@ -167,7 +170,7 @@ async def toggle_conversation_pin(request: Request, conversation_id: int):
     """Flip a conversation's pinned state; pinned ones sort first."""
     uid = get_user(request)
     if uid is None:
-        return JSONResponse({"error": "not authenticated"}, status_code=401)
+        return JSONResponse({"error": ERROR_NOT_AUTHENTICATED}, status_code=401)
     conn = await db.get_db()
     try:
         c = conn.cursor()
@@ -178,7 +181,7 @@ async def toggle_conversation_pin(request: Request, conversation_id: int):
         )
         row = c.fetchone()
         if not row:
-            return JSONResponse({"error": "not found"}, status_code=404)
+            return JSONResponse({"error": ERROR_NOT_FOUND}, status_code=404)
         new_pinned = not row["pinned"]
         await db.db_execute(c, "UPDATE conversations SET pinned = ? WHERE id = ?", (new_pinned, conversation_id))
         await conn.commit()
@@ -192,7 +195,7 @@ async def set_conversation_tag(request: Request, conversation_id: int, tag: str 
     """Set (or clear, with an empty value) a conversation's category tag."""
     uid = get_user(request)
     if uid is None:
-        return JSONResponse({"error": "not authenticated"}, status_code=401)
+        return JSONResponse({"error": ERROR_NOT_AUTHENTICATED}, status_code=401)
     tag = tag.strip()
     if tag and tag not in config.CONVERSATION_TAGS:
         return JSONResponse({"error": "invalid tag"}, status_code=400)
@@ -207,7 +210,7 @@ async def set_conversation_tag(request: Request, conversation_id: int, tag: str 
         found = db._safe_rowcount(c) > 0
         await conn.commit()
         if not found:
-            return JSONResponse({"error": "not found"}, status_code=404)
+            return JSONResponse({"error": ERROR_NOT_FOUND}, status_code=404)
         return JSONResponse({"tag": tag or None})
     finally:
         await conn.close()
@@ -219,7 +222,7 @@ async def rename_conversation(request: Request, conversation_id: int, title: str
     the auto-generated title (first-message text) instead of storing blank."""
     uid = get_user(request)
     if uid is None:
-        return JSONResponse({"error": "not authenticated"}, status_code=401)
+        return JSONResponse({"error": ERROR_NOT_AUTHENTICATED}, status_code=401)
     lang = get_lang(request)
     cleaned = _CONTROL_CHAR_PATTERN.sub(" ", title)
     cleaned = " ".join(cleaned.split())[:100]
@@ -234,7 +237,7 @@ async def rename_conversation(request: Request, conversation_id: int, title: str
         found = db._safe_rowcount(c) > 0
         await conn.commit()
         if not found:
-            return JSONResponse({"error": "not found"}, status_code=404)
+            return JSONResponse({"error": ERROR_NOT_FOUND}, status_code=404)
         return JSONResponse({"title": cleaned or get_text("new_conversation", lang)})
     finally:
         await conn.close()
@@ -245,7 +248,7 @@ async def create_conversation(request: Request):
     """Start a new, empty conversation and return its id."""
     uid = get_user(request)
     if uid is None:
-        return JSONResponse({"error": "not authenticated"}, status_code=401)
+        return JSONResponse({"error": ERROR_NOT_AUTHENTICATED}, status_code=401)
     lang = get_lang(request)
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     conn = await db.get_db()
@@ -289,7 +292,7 @@ async def get_conversation_messages(request: Request, conversation_id: int):
         # deleted one) is treated as not found rather than leaking its rows.
         await db.db_execute(c, "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE", (conversation_id, uid))
         if not c.fetchone():
-            return JSONResponse({"history": [], "error": "not found"}, status_code=404)
+            return JSONResponse({"history": [], "error": ERROR_NOT_FOUND}, status_code=404)
         history = await load_conversation_messages(c, conn, conversation_id, lang)
         return JSONResponse({"history": history})
     except Exception as e:
