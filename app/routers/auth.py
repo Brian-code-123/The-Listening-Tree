@@ -279,6 +279,37 @@ def _validate_registration_fields(email: str, password: str, confirm_password: s
 
 
 # Same page-path collision as /auth/login above.
+async def _find_valid_verification(cursor, email: str, verification_code: str):
+    """Return the newest unused, unexpired verification row for this email and
+    code, or None if the code doesn't check out.
+    """
+    await db.db_execute(
+        cursor,
+        "SELECT id FROM email_verifications WHERE LOWER(email) = LOWER(?) AND code = ? AND used = FALSE AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
+        (email, verification_code, datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+    )
+    return cursor.fetchone()
+
+
+async def _create_user_and_start_session(cursor, conn, request: Request, email: str, password: str, verification_id) -> None:
+    """Insert the user, burn the verification code, and sign them in.
+
+    Takes the caller's cursor and connection: register_post owns the
+    connection's lifetime (it closes it in a finally), so this must not open
+    one of its own.
+    """
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    await db.db_execute(cursor, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
+    await db.db_execute(cursor, "UPDATE email_verifications SET used = TRUE WHERE id = ?", (verification_id,))
+    await conn.commit()
+    await db.db_execute(cursor, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+    created_user = cursor.fetchone()
+    if created_user:
+        request.session['user_email'] = created_user["email"]
+        request.session['user_id'] = created_user["id"]
+        request.session['remember_me'] = True
+
+
 @router.post("/auth/register", response_class=HTMLResponse)
 @router.post("/register", response_class=HTMLResponse)
 async def register_post(
@@ -339,36 +370,17 @@ async def register_post(
     conn = await db.get_db()
     c = conn.cursor()
     try:
-        # Validate verification code
-        await db.db_execute(
-            c,
-            "SELECT id FROM email_verifications WHERE LOWER(email) = LOWER(?) AND code = ? AND used = FALSE AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
-            (email, verification_code, datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
-        )
-        verification = c.fetchone()
+        verification = await _find_valid_verification(c, email, verification_code)
         if not verification:
-            await conn.close()
             return fail("Verification code is incorrect or has expired" if lang == 'en' else "驗證碼錯誤或已過期", field="verification_code")
 
-        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        await db.db_execute(c, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
-        await db.db_execute(c, "UPDATE email_verifications SET used = TRUE WHERE id = ?", (verification["id"],))
-        await conn.commit()
-        await db.db_execute(c, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
-        created_user = c.fetchone()
-        if created_user:
-            request.session['user_email'] = created_user["email"]
-            request.session['user_id'] = created_user["id"]
-            request.session['remember_me'] = True
-        await conn.close()
+        await _create_user_and_start_session(c, conn, request, email, password, verification["id"])
         if wants_json:
             return JSONResponse({"success": True, "redirect": "/"})
         return RedirectResponse(url="/", status_code=303)
     except db.PgIntegrityError:
-        await conn.close()
         return fail("Email already exists" if lang == 'en' else "電郵已存在", field="email")
     except Exception as e:
-        await conn.close()
         logger.error(f"Registration failed: {e}")
         return fail(
             "Service temporarily unavailable. Your account data remains in database; please try again."
@@ -377,6 +389,8 @@ async def register_post(
             field="email",
             status_code=500,
         )
+    finally:
+        await conn.close()
 
 
 @router.get("/auth/google")
