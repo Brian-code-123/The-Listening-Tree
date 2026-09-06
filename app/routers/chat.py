@@ -129,16 +129,17 @@ async def _handle_set_preference(c, conn, uid: int, user_input_lower: str, times
     return f"Preference updated: {key} = {value}"
 
 
-async def _handle_quiz_game(request: Request, c, uid: int, lang: str, user_input_original: str, user_input_lower: str) -> Optional[str]:
-    """Run the quiz state machine, or return None if this message isn't
-    game-related and should fall through to the AI.
+ANSWER_PREFIXES = ["answer ", "答案 ", "答案：", "答案:", "回答 ", "答 "]
+ANSWER_ONLY_TOKENS = {"answer", "答案", "回答", "答"}
+GAME_TRIGGERS = ["play game", "玩遊戲", "玩游戏"]
+EXIT_TRIGGERS = ["exit game", "退出遊戲", "退出游戏"]
 
-    Kept as one function on purpose: every branch mutates the same `game`
-    dict and re-persists it through the same closure, so splitting it
-    further would mean threading that state through more boundaries for
-    no real gain.
+
+def _load_game_state(request: Request, uid: int, lang: str) -> dict:
+    """Session state wins over the in-process dict: it survives reloads and
+    worker boundaries, which the process memory doesn't.
     """
-    game_defaults = {
+    defaults = {
         'is_game_mode': False,
         'current_index': 0,
         'current_question': None,
@@ -146,118 +147,154 @@ async def _handle_quiz_game(request: Request, c, uid: int, lang: str, user_input
         'score': 0,
         'lang': lang,
     }
+    stored = request.session.get('game_state')
+    if isinstance(stored, dict):
+        return {**defaults, **stored}
+    return {**defaults, **config.user_game_states.get(uid, {})}
 
-    # Session-backed game state is more reliable than process memory and
-    # avoids accidental mode loss across reloads or worker boundaries.
-    stored_game = request.session.get('game_state')
-    if isinstance(stored_game, dict):
-        game = {**game_defaults, **stored_game}
-    else:
-        game = {**game_defaults, **config.user_game_states.get(uid, {})}
 
+async def _restore_game_from_history(c, uid: int, game: dict, game_lang: str, active_questions) -> bool:
+    """Re-enter game mode if the last bot message was a quiz question.
+
+    Covers the case where the session lost its game state (reload, worker
+    switch) mid-game. Returns whether anything was restored, so the caller
+    knows to persist.
+    """
+    try:
+        await db.db_execute(
+            c,
+            "SELECT message FROM chat_history WHERE user_id = ? AND lang = ? AND is_bot = TRUE ORDER BY timestamp DESC LIMIT 1",
+            (uid, game_lang),
+        )
+        last_bot = c.fetchone()
+        last_text = (last_bot[0] if isinstance(last_bot, (list, tuple)) else (last_bot.get('message') if last_bot else '')) if last_bot else ''
+    except Exception:
+        last_text = ''
+    if not last_text:
+        return False
+
+    for idx, q in enumerate(active_questions):
+        if q['question'] and q['question'] in last_text:
+            game['is_game_mode'] = True
+            game['current_index'] = idx
+            game['current_question'] = q['question']
+            game['correct_answer'] = q['answer']
+            return True
+    return False
+
+
+def _strip_answer_prefix(user_input_original: str, user_input_lower: str) -> tuple[str, str]:
+    """Drop a leading "answer"/"答案" style prefix, returning the bare answer
+    and its lowercased form.
+    """
+    answer_text = user_input_original.strip()
+    answer_text_lower = user_input_lower.strip()
+    for prefix in ANSWER_PREFIXES:
+        if answer_text_lower.startswith(prefix):
+            answer_text = answer_text[len(prefix):].strip()
+            answer_text_lower = answer_text.lower()
+            break
+    return answer_text, answer_text_lower
+
+
+def _start_game(game: dict, active_questions, lang: str) -> str:
+    game['is_game_mode'] = True
+    game['current_index'] = 0
+    game['score'] = 0
+    game['lang'] = lang
+    q = active_questions[0]
+    game['current_question'] = q["question"]
+    game['correct_answer'] = q["answer"]
+    if lang == 'zh-HK':
+        return f"開始玩喇！一共有{len(active_questions)}條問題。分數：0。第一條問題：{game['current_question']}"
+    return f"Let's play! You have {len(active_questions)} questions. Current score: 0. First question: {game['current_question']}"
+
+
+def _stop_game(game: dict, lang: str) -> str:
+    game['is_game_mode'] = False
+    if lang == 'zh-HK':
+        return f"遊戲結束！你答啱咗{game['score']}條（總共{game['current_index']}條）。"
+    return f"Game stopped. You got {game['score']} out of {game['current_index']} correct so far!"
+
+
+def _grade_answer(game: dict, answer_text: str, lang: str) -> str:
+    """Score the answer against the current question."""
+    if is_quiz_answer_correct(answer_text, game['correct_answer']):
+        game['score'] += 1
+        return f"啱咗！分數：{game['score']}" if lang == 'zh-HK' else f"Correct! Score: {game['score']}"
+    if lang == 'zh-HK':
+        return f"唔啱呀，答案係{game['correct_answer']}。分數：{game['score']}"
+    return f"Incorrect. The answer was {game['correct_answer']}. Score: {game['score']}"
+
+
+def _advance_question(game: dict, active_questions, lang: str) -> str:
+    """Move to the next question, or end the game if that was the last one.
+    Returns the text to append to the answer's own feedback.
+    """
+    game['current_index'] += 1
+    if game['current_index'] == len(active_questions):
+        game['is_game_mode'] = False
+        if lang == 'zh-HK':
+            return f"\n遊戲完成！你答啱咗{game['score']}條（總共{len(active_questions)}條）。叻叻！"
+        return f"\nGame over! You successfully answered {game['score']} out of {len(active_questions)} questions correctly."
+
+    q = active_questions[game['current_index']]
+    game['current_question'] = q["question"]
+    game['correct_answer'] = q["answer"]
+    if lang == 'zh-HK':
+        return f" 下一條問題：{q['question']}"
+    return f" Next question: {q['question']}"
+
+
+async def _handle_quiz_game(request: Request, c, uid: int, lang: str, user_input_original: str, user_input_lower: str) -> Optional[str]:
+    """Run the quiz state machine, or return None if this message isn't
+    game-related and should fall through to the AI.
+
+    The pieces that only touch one part of the state (loading, restoring,
+    starting, stopping, parsing an answer) are their own functions above.
+    What stays here is the part that genuinely can't be pulled apart:
+    grading an answer and advancing the game read and write the same
+    `score` / `current_index` / `current_question` / `correct_answer` /
+    `is_game_mode` fields in sequence, and each step's result decides what
+    the next one does — grading feeds the score into the advance, and the
+    advance decides whether the game is still running for the next message.
+    """
+    game = _load_game_state(request, uid, lang)
     game_lang = game.get('lang', lang)
     # Treat any zh-* language code as Chinese so users with 'zh',
     # 'zh-CN', or 'zh-HK' preferences get the Chinese question set.
     active_questions = questions_zh if (isinstance(game_lang, str) and game_lang.startswith('zh')) else questions
 
-    def _persist_game_state() -> None:
+    def persist() -> None:
         request.session['game_state'] = game
         config.user_game_states[uid] = game
 
-    game_trigger = user_input_lower in ["play game", "玩遊戲", "玩游戏"]
-    exit_trigger = user_input_lower in ["exit game", "退出遊戲", "退出游戏"]
-    answer_prefixes = ["answer ", "答案 ", "答案：", "答案:", "回答 ", "答 "]
-    answer_only_tokens = {"answer", "答案", "回答", "答"}
+    if not game['is_game_mode'] and await _restore_game_from_history(c, uid, game, game_lang, active_questions):
+        persist()
 
-    # If the session lost game state but the last bot message was a quiz
-    # question (e.g., page reload or worker switch), detect it from the
-    # most recent bot message in chat_history and restore game mode.
-    if not game.get('is_game_mode'):
-        try:
-            await db.db_execute(
-                c,
-                "SELECT message FROM chat_history WHERE user_id = ? AND lang = ? AND is_bot = TRUE ORDER BY timestamp DESC LIMIT 1",
-                (uid, game_lang),
-            )
-            last_bot = c.fetchone()
-            last_text = (last_bot[0] if isinstance(last_bot, (list, tuple)) else (last_bot.get('message') if last_bot else '')) if last_bot else ''
-        except Exception:
-            last_text = ''
-        if last_text:
-            for idx, q in enumerate(active_questions):
-                if q['question'] and q['question'] in last_text:
-                    game['is_game_mode'] = True
-                    game['current_index'] = idx
-                    game['current_question'] = q['question']
-                    game['correct_answer'] = q['answer']
-                    _persist_game_state()
-                    break
-
-    if game_trigger and not game['is_game_mode']:
-        game['is_game_mode'] = True
-        game['current_index'] = 0
-        game['score'] = 0
-        game['lang'] = lang
-        q = active_questions[0]
-        game['current_question'] = q["question"]
-        game['correct_answer'] = q["answer"]
-        if lang == 'zh-HK':
-            response = f"開始玩喇！一共有{len(active_questions)}條問題。分數：0。第一條問題：{game['current_question']}"
-        else:
-            response = f"Let's play! You have {len(active_questions)} questions. Current score: 0. First question: {game['current_question']}"
-        _persist_game_state()
+    if user_input_lower in GAME_TRIGGERS and not game['is_game_mode']:
+        response = _start_game(game, active_questions, lang)
+        persist()
         return response
 
-    if exit_trigger and game['is_game_mode']:
-        game['is_game_mode'] = False
-        if lang == 'zh-HK':
-            response = f"遊戲結束！你答啱咗{game['score']}條（總共{game['current_index']}條）。"
-        else:
-            response = f"Game stopped. You got {game['score']} out of {game['current_index']} correct so far!"
-        _persist_game_state()
+    if user_input_lower in EXIT_TRIGGERS and game['is_game_mode']:
+        response = _stop_game(game, lang)
+        persist()
         return response
 
     if game['is_game_mode']:
-        answer_text = user_input_original.strip()
-        answer_text_lower = user_input_lower.strip()
-        for prefix in answer_prefixes:
-            if answer_text_lower.startswith(prefix):
-                answer_text = answer_text[len(prefix):].strip()
-                answer_text_lower = answer_text.lower()
-                break
-
-        if answer_text_lower in answer_only_tokens or not answer_text:
+        answer_text, answer_text_lower = _strip_answer_prefix(user_input_original, user_input_lower)
+        if answer_text_lower in ANSWER_ONLY_TOKENS or not answer_text:
             if lang == 'zh-HK':
                 response = f"請輸入答案內容先喔。呢條問題係：{game['current_question']}"
             else:
                 response = f"Please type your answer after 'answer'. Current question: {game['current_question']}"
-            _persist_game_state()
-        elif is_quiz_answer_correct(answer_text, game['correct_answer']):
-            game['score'] += 1
-            response = f"啱咗！分數：{game['score']}" if lang == 'zh-HK' else f"Correct! Score: {game['score']}"
-        else:
-            if lang == 'zh-HK':
-                response = f"唔啱呀，答案係{game['correct_answer']}。分數：{game['score']}"
-            else:
-                response = f"Incorrect. The answer was {game['correct_answer']}. Score: {game['score']}"
+            persist()
+            return response
 
-        if answer_text_lower not in answer_only_tokens and answer_text:
-            game['current_index'] += 1
-            if game['current_index'] == len(active_questions):
-                if lang == 'zh-HK':
-                    response += f"\n遊戲完成！你答啱咗{game['score']}條（總共{len(active_questions)}條）。叻叻！"
-                else:
-                    response += f"\nGame over! You successfully answered {game['score']} out of {len(active_questions)} questions correctly."
-                game['is_game_mode'] = False
-            else:
-                q = active_questions[game['current_index']]
-                game['current_question'] = q["question"]
-                game['correct_answer'] = q["answer"]
-                if lang == 'zh-HK':
-                    response += f" 下一條問題：{q['question']}"
-                else:
-                    response += f" Next question: {q['question']}"
-            _persist_game_state()
+        response = _grade_answer(game, answer_text, lang)
+        response += _advance_question(game, active_questions, lang)
+        persist()
         return response
 
     if user_input_lower.startswith("answer") or user_input_lower.startswith("答案") or user_input_lower.startswith("回答"):
