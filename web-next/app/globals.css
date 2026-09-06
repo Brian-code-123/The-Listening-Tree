@@ -213,6 +213,7 @@ body {
   gap: 6px;
   padding: 7px 14px;
   border-radius: 999px;
+  font-family: inherit;
   font-size: 0.88rem;
   font-weight: 600;
   background: var(--bg-card);

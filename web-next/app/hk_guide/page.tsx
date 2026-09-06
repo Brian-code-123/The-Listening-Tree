@@ -46,6 +46,15 @@ export default function HkGuidePage() {
     return () => clearInterval(interval);
   }, [user]);
 
+  useEffect(() => {
+    if (!detailItem) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setDetailItem(null);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [detailItem]);
+
   if (checking || !user) {
     return null;
   }
@@ -109,7 +118,19 @@ export default function HkGuidePage() {
         ) : (
           <div className="hk-guide-grid">
             {filtered.map((item, idx) => (
-              <div key={idx} className="hk-guide-card" onClick={() => setDetailItem(item)}>
+              <div
+                key={idx}
+                className="hk-guide-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDetailItem(item)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDetailItem(item);
+                  }
+                }}
+              >
                 <div className="hk-card-badge" style={{ background: CATEGORY_COLOR[item.category] }}>
                   <i className={`fas ${CATEGORY_ICON[item.category]}`} /> {categoryLabel(item.category)}
                 </div>
@@ -143,7 +164,13 @@ export default function HkGuidePage() {
                   >
                     <i className="fas fa-volume-up" />
                   </button>
-                  <button className="hk-card-detail" onClick={() => setDetailItem(item)}>
+                  <button
+                    className="hk-card-detail"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDetailItem(item);
+                    }}
+                  >
                     {t("read_more", "Read more")} <i className="fas fa-arrow-right" />
                   </button>
                 </div>
@@ -154,7 +181,12 @@ export default function HkGuidePage() {
       </div>
 
       <div className={`hk-guide-modal${detailItem ? " show" : ""}`}>
-        <div className="hk-guide-modal-overlay" onClick={() => setDetailItem(null)} />
+        <div
+          className="hk-guide-modal-overlay"
+          role="presentation"
+          aria-hidden="true"
+          onClick={() => setDetailItem(null)}
+        />
         <div className="hk-guide-modal-content">
           <button className="hk-guide-modal-close" onClick={() => setDetailItem(null)}>
             <i className="fas fa-times" />
