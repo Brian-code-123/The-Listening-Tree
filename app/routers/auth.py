@@ -66,6 +66,60 @@ async def login_page(request: Request, error: Optional[str] = None):
 # Next.js service, and a rewrite applies to every method, so a POST to
 # /login reaches the static page and comes back 405. /login stays
 # registered for the existing tests and the (now unrouted) Jinja form.
+def _lockout_message(user, lang: str) -> Optional[str]:
+    """Message to show while an account is locked out, or None if it isn't.
+
+    Rounds the remaining wait up so a few seconds left never reads as "0 min".
+    """
+    if not user or not user["locked_until"] or user["locked_until"] <= datetime.now():
+        return None
+    wait_minutes = max(1, int((user["locked_until"] - datetime.now()).total_seconds() // 60) + 1)
+    return (
+        f"Too many failed attempts. Try again in {wait_minutes} min." if lang == 'en'
+        else f"登入失敗次數過多，請 {wait_minutes} 分鐘後再試"
+    )
+
+
+async def _complete_successful_login(cursor, conn, request: Request, user, password: str, remember_me) -> None:
+    """Clear the failure counters, sign the user in, and load their language.
+
+    Takes the caller's cursor and connection; login_post owns the
+    connection's lifetime.
+    """
+    if not is_password_hashed(user["password"]):
+        # Transparent migration for legacy plaintext rows.
+        await db.db_execute(cursor, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    await db.db_execute(
+        cursor,
+        "UPDATE users SET last_login = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
+        (ts, user["id"]),
+    )
+    await conn.commit()
+    request.session['user_email'] = user["email"]
+    request.session['user_id'] = user["id"]
+    request.session['remember_me'] = bool(remember_me)
+    await db.db_execute(cursor, "SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
+    pref = cursor.fetchone()
+    if pref:
+        request.session['language'] = pref["pref_value"]
+
+
+async def _record_failed_attempt(cursor, conn, user) -> None:
+    """Count a failed login, locking the account once it hits the limit."""
+    attempts = (user["failed_login_attempts"] or 0) + 1
+    if attempts >= LOGIN_MAX_ATTEMPTS:
+        locked_until = (datetime.now() + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
+        await db.db_execute(
+            cursor,
+            "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
+            (attempts, locked_until, user["id"]),
+        )
+    else:
+        await db.db_execute(cursor, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
+    await conn.commit()
+
+
 @router.post("/auth/login", response_class=HTMLResponse)
 @router.post("/login", response_class=HTMLResponse)
 async def login_post(
@@ -116,60 +170,29 @@ async def login_post(
     generic_error = "Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"
     conn = await db.get_db()
     c = conn.cursor()
-    await db.db_execute(
-        c,
-        "SELECT id, email, password, failed_login_attempts, locked_until FROM users WHERE LOWER(email) = LOWER(?)",
-        (email,),
-    )
-    user = c.fetchone()
-
-    if user and user["locked_until"] and user["locked_until"] > datetime.now():
-        await conn.close()
-        wait_minutes = max(1, int((user["locked_until"] - datetime.now()).total_seconds() // 60) + 1)
-        locked_msg = (
-            f"Too many failed attempts. Try again in {wait_minutes} min." if lang == 'en'
-            else f"登入失敗次數過多，請 {wait_minutes} 分鐘後再試"
-        )
-        return fail(locked_msg, status_code=429)
-
-    if user and verify_password(password, user["password"]):
-        if not is_password_hashed(user["password"]):
-            # Transparent migration for legacy plaintext rows.
-            await db.db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
-        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
         await db.db_execute(
             c,
-            "UPDATE users SET last_login = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
-            (ts, user["id"]),
+            "SELECT id, email, password, failed_login_attempts, locked_until FROM users WHERE LOWER(email) = LOWER(?)",
+            (email,),
         )
-        await conn.commit()
-        request.session['user_email'] = user["email"]
-        request.session['user_id'] = user["id"]
-        request.session['remember_me'] = bool(remember_me)
-        # Load language preference
-        await db.db_execute(c, "SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
-        pref = c.fetchone()
-        if pref:
-            request.session['language'] = pref["pref_value"]
-        await conn.close()
-        if wants_json:
-            return JSONResponse({"success": True, "redirect": "/"})
-        return RedirectResponse(url="/", status_code=303)
+        user = c.fetchone()
 
-    if user:
-        attempts = (user["failed_login_attempts"] or 0) + 1
-        if attempts >= LOGIN_MAX_ATTEMPTS:
-            locked_until = (datetime.now() + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
-            await db.db_execute(
-                c,
-                "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
-                (attempts, locked_until, user["id"]),
-            )
-        else:
-            await db.db_execute(c, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
-        await conn.commit()
-    await conn.close()
-    return fail(generic_error)
+        locked_msg = _lockout_message(user, lang)
+        if locked_msg is not None:
+            return fail(locked_msg, status_code=429)
+
+        if user and verify_password(password, user["password"]):
+            await _complete_successful_login(c, conn, request, user, password, remember_me)
+            if wants_json:
+                return JSONResponse({"success": True, "redirect": "/"})
+            return RedirectResponse(url="/", status_code=303)
+
+        if user:
+            await _record_failed_attempt(c, conn, user)
+        return fail(generic_error)
+    finally:
+        await conn.close()
 
 
 @router.get("/register", response_class=HTMLResponse)
