@@ -2069,10 +2069,16 @@ body {
     box-sizing: border-box;
 }
 
-/* Time input on the second row, left */
+/* Time input on the second row, right-aligned against the submit button
+   rather than stretched across the full 1fr track — the track is sized
+   to fill the row, but a native HH:MM input only needs ~130px, so
+   filling it left-to-right would leave a large dead-space gap before
+   the button instead of a compact pill next to it. */
 .page-chat .add-reminder-form #reminderTime {
     grid-column: 1;
     width: 100%;
+    max-width: 130px;
+    justify-self: end;
     min-width: 0;
     box-sizing: border-box;
 }
