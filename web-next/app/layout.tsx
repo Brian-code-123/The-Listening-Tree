@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
+import ReminderAlarm from "./components/ReminderAlarm";
 
 export const metadata: Metadata = {
   title: "The Listening Tree",
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body>
         {children}
+        <ReminderAlarm />
         <Analytics />
       </body>
     </html>
