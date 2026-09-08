@@ -161,7 +161,7 @@ export default function RegisterPage() {
                 <button
                   type="button"
                   className="password-toggle"
-                  aria-label="Show password"
+                  aria-label={t(showPassword ? "hide_password" : "show_password", showPassword ? "Hide password" : "Show password")}
                   onClick={() => setShowPassword((v) => !v)}
                 >
                   <i className={showPassword ? "fas fa-eye-slash" : "fas fa-eye"} />
@@ -195,7 +195,7 @@ export default function RegisterPage() {
                 <button
                   type="button"
                   className="password-toggle"
-                  aria-label="Show password"
+                  aria-label={t(showConfirmPassword ? "hide_password" : "show_password", showConfirmPassword ? "Hide password" : "Show password")}
                   onClick={() => setShowConfirmPassword((v) => !v)}
                 >
                   <i className={showConfirmPassword ? "fas fa-eye-slash" : "fas fa-eye"} />
