@@ -2095,7 +2095,6 @@ body {
     color: var(--text-primary); font-size: 0.85rem; width: 100%;
 }
 .page-chat .add-reminder-form input:focus { border-color: var(--primary); outline: none; }
-.page-chat .add-reminder-form input[type="time"] { max-width: 100px; }
 .page-chat .add-reminder-form button {
     padding: 8px 14px; border-radius: var(--radius-xs); border: none;
     background: var(--primary); color: white; font-weight: 600; font-size: 0.85rem;

@@ -149,6 +149,7 @@ export default function ReminderPanel({ lang, t }: ReminderPanelProps) {
         </div>
         <form className="add-reminder-form" onSubmit={handleAdd}>
           <input
+            id="reminderLabel"
             type="text"
             placeholder={t("reminder_label", "What to remind")}
             required
@@ -164,7 +165,7 @@ export default function ReminderPanel({ lang, t }: ReminderPanelProps) {
             <option value="Rest">Rest</option>
             <option value="Exercise">Exercise</option>
           </datalist>
-          <input type="time" required value={time} onChange={(e) => setTime(e.target.value)} />
+          <input id="reminderTime" type="time" required value={time} onChange={(e) => setTime(e.target.value)} />
           <button type="submit">
             <i className="fas fa-plus" />
           </button>
