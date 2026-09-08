@@ -15,7 +15,7 @@ interface ReminderPanelProps {
 // trigger used to live here too, but that meant it only fired while
 // /chat was open — it now lives in app/components/ReminderAlarm.tsx,
 // mounted site-wide in the root layout.
-export default function ReminderPanel({ lang, t }: ReminderPanelProps) {
+export default function ReminderPanel({ lang, t, translations }: ReminderPanelProps) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [label, setLabel] = useState("");
   const [time, setTime] = useState("");
@@ -86,7 +86,7 @@ export default function ReminderPanel({ lang, t }: ReminderPanelProps) {
                   </div>
                 </div>
                 {r.active && (
-                  <button className="reminder-delete" title="Delete" onClick={() => handleDelete(r.id)}>
+                  <button className="reminder-delete" title={t("reminder_delete", "Delete")} onClick={() => handleDelete(r.id)}>
                     <i className="fas fa-times" />
                   </button>
                 )}
@@ -105,15 +105,15 @@ export default function ReminderPanel({ lang, t }: ReminderPanelProps) {
             list="reminderPresets"
           />
           <datalist id="reminderPresets">
-            <option value="Take medicine">Take medicine</option>
-            <option value="Walk">Walk</option>
-            <option value="Drink water">Drink water</option>
-            <option value="Eat meal">Eat meal</option>
-            <option value="Rest">Rest</option>
-            <option value="Exercise">Exercise</option>
+            <option value={translations.reminder_preset_1 ?? "Take medicine"}>{translations.reminder_preset_1 ?? "Take medicine"}</option>
+            <option value={translations.reminder_preset_2 ?? "Walk"}>{translations.reminder_preset_2 ?? "Walk"}</option>
+            <option value={translations.reminder_preset_3 ?? "Drink water"}>{translations.reminder_preset_3 ?? "Drink water"}</option>
+            <option value={translations.reminder_preset_4 ?? "Eat meal"}>{translations.reminder_preset_4 ?? "Eat meal"}</option>
+            <option value={translations.reminder_preset_5 ?? "Rest"}>{translations.reminder_preset_5 ?? "Rest"}</option>
+            <option value={translations.reminder_preset_6 ?? "Exercise"}>{translations.reminder_preset_6 ?? "Exercise"}</option>
           </datalist>
           <input id="reminderTime" type="time" required value={time} onChange={(e) => setTime(e.target.value)} />
-          <button type="submit">
+          <button type="submit" aria-label={t("add_reminder_button", "Add reminder")}>
             <i className="fas fa-plus" />
           </button>
         </form>
