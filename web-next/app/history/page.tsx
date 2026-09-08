@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE, fetchConversations, type Conversation } from "../lib/api";
+import { fetchCurrentUser } from "../lib/me";
 import { fetchTranslations, type Translations } from "../lib/translations";
 import FilterBar from "./components/FilterBar";
 import ConversationCard from "./components/ConversationCard";
@@ -10,6 +11,7 @@ export default function HistoryPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [translations, setTranslations] = useState<Translations>({});
   const [activeFilter, setActiveFilter] = useState("all");
+  const [lang, setLang] = useState("en");
   // Lazy initializer (not a mount effect) so this doesn't trigger an extra
   // render just to apply the saved theme — reads localStorage safely since
   // this runs both during SSR (window undefined, falls back to "light")
@@ -25,13 +27,14 @@ export default function HistoryPage() {
     let cancelled = false;
     async function load() {
       try {
-        const [convData, tData] = await Promise.all([
-          fetchConversations(),
-          fetchTranslations("en"),
-        ]);
+        const [convData, user] = await Promise.all([fetchConversations(), fetchCurrentUser()]);
+        if (cancelled) return;
+        const userLang = user.authenticated ? user.lang ?? "en" : "en";
+        const tData = await fetchTranslations(userLang);
         if (cancelled) return;
         setConversations(convData.conversations);
         setTranslations(tData);
+        setLang(userLang);
       } catch (e) {
         if (!cancelled) {
           const hint = API_BASE
@@ -84,7 +87,12 @@ export default function HistoryPage() {
             <span>{translations.conversation_history_title ?? "Conversation History"}</span>
           </h1>
           <div className="hk-guide-lang">
-            <span className="chat-nav-btn active">EN</span>
+            <a href={`${API_BASE}/set_language/en`} className={`chat-nav-btn${lang === "en" ? " active" : ""}`}>
+              {translations.conversation_history_lang_en ?? "EN"}
+            </a>
+            <a href={`${API_BASE}/set_language/zh-HK`} className={`chat-nav-btn${lang === "zh-HK" ? " active" : ""}`}>
+              {translations.conversation_history_lang_zh ?? "繁中"}
+            </a>
           </div>
         </div>
       </nav>
@@ -92,7 +100,7 @@ export default function HistoryPage() {
       <main>
         <FilterBar active={activeFilter} onChange={setActiveFilter} translations={translations} />
 
-        {loading && <div className="empty-state">Loading…</div>}
+        {loading && <div className="empty-state">{translations.loading ?? "Loading…"}</div>}
         {error && (
           <div className="empty-state" style={{ color: "var(--accent)" }}>
             {error}

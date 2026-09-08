@@ -129,6 +129,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'need_help_title': 'Need Help?',
         'need_help_desc': 'If you have trouble logging in, please contact our support team. We are here to help you.',
         'show_password': 'Show password',
+        'hide_password': 'Hide password',
 
         # Conversations sidebar
         'conversations': 'Conversations',
@@ -259,6 +260,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'reminder_label': 'What to remind',
         'reminder_time_label': 'Time',
         'voice_read': 'Read aloud',
+        'reminder_delete': 'Delete',
+        'reminder_preset_1': 'Take medicine',
+        'reminder_preset_2': 'Walk',
+        'reminder_preset_3': 'Drink water',
+        'reminder_preset_4': 'Eat meal',
+        'reminder_preset_5': 'Rest',
+        'reminder_preset_6': 'Exercise',
+        'add_reminder_button': 'Add reminder',
+        'loading': 'Loading…',
+        'conversation_history_lang_en': 'EN',
+        'conversation_history_lang_zh': '繁中',
 
         # HK Local Guide
         'hk_guide_title': 'Hong Kong Local Guide',
@@ -380,6 +392,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'need_help_title': '需要幫忙？',
         'need_help_desc': '如果登入有問題，請聯絡我們的支援團隊。我們隨時為您服務。',
         'show_password': '顯示密碼',
+        'hide_password': '隱藏密碼',
 
         # Conversations sidebar
         'conversations': '對話記錄',
@@ -510,6 +523,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'reminder_label': '提醒內容',
         'reminder_time_label': '時間',
         'voice_read': '語音朗讀',
+        'reminder_delete': '刪除',
+        'reminder_preset_1': '食藥',
+        'reminder_preset_2': '散步',
+        'reminder_preset_3': '飲水',
+        'reminder_preset_4': '食飯',
+        'reminder_preset_5': '休息',
+        'reminder_preset_6': '運動',
+        'add_reminder_button': '新增提醒',
+        'loading': '載入中…',
+        'conversation_history_lang_en': 'EN',
+        'conversation_history_lang_zh': '繁中',
 
         # HK Local Guide
         'hk_guide_title': '香港本地攻略',
