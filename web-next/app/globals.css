@@ -266,6 +266,23 @@ body {
   border-color: var(--warm);
   color: #c99a2e;
 }
+.conv-delete-btn {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 1rem;
+}
+.conv-delete-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+.conv-delete-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .conv-main {
   flex: 1;
   min-width: 0;

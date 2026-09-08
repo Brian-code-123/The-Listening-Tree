@@ -216,6 +216,32 @@ async def set_conversation_tag(request: Request, conversation_id: int, tag: str 
         await conn.close()
 
 
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(request: Request, conversation_id: int):
+    """Soft-delete a conversation. Mirrors toggle_conversation_pin's
+    select-then-update ownership check — a conversation belonging to
+    another user (or already deleted) is reported as not-found rather
+    than leaking whether it exists."""
+    uid = get_user(request)
+    if uid is None:
+        return JSONResponse({"error": ERROR_NOT_AUTHENTICATED}, status_code=401)
+    conn = await db.get_db()
+    try:
+        c = conn.cursor()
+        await db.db_execute(
+            c,
+            "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE",
+            (conversation_id, uid),
+        )
+        if not c.fetchone():
+            return JSONResponse({"error": ERROR_NOT_FOUND}, status_code=404)
+        await db.db_execute(c, "UPDATE conversations SET is_deleted = TRUE WHERE id = ?", (conversation_id,))
+        await conn.commit()
+        return JSONResponse({"deleted": True})
+    finally:
+        await conn.close()
+
+
 @router.post("/conversations/{conversation_id}/title")
 async def rename_conversation(request: Request, conversation_id: int, title: str = Form(...)):
     """Rename a conversation. An empty result after cleanup falls back to

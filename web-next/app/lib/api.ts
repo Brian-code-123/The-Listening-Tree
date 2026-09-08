@@ -56,3 +56,7 @@ export function setConversationTag(id: number, tag: string): Promise<{ tag: stri
     body: formBody({ tag }),
   });
 }
+
+export function deleteConversation(id: number): Promise<{ deleted: boolean }> {
+  return request(`/conversations/${id}`, { method: "DELETE" });
+}

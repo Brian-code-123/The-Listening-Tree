@@ -149,6 +149,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'tag_important': 'Important',
         'no_conversations': 'No conversations yet.',
         'rename_conversation': 'Rename',
+        'delete_conversation': 'Delete',
+        'delete_conversation_confirm': 'Delete this conversation? This cannot be undone.',
 
         # Profile page
         'profile_nav': 'My Profile',
@@ -412,6 +414,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'tag_important': '重要',
         'no_conversations': '未有對話記錄。',
         'rename_conversation': '重新命名',
+        'delete_conversation': '刪除',
+        'delete_conversation_confirm': '刪除呢個對話？呢個動作無法復原。',
 
         # Profile page
         'profile_nav': '個人檔案',

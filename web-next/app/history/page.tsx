@@ -62,6 +62,10 @@ export default function HistoryPage() {
     setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
   }
 
+  function removeConversation(id: number) {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+  }
+
   const filtered = useMemo(() => {
     return conversations.filter((c) => {
       if (activeFilter === "all") return true;
@@ -116,6 +120,7 @@ export default function HistoryPage() {
                   conversation={conv}
                   translations={translations}
                   onUpdate={updateConversation}
+                  onDelete={removeConversation}
                   activeFilter={activeFilter}
                 />
               ))}

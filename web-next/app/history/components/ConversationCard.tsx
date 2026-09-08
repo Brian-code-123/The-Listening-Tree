@@ -2,13 +2,14 @@
 
 import { useRef, useState } from "react";
 import type { Conversation } from "../../lib/api";
-import { API_BASE, renameConversation, setConversationTag, togglePin } from "../../lib/api";
+import { API_BASE, deleteConversation, renameConversation, setConversationTag, togglePin } from "../../lib/api";
 import { CONVERSATION_TAGS, type Translations } from "../../lib/translations";
 
 interface ConversationCardProps {
   conversation: Conversation;
   translations: Translations;
   onUpdate: (updated: Conversation) => void;
+  onDelete: (id: number) => void;
   activeFilter: string;
 }
 
@@ -16,10 +17,12 @@ export default function ConversationCard({
   conversation,
   translations,
   onUpdate,
+  onDelete,
   activeFilter,
 }: ConversationCardProps) {
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(conversation.title);
+  const [deleting, setDeleting] = useState(false);
   // Mirrors the original jQuery version's `$input.off('blur')` guard: Enter
   // and Escape both already decide the outcome (save or cancel), so the
   // blur handler that normally fires right after the input is hidden must
@@ -30,6 +33,21 @@ export default function ConversationCard({
   async function handlePin() {
     const { pinned } = await togglePin(conversation.id);
     onUpdate({ ...conversation, pinned });
+  }
+
+  async function handleDelete() {
+    if (deleting) return;
+    const confirmed = window.confirm(
+      translations.delete_conversation_confirm ?? "Delete this conversation? This cannot be undone."
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    try {
+      await deleteConversation(conversation.id);
+      onDelete(conversation.id);
+    } catch {
+      setDeleting(false);
+    }
   }
 
   function startEdit() {
@@ -70,6 +88,16 @@ export default function ConversationCard({
         onClick={handlePin}
       >
         <i className="fas fa-star" />
+      </button>
+
+      <button
+        type="button"
+        className="conv-delete-btn"
+        title={translations.delete_conversation ?? "Delete"}
+        disabled={deleting}
+        onClick={() => void handleDelete()}
+      >
+        <i className="fas fa-trash" />
       </button>
 
       <div className="conv-main">
