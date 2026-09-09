@@ -7,8 +7,8 @@ import { useTranslations } from "../lib/i18n";
 import { useRequireAuth } from "../lib/useRequireAuth";
 
 export default function ProfilePage() {
-  const { t } = useTranslations();
   const { user, checking } = useRequireAuth();
+  const { t } = useTranslations(user?.lang ?? "en");
 
   // Starts null (not yet edited) so the input can show `user.display_name`
   // once /me resolves, without needing an effect to copy it into state —

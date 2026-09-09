@@ -11,8 +11,8 @@ const CATEGORIES = ["all", "food", "shopping", "fun", "events"] as const;
 type Category = (typeof CATEGORIES)[number];
 
 export default function HkGuidePage() {
-  const { t } = useTranslations();
   const { user, checking } = useRequireAuth();
+  const { t } = useTranslations(user?.lang ?? "en");
 
   const [items, setItems] = useState<HkGuideItem[]>([]);
   const [lastUpdated, setLastUpdated] = useState("");

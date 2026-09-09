@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { register, sendVerificationCode } from "../lib/auth";
 import { useTranslations } from "../lib/i18n";
+import { fetchCurrentUser } from "../lib/me";
 
 function passwordStrength(password: string): number {
   let strength = 0;
@@ -14,7 +15,18 @@ function passwordStrength(password: string): number {
 }
 
 export default function RegisterPage() {
-  const { t } = useTranslations();
+  const [lang, setLang] = useState("en");
+  const { t } = useTranslations(lang);
+
+  useEffect(() => {
+    fetchCurrentUser()
+      .then((u) => {
+        if (u.lang) setLang(u.lang);
+      })
+      .catch(() => {
+        // Stay on "en" if /me can't be reached.
+      });
+  }, []);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

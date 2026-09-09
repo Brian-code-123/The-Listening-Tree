@@ -18,8 +18,8 @@ function nowTime(): string {
 }
 
 export default function AccessibilityPage() {
-  const { t } = useTranslations();
   const { user, checking } = useRequireAuth();
+  const { t } = useTranslations(user?.lang ?? "en");
 
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
