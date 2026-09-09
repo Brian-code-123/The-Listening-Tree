@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { login } from "../lib/auth";
 import { fetchConfig } from "../lib/config";
 import { useTranslations } from "../lib/i18n";
-import { fetchCurrentUser } from "../lib/me";
+import { useSessionLang } from "../lib/useSessionLang";
 import { API_BASE } from "../lib/api";
 
 export default function LoginPage() {
-  const [lang, setLang] = useState("en");
+  const lang = useSessionLang();
   const { t } = useTranslations(lang);
 
   const [email, setEmail] = useState("");
@@ -25,16 +25,6 @@ export default function LoginPage() {
       .then((cfg) => setGoogleEnabled(cfg.google_enabled))
       .catch(() => {
         // Leave the Google button hidden if /config can't be reached.
-      });
-  }, []);
-
-  useEffect(() => {
-    fetchCurrentUser()
-      .then((u) => {
-        if (u.lang) setLang(u.lang);
-      })
-      .catch(() => {
-        // Stay on "en" if /me can't be reached.
       });
   }, []);
 
