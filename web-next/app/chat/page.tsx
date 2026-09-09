@@ -283,6 +283,7 @@ export default function ChatPage() {
                 />
                 <VoiceRecorder
                   lang={lang}
+                  t={t}
                   onStateChange={setMicState}
                   onToast={showToast}
                   onTranscript={(text) => setInput(text)}

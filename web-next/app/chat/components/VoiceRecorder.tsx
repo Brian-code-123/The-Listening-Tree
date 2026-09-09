@@ -8,6 +8,7 @@ export type MicState = "idle" | "recording" | "processing";
 
 interface VoiceRecorderProps {
   lang: string;
+  t: (key: string, fallback: string) => string;
   onTranscript: (text: string) => void;
   onStateChange: (state: MicState) => void;
   onToast: (message: string) => void;
@@ -20,7 +21,7 @@ interface VoiceRecorderProps {
 // mutable recording session) rather than force-fitting into React state,
 // matching the plan's recommendation to model this explicitly rather
 // than risk stale-closure bugs from a naive useState translation.
-export default function VoiceRecorder({ lang, onTranscript, onStateChange, onToast }: VoiceRecorderProps) {
+export default function VoiceRecorder({ lang, t, onTranscript, onStateChange, onToast }: VoiceRecorderProps) {
   const [micState, setMicState] = useState<MicState>("idle");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -362,20 +363,20 @@ export default function VoiceRecorder({ lang, onTranscript, onStateChange, onToa
     <>
       <canvas ref={canvasRef} id="voiceWaveform" className={`voice-waveform${micState === "idle" ? " d-none" : ""}`} width={180} height={40} />
       {micState !== "idle" && (
-        <button type="button" className="send_btn delete-btn" onClick={discardRecording} title="Discard recording">
+        <button type="button" className="send_btn delete-btn" onClick={discardRecording} title={t("discard_recording", "Discard recording")}>
           <i className="fas fa-trash" />
         </button>
       )}
       {micState === "recording" ? (
-        <button type="button" className="send_btn mic-btn recording-active pulse-recording" onClick={stopRecording} title="Stop">
+        <button type="button" className="send_btn mic-btn recording-active pulse-recording" onClick={stopRecording} title={t("stop", "Stop")}>
           <i className="fas fa-stop" />
         </button>
       ) : micState === "processing" ? (
-        <button type="button" className="send_btn stop-btn" disabled title="Processing">
+        <button type="button" className="send_btn stop-btn" disabled title={t("processing", "Processing")}>
           <i className="fas fa-play" />
         </button>
       ) : (
-        <button type="button" className="send_btn mic-btn" onClick={startRecording} title="Start Voice">
+        <button type="button" className="send_btn mic-btn" onClick={startRecording} title={t("start_voice", "Start Voice")}>
           <i className="fas fa-microphone" />
         </button>
       )}
