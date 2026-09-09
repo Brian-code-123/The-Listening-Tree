@@ -1,7 +1,12 @@
+"use client";
+
+import { useTheme } from "../lib/useTheme";
+
 export default function PageLoading() {
+  const { theme } = useTheme();
   return (
     <div
-      data-theme="light"
+      data-theme={theme}
       style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}
     >
       <div style={{ textAlign: "center" }}>
