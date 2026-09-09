@@ -6,6 +6,7 @@ import { CATEGORY_COLOR, CATEGORY_ICON, fetchHkGuide, type HkGuideItem } from ".
 import { useTranslations } from "../lib/i18n";
 import { speakText } from "../lib/tts";
 import { useRequireAuth } from "../lib/useRequireAuth";
+import PageLoading from "../components/PageLoading";
 
 const CATEGORIES = ["all", "food", "shopping", "fun", "events"] as const;
 type Category = (typeof CATEGORIES)[number];
@@ -56,7 +57,7 @@ export default function HkGuidePage() {
   }, [detailItem]);
 
   if (checking || !user) {
-    return null;
+    return <PageLoading />;
   }
 
   const filtered = category === "all" ? items : items.filter((i) => i.category === category);

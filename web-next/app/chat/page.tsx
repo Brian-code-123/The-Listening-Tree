@@ -15,6 +15,7 @@ import { useTranslations } from "../lib/i18n";
 import { speakText } from "../lib/tts";
 import { useRequireAuth } from "../lib/useRequireAuth";
 import { useTheme } from "../lib/useTheme";
+import PageLoading from "../components/PageLoading";
 import CalendarCard from "./components/CalendarCard";
 import NewsCard from "./components/NewsCard";
 import ReminderPanel from "./components/ReminderPanel";
@@ -162,7 +163,7 @@ export default function ChatPage() {
         ? t("processing", "Processing...")
         : t("type_message", "Type your message...");
 
-  if (checking || !user) return null;
+  if (checking || !user) return <PageLoading />;
 
   const welcome = t("welcome_chat", "Hello! I am your friendly companion. How are you today? 😊");
   const shown: DisplayMessage[] = messages.length > 0 ? messages : [{ sender: "bot", text: welcome, time: nowTime() }];

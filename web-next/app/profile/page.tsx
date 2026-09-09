@@ -5,6 +5,7 @@ import { API_BASE } from "../lib/api";
 import { updateDisplayName, updatePassword } from "../lib/auth";
 import { useTranslations } from "../lib/i18n";
 import { useRequireAuth } from "../lib/useRequireAuth";
+import PageLoading from "../components/PageLoading";
 
 export default function ProfilePage() {
   const { user, checking } = useRequireAuth();
@@ -73,7 +74,7 @@ export default function ProfilePage() {
   }
 
   if (checking || !user) {
-    return null;
+    return <PageLoading />;
   }
 
   const avatarLetter = (user.display_name || user.email || "?").charAt(0).toUpperCase();

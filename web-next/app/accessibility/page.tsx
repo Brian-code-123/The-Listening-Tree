@@ -6,6 +6,7 @@ import { fetchChatHistory, sendChatMessage, type ChatHistoryItem } from "../lib/
 import { useTranslations } from "../lib/i18n";
 import { speakText } from "../lib/tts";
 import { useRequireAuth } from "../lib/useRequireAuth";
+import PageLoading from "../components/PageLoading";
 
 interface DisplayMessage {
   sender: "user" | "bot";
@@ -126,7 +127,7 @@ export default function AccessibilityPage() {
   }
 
   if (checking || !user) {
-    return null;
+    return <PageLoading />;
   }
 
   return (
