@@ -203,6 +203,4 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 - Offline mode support for low-connectivity environments.
 - Multi-language expansion for additional regional dialects.
 
-## License
 
-Academic use only. Educational and research use is permitted. Commercial use requires explicit permission from the maintainer.
