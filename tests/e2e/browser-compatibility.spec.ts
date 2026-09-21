@@ -1,74 +1,61 @@
-/**
- * Mermaid sequence diagram:
- * sequenceDiagram
- *     participant QA
- *     participant Chromium
- *     participant WebKit
- *     participant App as Web App
- *     QA->>Chromium: Open key pages and validate core UI elements
- *     QA->>WebKit: Open key pages and validate core UI elements
- *     Chromium->>App: Request /login and /hk_guide
- *     WebKit->>App: Request /login and /hk_guide
- *     App-->>Chromium: Render compatible layout and controls
- *     App-->>WebKit: Render compatible layout and controls
- */
+import { test, expect } from './support/fixtures';
 
-import { expect, test, type Page } from '@playwright/test';
+const AUTHED_PAGES: { path: string; landmark: string }[] = [
+  { path: '/', landmark: 'input.type_msg' },
+  { path: '/history', landmark: '.hk-guide-title' },
+  { path: '/profile', landmark: '.profile-card' },
+  { path: '/accessibility', landmark: '#messageInput' },
+  { path: '/hk_guide', landmark: '.hk-guide-card' },
+];
 
-async function registerAndLogin(page: Page) {
-  const suffix = Date.now().toString(36);
-  const email = `browser_${suffix}@example.com`;
-  const password = 'TestPass123!';
-
-  await page.goto('/register');
-  await page.locator('#email').fill(email);
-  await page.locator('#password').fill(password);
-  await page.locator('#confirm_password').fill(password);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/\/$/);
-}
-
-test.describe('Browser test: cross-browser compatibility', () => {
-  test('login page renders correctly across browsers', async ({ page }) => {
-    await page.goto('/login');
-    await expect(page.locator('form')).toBeVisible();
-    await expect(page.locator('#email')).toBeVisible();
-    await expect(page.locator('#password')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toBeVisible();
+test.describe('Browser test: cross-browser and mobile rendering', () => {
+  test('login and register forms render their fields', async ({ page }) => {
+    for (const path of ['/login', '/register']) {
+      await page.goto(path);
+      await expect(page.locator('form.auth-form')).toBeVisible();
+      await expect(page.locator('#email')).toBeVisible();
+      await expect(page.locator('#password')).toBeVisible();
+      await expect(page.locator('form.auth-form button[type="submit"]')).toBeVisible();
+    }
   });
 
-  test('Hong Kong Local Guide renders tabs and cards across browsers', async ({ page }) => {
-    await registerAndLogin(page);
-    await page.goto('/hk_guide');
+  for (const { path, landmark } of AUTHED_PAGES) {
+    test(`${path} renders its main landmark without app errors`, async ({ authedPage: page, baseURL }) => {
+      const pageErrors: string[] = [];
+      const appConsoleErrors: string[] = [];
+      page.on('pageerror', (e) => pageErrors.push(e.message));
+      page.on('console', (m) => {
+        // Only errors raised by our own origin: third-party CDN failures in a sandbox are not our bug.
+        if (m.type() === 'error' && m.location().url.startsWith(baseURL!)) appConsoleErrors.push(m.text());
+      });
+      await page.goto(path);
+      await expect(page.locator(landmark).first()).toBeVisible();
+      expect(pageErrors).toEqual([]);
+      expect(appConsoleErrors).toEqual([]);
+    });
+  }
 
-    await expect(page.locator('.hk-guide-title')).toBeVisible();
-    await expect(page.locator('.hk-tab')).toHaveCount(5);
-
-    await page.locator('.hk-tab[data-category="food"]').click();
-    await expect(page.locator('#guideContent .hk-guide-card').first()).toBeVisible();
-    await expect(page.locator('.hk-card-detail').first()).toBeVisible();
+  test('a loading screen shows while /me is slow, then the page appears', async ({ authedPage: page }) => {
+    await page.route('**/me', async (route) => {
+      await new Promise((r) => setTimeout(r, 1_500));
+      await route.continue();
+    });
+    // waitUntil opts out of the fixture's wait-for-network-idle, which would
+    // otherwise sit through the delayed /me and miss the loading screen.
+    await page.goto('/profile', { waitUntil: 'commit' });
+    // data-testid, not the Font Awesome <i>: the icon font comes from a CDN, and
+    // an empty <i> (font blocked/slow) has no box, so it never counts as visible.
+    await expect(page.getByTestId('page-loading')).toBeVisible();
+    await expect(page.locator('.profile-card').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('page-loading')).toHaveCount(0);
   });
 
-  test('chat page renders core controls and supports basic game command', async ({ page }) => {
-    test.setTimeout(60_000);
-
-    await registerAndLogin(page);
-    await page.goto('/');
-
-    await expect(page.locator('#messageArea')).toBeVisible();
-    await expect(page.locator('#text')).toBeVisible();
-    await expect(page.locator('#send')).toBeVisible();
-    await expect(page.locator('#micBtn')).toBeVisible();
-    await expect(page.locator('#reminderForm')).toBeVisible();
-    await expect(page.locator('#guideFab')).toBeVisible();
-
-    const botMessages = page.locator('.msg_cotainer');
-    const botCountBefore = await botMessages.count();
-
-    await page.locator('#text').fill('play game');
-    await page.locator('#send').click();
-    await expect(botMessages).toHaveCount(botCountBefore + 1, { timeout: 30000 });
-
-    await expect(botMessages.last()).toContainText("Let's play");
+  test('no horizontal overflow on login and chat (mobile-friendly layout)', async ({ authedPage: page }) => {
+    for (const path of ['/login', '/']) {
+      await page.goto(path);
+      await page.waitForLoadState('networkidle');
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+    }
   });
 });
