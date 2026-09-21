@@ -15,7 +15,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: isCI ? 1 : 2,
-  retries: isCI ? 1 : 0,
+  retries: 1, // absorbs the proxy keep-alive race; flaky tests are still reported as flaky
   forbidOnly: isCI,
   globalSetup: './tests/e2e/global-setup.ts',
   globalTeardown: './tests/e2e/global-teardown.ts',
