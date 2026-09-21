@@ -11,11 +11,13 @@ export interface CurrentUser {
 
 /** GET /me — session identity check + basic user info. Never throws on a
  * 401 (not logged in) — that's a normal, expected response shape here,
- * not an error. */
+ * not an error. The 401 body still carries the session `lang`, which the
+ * logged-out login/register pages need. */
 export async function fetchCurrentUser(): Promise<CurrentUser> {
   const res = await fetch(`${API_BASE}/me`, { credentials: "include" });
   if (res.status === 401) {
-    return { authenticated: false };
+    const body = (await res.json().catch(() => ({}))) as { lang?: string };
+    return { authenticated: false, lang: body.lang };
   }
   if (!res.ok) {
     throw new Error(`/me fetch failed: ${res.status}`);

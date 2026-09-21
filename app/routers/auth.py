@@ -531,7 +531,9 @@ async def current_user(request: Request):
     via tpl_context(); this is the only other consumer)."""
     uid = get_user(request)
     if uid is None:
-        return JSONResponse({"authenticated": False}, status_code=401)
+        # lang is included even when logged out: /login and /register have no
+        # session user but still need to render in the visitor's chosen language.
+        return JSONResponse({"authenticated": False, "lang": get_lang(request)}, status_code=401)
     conn = await db.get_db()
     c = conn.cursor()
     await db.db_execute(c, "SELECT username, email FROM users WHERE id = ?", (uid,))
