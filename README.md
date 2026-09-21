@@ -12,6 +12,7 @@ Elderly-friendly AI companion for English and Cantonese conversations, reminders
 - [Key Features](#key-features)
 - [Tech Stack](#tech-stack)
 - [System Architecture](#system-architecture)
+- [Project Layout](#project-layout)
 - [Quick Start](#quick-start)
 - [Core Workflow](#core-workflow)
 - [Testing & Evaluation Methodology](#testing--evaluation-methodology)
@@ -46,8 +47,8 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 - Bilingual AI chatbot: warm, patient conversations powered by Zhipu AI GLM-4 LLM in English and Cantonese.
 - Voice interaction: Web Speech API for real-time speech recognition and synthesis.
-- Smart reminder system: CRUD-managed medication and activity reminders. In-browser polling drives an in-app alarm (sound + on-screen alert); on the native mobile build, reminders are also scheduled as local OS notifications so they still fire while the app is backgrounded or closed.
-- Conversation history: dedicated history page for browsing, pinning, tagging, and renaming past conversations, separate from the always-current active chat.
+- Smart reminder system: CRUD-managed medication and activity reminders. An in-app alarm (looping sound + on-screen alert) fires on whichever page is open; on the native mobile build, reminders are also scheduled as local OS notifications so they still fire while the app is backgrounded or closed.
+- Conversation history: dedicated history page for browsing, pinning, tagging, renaming, and deleting past conversations, separate from the always-current active chat.
 - Cross-platform support: responsive web app plus native iOS and Android builds via Capacitor.
 - Accessibility optimization: large typography, high-contrast themes, and simplified navigation.
 - Cognitive wellness tools: bilingual memory games and daily wellness prompts.
@@ -87,8 +88,8 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 ### DevOps & Testing
 
-- CI/CD: GitHub Actions for automated checks on commits
-- E2E testing: Playwright for cross-browser and device automation
+- CI/CD: GitHub Actions — unit, integration and component tests, a Playwright end-to-end matrix across four browser/device projects, and a k6 load smoke test
+- Testing: Playwright (end-to-end), pytest (backend unit and live-database API integration), Vitest with Testing Library (React hooks and components), k6 (load)
 - Version control: Git with branch-based workflow
 
 ## System Architecture
@@ -98,6 +99,22 @@ The project follows a modular three-layer architecture designed for stability an
 - Frontend layer: a Next.js (App Router, TypeScript) app in `web-next/` serving every page — chat, login, register, profile, accessibility, HK guide, and conversation history — plus a standalone Capacitor shell (`www/`) for the mobile build. The original Jinja2 templates (`templates/`) are still in the repo and still rendered by their FastAPI routes; they're kept until the migrated pages have proven stable in production, then removed.
 - Backend API layer: FastAPI service handling business logic, LLM integration, authentication, and database operations.
 - Database layer: PostgreSQL storing user profiles, chat history, reminders, and preferences with optimized indexing.
+
+## Project Layout
+
+| Path | Purpose |
+|---|---|
+| `web-next/` | Next.js front end (every page), with its hook and component tests in `web-next/tests/` |
+| `app/` | FastAPI backend: routers, services, database layer |
+| `alembic/` | Database migrations |
+| `api/` | Vercel serverless entry point for the backend |
+| `templates/`, `static/` | Legacy Jinja2 pages, plus shared static files (images, notification sound, speech helper) |
+| `www/`, `capacitor.config.ts` | Capacitor shell for the mobile build |
+| `tests/` | End-to-end (`e2e/`), API integration (`integration/`), backend unit tests, k6 load test (`stress/`) and shared helpers (`support/`) |
+| `docs/` | Documentation, including the test plan and results ([`TESTING.md`](docs/TESTING.md)) |
+| `icons/`, `assets/` | App icons and mobile icon/splash sources |
+| `scripts/` | Helper scripts (translation sync, test database setup, mobile dev) |
+| `translations.py` | Single source of truth for English and Cantonese strings |
 
 ## Quick Start
 
@@ -136,6 +153,28 @@ In production both are deployed together behind one origin via
 `vercel.json`'s `services`/`rewrites` config, so this env var is unset
 there (same-origin relative fetches).
 
+### Running the tests
+
+```bash
+npm run test:unit                # repository-root unit tests
+(cd web-next && npm test)        # React hook and component tests
+npm run test:backend             # backend unit tests (mocked database)
+npm run e2e:db                   # once: create the local test database
+npm run test:integration         # API integration tests (local test database)
+npm run test:e2e                 # Playwright; starts both servers itself
+npm run test:stress              # k6 load test (PROFILE=smoke for a short run)
+```
+
+The end-to-end and load tests use their own local database and never touch
+`.env.local` or production. Prerequisites, criteria and results are in
+[docs/TESTING.md](docs/TESTING.md).
+
+### Mobile (Capacitor)
+
+The native `ios/` and `android/` projects are generated, not committed. Create
+them with `npm run cap:add:ios` or `npm run cap:add:android`, then
+`npm run mobile:ios` / `npm run mobile:android` to sync and open them.
+
 ## Core Workflow
 
 ### 1. User Onboarding
@@ -160,17 +199,19 @@ there (same-origin relative fetches).
 
 ### Automated testing
 
-- Unit testing: Vitest for JavaScript utility functions.
-- Integration testing: pytest against an ephemeral PostgreSQL container, covering registration with email verification, login, reminder CRUD, AI chat, cognitive game flow, and voice transcription.
-- End-to-end testing: Playwright simulates real user flows such as reminder CRUD, voice chat, and mobile responsiveness.
-- CI/CD automation: GitHub Actions runs the unit, integration and `web-next` tests, a Playwright e2e matrix (Chromium, WebKit, Pixel 5, iPhone 13) and a k6 stress smoke on every push/PR to `main`/`develop`. See [docs/TESTING.md](docs/TESTING.md) for the test plan, criteria, results and how to repeat them.
+- End-to-end (Playwright): 72 user-flow tests on each of Chromium, WebKit, Pixel 5 and iPhone 13 (288 runs), against the real Next.js and FastAPI stack: registration and login, language switching on every page, chat, the cognitive game, voice input, reminders and the site-wide alarm, conversation history and delete, profile, and the HK guide.
+- API integration (pytest, local PostgreSQL): 20 tests covering conversation ownership and delete, session language, translations, and security boundaries. Backend unit tests: 17.
+- Unit and component tests (Vitest, Testing Library): 69 tests covering the language hooks, loading screen, delete-confirmation flow, the guard that keeps tests off non-local databases, and a check that English and Cantonese carry the same translation keys.
+- Load testing (k6): ramps to 150 concurrent virtual users against a local backend with 0% failed requests and a p95 latency of about 12 ms for authenticated requests. This is measured on a local machine, not on the Vercel deployment.
+- CI/CD automation: GitHub Actions runs the unit, integration and `web-next` tests, a Playwright end-to-end matrix (one job per browser project) and a k6 smoke run on every push and pull request to `main`/`develop`. See [docs/TESTING.md](docs/TESTING.md) for the test plan, criteria, results and how to repeat them.
 
 ### Known evaluation gaps
 
 Automated test pass rate reflects functional correctness, not usability. The project does not yet include:
 
 - A formal System Usability Scale (SUS) study with elderly test participants.
-- Measured response latency / throughput benchmarks under load.
+- Load testing of the deployed (Vercel) system; the local load test found no degradation up to 150 virtual users, so the capacity limit is unknown.
+- Automated coverage of AI answer quality, email delivery, and Google sign-in.
 - A structured user feedback or focus-group study.
 
 These are tracked as future work (see [Future Improvements](#future-improvements)).
@@ -182,6 +223,9 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 - Verification code abuse prevention: `/send_verification_code` enforces a server-side cooldown per email address, rejecting rapid repeat requests with HTTP 429.
 - Database access: connections use Supabase's managed connection pooler rather than raw per-request connections; credentials are read from environment variables, never hardcoded.
 - SQL injection prevention: all queries use parameterized placeholders via the `db_execute` helper.
+- Rate limiting: per-IP limits of 10 login attempts, 5 registrations and 5 verification-code requests per minute, stored in PostgreSQL so they hold across serverless instances, in addition to account lockout after repeated failures.
+- Access control: conversations and reminders belong to their owner; automated tests check that another user is refused on read, pin, tag, rename, delete and write.
+- Output handling: user-supplied text is rendered as text (tests cover HTML in messages, reminder labels and conversation titles), and the language-switch redirect only ever returns known local pages.
 
 ### Known gaps
 
@@ -203,4 +247,6 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 - Offline mode support for low-connectivity environments.
 - Multi-language expansion for additional regional dialects.
 
+## License
 
+Released under the [GNU General Public License v3.0](LICENSE). Third-party libraries and assets keep their own licenses.
