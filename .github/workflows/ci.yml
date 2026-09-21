@@ -125,6 +125,10 @@ jobs:
         working-directory: web-next
         run: npm run build
 
+      - name: Component and hook tests
+        working-directory: web-next
+        run: npm test
+
   vercel-manifest-check:
     name: Verify api/requirements.txt boots the app
     runs-on: ubuntu-latest
@@ -151,3 +155,138 @@ jobs:
 
       - name: Import run.py — catches a manifest missing something the app needs at import time
         run: python -c "import run"
+
+  e2e-tests:
+    name: Playwright e2e (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, webkit, mobile-chromium, mobile-webkit]
+    env:
+      CI: "true"
+      E2E_DATABASE_URL: postgresql://postgres@localhost:5432/ci_db?sslmode=disable
+      DATABASE_URL: postgresql://postgres@localhost:5432/ci_db?sslmode=disable
+      SKIP_ENV_LOCAL: "1"
+      SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
+      ZHIPU_API_KEY: ""
+      LOG_LEVEL: "WARNING"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ci_db
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Apply Alembic migrations to the ephemeral CI database
+        run: alembic upgrade head
+
+      - name: Install Node dependencies (root and web-next)
+        run: |
+          npm ci
+          npm ci --prefix web-next
+
+      - name: Install the browser for this project
+        run: npx playwright install --with-deps ${{ contains(matrix.project, 'webkit') && 'webkit' || 'chromium' }}
+
+      - name: Run Playwright (${{ matrix.project }})
+        run: npx playwright test --project=${{ matrix.project }}
+
+      - name: Upload e2e artifacts (report, screenshots, videos, traces, junit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-artifacts-e2e-${{ matrix.project }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+
+  stress-smoke:
+    name: k6 stress smoke
+    runs-on: ubuntu-latest
+    env:
+      E2E_DATABASE_URL: postgresql://postgres@localhost:5432/ci_db?sslmode=disable
+      DATABASE_URL: postgresql://postgres@localhost:5432/ci_db?sslmode=disable
+      SKIP_ENV_LOCAL: "1"
+      PROFILE: smoke
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ci_db
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ci_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Apply Alembic migrations to the ephemeral CI database
+        run: alembic upgrade head
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run the k6 smoke profile against a local backend
+        run: bash tests/stress/run-local.sh
+
+      - name: Upload stress summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-artifacts-stress
+          path: test-results/stress-summary.json
+          retention-days: 14

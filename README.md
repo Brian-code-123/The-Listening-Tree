@@ -163,7 +163,7 @@ there (same-origin relative fetches).
 - Unit testing: Vitest for JavaScript utility functions.
 - Integration testing: pytest against an ephemeral PostgreSQL container, covering registration with email verification, login, reminder CRUD, AI chat, cognitive game flow, and voice transcription.
 - End-to-end testing: Playwright simulates real user flows such as reminder CRUD, voice chat, and mobile responsiveness.
-- CI/CD automation: GitHub Actions runs unit and integration tests on every push/PR to `main`/`develop`; Playwright E2E tests are run locally/manually and are not yet wired into CI.
+- CI/CD automation: GitHub Actions runs the unit, integration and `web-next` tests, a Playwright e2e matrix (Chromium, WebKit, Pixel 5, iPhone 13) and a k6 stress smoke on every push/PR to `main`/`develop`. See [docs/TESTING.md](docs/TESTING.md) for the test plan, criteria, results and how to repeat them.
 
 ### Known evaluation gaps
 
