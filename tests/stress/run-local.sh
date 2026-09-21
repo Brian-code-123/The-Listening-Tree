@@ -8,6 +8,11 @@ API_PORT=${E2E_API_PORT:-5100}
 DB_URL="${E2E_DATABASE_URL:-postgresql://$(whoami)@127.0.0.1:5432/listening_tree_e2e?sslmode=disable}"
 mkdir -p test-results
 
+if curl -fs "http://127.0.0.1:$API_PORT/health" >/dev/null 2>&1; then
+  echo "Port $API_PORT already has a server on it; refusing to load-test something that may use another database." >&2
+  exit 1
+fi
+
 SKIP_ENV_LOCAL=1 DATABASE_URL="$DB_URL" SUPABASE_POOLER_URL= POSTGRES_POOLER_URL= DATABASE_POOLER_URL= \
 ZHIPU_API_KEY= NEWS_API_KEY= HF_API_KEY= AZURE_COMMUNICATION_CONNECTION_STRING= GOOGLE_CLIENT_ID= GOOGLE_CLIENT_SECRET= \
 LOG_LEVEL=WARNING SECRET_KEY=stress-secret PORT="$API_PORT" ${PYTHON:-python} run.py &
@@ -18,6 +23,7 @@ for _ in $(seq 1 60); do
   curl -fs "http://127.0.0.1:$API_PORT/health" >/dev/null && break
   sleep 1
 done
+curl -fs "http://127.0.0.1:$API_PORT/health" >/dev/null || { echo "Backend did not start on port $API_PORT" >&2; exit 1; }
 
 export E2E_DATABASE_URL="$DB_URL" STRESS_BASE_URL="http://127.0.0.1:$API_PORT"
 CREDS=$(npx tsx tests/stress/seed-user.ts)

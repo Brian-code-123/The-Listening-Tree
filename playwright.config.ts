@@ -61,7 +61,9 @@ export default defineConfig({
         SECRET_KEY: process.env.SECRET_KEY || 'e2e-secret-key',
       },
       url: `http://127.0.0.1:${API_PORT}/health`,
-      reuseExistingServer: !isCI,
+      // Never adopt a server that is already listening: a stale one could be running
+      // against a different database and would bypass the local-DB guard above.
+      reuseExistingServer: false,
       timeout: 60_000,
     },
     {
@@ -69,8 +71,9 @@ export default defineConfig({
       cwd: 'web-next',
       env: { NEXT_PUBLIC_API_BASE: '', E2E_API_PROXY: `http://127.0.0.1:${API_PORT}` },
       url: baseURL,
-      reuseExistingServer: !isCI,
-      timeout: 180_000,
+      reuseExistingServer: false, // same reason: its proxy target is baked in at start-up
+      timeout: 300_000, // CI also runs `next build` inside this command
+
     },
   ],
   projects: [

@@ -17,6 +17,24 @@ describe('assertLocalDb', () => {
     expect(() => assertLocalDb(url)).toThrow(/not local/);
   });
 
+  it.each([
+    'postgresql://localhost@evil.example.net/db', // "localhost" is only the user name
+    'postgresql://u@localhost.evil.example.net/db', // look-alike host
+    'postgresql://u@127.0.0.1.evil.example.net/db',
+    'postgresql://u:pw@127.0.0.1@evil.example.net/db', // last @ wins
+    'postgresql:///db?host=/var/run/postgresql', // no host: refused rather than guessed
+  ])('refuses the look-alike %s', (url) => {
+    expect(() => assertLocalDb(url)).toThrow();
+  });
+
+  it('accepts an upper-case LOCALHOST', () => {
+    expect(assertLocalDb('postgresql://u@LOCALHOST:5432/db')).toContain('LOCALHOST');
+  });
+
+  it('gives a clear error for something that is not a URL', () => {
+    expect(() => assertLocalDb('not a url')).toThrow(/not a valid URL/);
+  });
+
   it('refuses an empty url', () => {
     expect(() => assertLocalDb('')).toThrow();
   });
