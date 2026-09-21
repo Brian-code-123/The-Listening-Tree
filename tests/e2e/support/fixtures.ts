@@ -18,6 +18,11 @@ export const test = base.extend<Fixtures>({
       (url) => url.hostname !== '127.0.0.1' && url.hostname !== 'localhost',
       (route) => route.abort(),
     );
+    // /_vercel/* (Analytics script) is served by the Vercel platform, so a local
+    // production build answers 404 and logs a console error. Serve an empty script.
+    await page.route('**/_vercel/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/javascript', body: '' }),
+    );
     const goto = page.goto.bind(page);
     page.goto = (async (url: string, options?: Parameters<Page['goto']>[1]) => {
       const response = await goto(url, options);
