@@ -1,10 +1,15 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
 from run import app
 from tests.integration.helpers import register_and_login
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(os.environ.get("RUN_LIVE_DB") != "1", reason="needs RUN_LIVE_DB=1 and a local database"),
+]
 
 
 def _new_conversation(client) -> int:
