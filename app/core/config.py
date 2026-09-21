@@ -28,7 +28,9 @@ except ImportError:
 env_path = Path(__file__).resolve().parents[2] / '.env'
 load_dotenv(env_path, override=False)
 env_local_path = Path(__file__).resolve().parents[2] / '.env.local'
-if env_local_path.exists():
+# SKIP_ENV_LOCAL=1 lets the hermetic e2e/stress runs ignore .env.local, whose
+# override=True would otherwise replace the test DATABASE_URL and API keys.
+if env_local_path.exists() and os.environ.get("SKIP_ENV_LOCAL") != "1":
     load_dotenv(env_local_path, override=True)
 
 # ---------------------------------------------------------------------------

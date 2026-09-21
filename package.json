@@ -10,6 +10,9 @@
     "test:unit": "npx vitest run --config vitest.config.ts",
     "test:integration": "PYTHONPATH=. pytest -q tests/integration",
     "test:e2e": "playwright test",
+    "test:e2e:chromium": "playwright test --project=chromium",
+    "e2e:db": "bash scripts/e2e-db.sh",
+    "test:stress": "bash tests/stress/run-local.sh",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "ci:python": "python -m compileall -q run.py api scripts && npm run test:backend",
     "ci:mobile": "npx cap doctor && ( [ -d android ] || npx cap add android ) && npx cap sync android",
@@ -49,7 +52,10 @@
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
     "@playwright/test": "^1.52.0",
+    "@types/pg": "^8.23.1",
     "jsdom": "^26.1.0",
+    "pg": "^8.23.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^4.1.2"
   }

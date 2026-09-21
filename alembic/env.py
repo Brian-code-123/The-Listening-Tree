@@ -45,7 +45,7 @@ target_metadata = None
 _env_path = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(_env_path, override=False)
 _env_local_path = Path(__file__).resolve().parents[1] / ".env.local"
-if _env_local_path.exists():
+if _env_local_path.exists() and os.environ.get("SKIP_ENV_LOCAL") != "1":
     load_dotenv(_env_local_path, override=True)
 
 
