@@ -13,8 +13,8 @@ application layout that production uses.
 | Layer | Tool | What it proves |
 |---|---|---|
 | Black-box / end-to-end | Playwright | User flows through the real UI on 4 browser/device projects |
-| API integration | pytest against a live local PostgreSQL | Endpoint contracts, ownership rules, data effects |
-| Backend unit | pytest with a mocked database | Core flows without a database |
+| API integration | pytest against a live local PostgreSQL | Endpoint contracts, ownership rules, data effects, security boundaries |
+| Backend unit | pytest with a mocked database | Core flows without a database; the open-redirect guard |
 | Component / hook unit | Vitest (jsdom, Testing Library) | Language hooks, loading screen, delete-confirm flow, translation parity |
 | Stress | k6 | Latency and error rate under concurrent load |
 
@@ -56,6 +56,11 @@ Design decisions that make the results trustworthy and repeatable:
 | Hong Kong guide: tabs, filtering, detail modal | `hk-guide.spec.ts` | e2e |
 | Page rendering, no app errors, loading screen, no horizontal overflow | `browser-compatibility.spec.ts`, `PageLoading.test.tsx` | e2e, unit |
 | Translation completeness (same keys in both languages) | `translations-parity.test.ts`, integration test | unit, integration |
+| Security boundaries: another user cannot read, pin, tag, rename or write into someone else's conversation; logged-out requests get no data; SQL-injection-shaped login; session cookie flags | `test_security_boundaries.py` | integration |
+| Open-redirect guard on the language switch (look-alike hosts, scheme-relative and backslash paths, malformed Referer) | `test_redirect_target.py` | unit |
+| Injection and odd input: HTML in a chat message, reminder label and conversation title is shown as text; whitespace-only message; Chinese and emoji text | `edge-cases.spec.ts` | e2e |
+| Things changing under the user: session expiring mid-chat, a conversation deleted elsewhere then opened, deleting while renaming | `edge-cases.spec.ts` | e2e |
+| Safety of the test tooling itself: refuses non-local databases and refuses to adopt a server already on its port | `e2e-env.test.ts`, `playwright.config.ts`, `run-local.sh` | unit, manual check |
 | Load behaviour | `tests/stress/k6-load.js` | stress |
 
 Not tested: see section 10.
@@ -93,7 +98,7 @@ are reported below.
 ## 5. Black-box test
 
 Black-box tests drive the UI or the public HTTP API only, with no knowledge of internals.
-There are 64 tests per project (12 spec files). Result: see section 6.
+There are 72 tests per project (13 spec files). Result: see section 6.
 
 | Spec | Tests | Scenarios |
 |---|---|---|
@@ -108,20 +113,21 @@ There are 64 tests per project (12 spec files). Result: see section 6.
 | `history.spec.ts` | 8 | List; pin and filter; rename; delete (cancel, confirm, persistence); empty state; localized confirm text; another user gets 404; logged out gets 401 |
 | `profile.spec.ts` | 3 | Display name persists; wrong current password rejected; new password works for login |
 | `hk-guide.spec.ts` | 4 | Five tabs and cards; category filter; detail modal and Escape; localized "Last updated" |
+| `edge-cases.spec.ts` | 8 | HTML in a chat message, reminder label and conversation title never executes; whitespace-only message not sent; Chinese and emoji label intact; session expiring mid-chat gives an error bubble; a deleted conversation opened by link leaves a working chat; deleting while renaming |
 | `browser-compatibility.spec.ts` | 8 | See section 7 |
 
-Supporting layers: 12 API integration tests and 7 backend unit tests (section 6), and 62
-component/unit tests.
+Supporting layers: 20 API integration tests, 17 backend unit tests, and 69 component/unit
+tests (section 6).
 
 ## 6. Results
 
 | Suite | Result |
 |---|---|
-| Playwright, dev servers, 2 workers | 256 executions (64 x 4 projects): **246 passed, 10 skipped, 0 failed, 0 flaky** in each of the last two runs (4.8 and 5.8 min) |
-| Playwright, production build (CI mode), 1 worker | Chromium 64 passed; WebKit, Pixel 5 and iPhone 13 together 182 passed, 10 skipped; 6.8 min total |
-| pytest, backend unit (mocked DB) | 7 passed |
-| pytest, API integration (live local PostgreSQL) | 12 passed |
-| Vitest, repository root | 9 passed (2 files) |
+| Playwright, dev servers, 2 workers | 288 executions (72 x 4 projects): **278 passed, 10 skipped, 0 failed, 0 flaky** (6.0 min) |
+| Playwright, production build (CI mode), 1 worker | **278 passed, 10 skipped, 0 failed, 0 flaky** (7.3 min for all four projects) |
+| pytest, backend unit (mocked DB) | 17 passed |
+| pytest, API integration (live local PostgreSQL) | 20 passed |
+| Vitest, repository root | 16 passed (2 files) |
 | Vitest, `web-next` | 53 passed (7 files) |
 | k6 stress, full profile | thresholds passed (section 8) |
 
@@ -192,9 +198,7 @@ npm run e2e:db                       # once: create and migrate listening_tree_e
 E2E_PYTHON=$(pwd)/.venv/bin/python npx playwright test        # all e2e
 npm run test:unit && (cd web-next && npm test)                # unit tests
 python -m pytest -q tests --ignore=tests/integration          # backend unit
-SKIP_ENV_LOCAL=1 DATABASE_URL="postgresql://$(whoami)@127.0.0.1:5432/listening_tree_e2e?sslmode=disable" \
-  SUPABASE_POOLER_URL= POSTGRES_POOLER_URL= DATABASE_POOLER_URL= RUN_LIVE_DB=1 PYTHONPATH=. \
-  python -m pytest -q tests/integration                       # API integration
+npm run test:integration                                      # API integration (against listening_tree_e2e)
 PYTHON=$(pwd)/.venv/bin/python npm run test:stress            # k6 (PROFILE=smoke for 25 s)
 npx playwright show-report                                    # open the HTML report
 ```
@@ -209,6 +213,11 @@ end instead of the dev server.
 the Chinese language did nothing for a logged-out visitor: the session check returned no
 language in its 401 response and the client discarded the body. The 401 now carries the
 language, and it is pinned by an e2e test, an integration test and a unit test.
+
+**Security and edge-case checks found no further product defects.** Cross-user access to a
+conversation (messages, pin, tag, rename, and posting into it), logged-out access, HTML in
+user text, SQL-injection-shaped logins, session cookie flags and the open-redirect guard all
+behaved correctly, so these tests are regression pins rather than fixes.
 
 **Test-environment problems found and fixed** (none were product bugs): the dev server
 refused `127.0.0.1` so pages never hydrated; the proxy reused sockets that the backend had
@@ -230,4 +239,8 @@ other's rate-limit counters (the rate-limit test now has its own reserved counte
 - Playwright is configured with one retry to absorb transport hiccups; a test that needs it
   is reported as flaky, and the recorded runs above had none.
 - The stress test does not measure the Vercel deployment and did not find a capacity limit.
-- The GitHub Actions jobs have not yet run (section 4).
+- The GitHub Actions jobs have not yet run (section 4). The `Secure` cookie flag only applies
+  in production and is not asserted locally.
+- The test tooling never adopts a server that is already listening on its ports (a stale
+  one could be using another database), so a leftover process on port 3100 or 5100 makes a
+  run fail immediately; stop it and re-run.
