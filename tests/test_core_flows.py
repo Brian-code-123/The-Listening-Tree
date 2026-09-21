@@ -22,6 +22,22 @@ def _new_user_email() -> str:
     return f"autotest_{uuid.uuid4().hex[:10]}@example.com"
 
 
+# The backend still serves its own login page and root route as a fallback
+# (production sends /login and / to the Next.js app via vercel.json), so these
+# two only pin that the fallback pages keep responding.
+def test_login_page_loads_when_unauthenticated():
+    with TestClient(app) as client:
+        response = client.get("/login")
+        assert response.status_code == 200
+        assert "Login" in response.text or "登入" in response.text
+
+
+def test_root_route_serves_or_redirects():
+    with TestClient(app) as client:
+        response = client.get("/", follow_redirects=False)
+        assert response.status_code in (200, 302, 303)
+
+
 def test_health_endpoints():
     with TestClient(app) as client:
         # /health is intentionally minimal for an unauthenticated caller —
