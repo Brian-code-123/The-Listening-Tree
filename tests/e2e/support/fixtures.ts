@@ -10,6 +10,14 @@ export const test = base.extend<Fixtures>({
   // values can be reset. Pass an explicit `waitUntil` to opt out (e.g. to
   // observe a loading screen).
   page: async ({ page }, use) => {
+    // Hermetic: never touch the internet. A hung third-party request (seen: the
+    // Vercel Analytics script) blocks the page "load" event and times out
+    // page.goto, and test runs must not send analytics events anyway. Fonts and
+    // icon CSS from CDNs fall back to system fonts, which no test depends on.
+    await page.route(
+      (url) => url.hostname !== '127.0.0.1' && url.hostname !== 'localhost',
+      (route) => route.abort(),
+    );
     const goto = page.goto.bind(page);
     page.goto = (async (url: string, options?: Parameters<Page['goto']>[1]) => {
       const response = await goto(url, options);

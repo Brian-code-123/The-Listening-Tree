@@ -25,8 +25,21 @@ function localTs(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+// Limiter keys look like "<bucket>:<client ip>". Clear everything except the
+// reserved 203.0.113.x (TEST-NET-3) addresses, which the rate-limit test uses
+// as its own private counters, so parallel workers resetting between tests
+// can't wipe that test's counter mid-run.
 export async function resetRateLimits() {
-  await query('DELETE FROM rate_limit_events');
+  await query("DELETE FROM rate_limit_events WHERE key NOT LIKE '%:203.0.113.%'");
+}
+
+export async function clearRateLimitKey(key: string) {
+  await query('DELETE FROM rate_limit_events WHERE key = $1', [key]);
+}
+
+export async function rateLimitCount(key: string): Promise<number> {
+  const res = await query('SELECT COALESCE(SUM(count), 0) AS n FROM rate_limit_events WHERE key = $1', [key]);
+  return Number(res.rows[0].n);
 }
 
 export async function seedVerificationCode(email: string, code = '123456') {

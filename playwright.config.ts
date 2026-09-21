@@ -37,7 +37,11 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: process.env.E2E_PYTHON || 'python run.py',
+      // uvicorn's default 5s keep-alive closes idle sockets that Next's proxy is
+      // still reusing, which surfaces as "Failed to proxy ... ECONNRESET" (and a
+      // 500 in the browser) about once per few hundred requests. Same app as
+      // `python run.py`, just a keep-alive longer than the proxy's reuse window.
+      command: `${process.env.E2E_PYTHON || 'python'} -m uvicorn app.main:app --host 127.0.0.1 --port ${API_PORT} --timeout-keep-alive 120 --log-level warning --no-access-log`,
       env: {
         PORT: String(API_PORT),
         SKIP_ENV_LOCAL: '1',

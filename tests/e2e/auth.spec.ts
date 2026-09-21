@@ -1,5 +1,5 @@
 import { test, expect } from './support/fixtures';
-import { resetRateLimits, seedVerificationCode } from '../support/db';
+import { clearRateLimitKey, rateLimitCount, resetRateLimits, seedVerificationCode } from '../support/db';
 import { deleteUser, uniqueEmail, E2E_PASSWORD } from '../support/users';
 
 const SUBMIT = 'form.auth-form button[type="submit"]';
@@ -83,16 +83,25 @@ test.describe('Black-box: authentication', () => {
   });
 
   test('login is rate limited after too many attempts (429)', async ({ request }) => {
-    await resetRateLimits();
-    const statuses: number[] = [];
-    for (let i = 0; i < 12; i++) {
-      const res = await request.post('/auth/login', {
-        form: { email: 'nobody@example.com', password: 'x' },
-        headers: { Accept: 'application/json' },
-      });
-      statuses.push(res.status());
+    // The limiter keys on the first X-Forwarded-For entry. A private address from
+    // the reserved TEST-NET-3 range gives this test its own counter, which the
+    // shared resetRateLimits() (run by parallel workers) deliberately leaves alone.
+    const ip = `203.0.113.${1 + Math.floor(Math.random() * 250)}`;
+    const key = `login:${ip}`;
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 12; i++) {
+        const res = await request.post('/auth/login', {
+          form: { email: 'nobody@example.com', password: 'x' },
+          headers: { Accept: 'application/json', 'X-Forwarded-For': ip },
+        });
+        statuses.push(res.status());
+      }
+      expect(await rateLimitCount(key)).toBe(12); // proves the header reached the limiter
+      expect(statuses.slice(0, 10)).not.toContain(429);
+      expect(statuses.slice(10)).toEqual([429, 429]);
+    } finally {
+      await clearRateLimitKey(key);
     }
-    expect(statuses).toContain(429);
-    await resetRateLimits();
   });
 });
