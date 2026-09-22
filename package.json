@@ -48,7 +48,7 @@
     "vercel": "^51.2.0"
   },
   "author": "The Listening Tree Team",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-only",
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
     "@playwright/test": "^1.52.0",
