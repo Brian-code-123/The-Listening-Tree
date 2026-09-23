@@ -73,6 +73,17 @@ def _all_checkins() -> set:
     return {get_text(k, l) for k in ("checkin_morning", "checkin_afternoon", "checkin_evening") for l in TRANSLATIONS}
 
 
+def _should_checkin(last_user_hours, last_row_message, last_row_hours) -> bool:
+    """Greet when the user has been away for CHECKIN_GAP_HOURS or more, unless a
+    check-in already opened this conversation within that window. "Away" is the age
+    of the user's latest own message in any conversation, so chatting elsewhere
+    counts; an old greeting they never answered does not block the next one."""
+    if last_user_hours is None or last_user_hours < CHECKIN_GAP_HOURS:
+        return False
+    greeted_recently = last_row_message in _all_checkins() and last_row_hours < CHECKIN_GAP_HOURS
+    return not greeted_recently
+
+
 def _hours_since(value) -> float:
     """Hours since a chat_history timestamp (datetime or 'YYYY-MM-DD HH:MM:SS')."""
     if not isinstance(value, datetime):
@@ -110,11 +121,20 @@ async def load_conversation_messages(cursor, conn, conversation_id: int, lang: s
             await conn.commit()
             rows = []
 
-    # Proactive check-in: the user is back after a long gap and
-    # hasn't already been greeted with a check-in, so open with a time-of-day greeting
-    # instead of silently showing yesterday's chat. Persisted so it's part
-    # of the conversation the LLM sees and doesn't repeat on reload.
-    if checkin and rows and rows[-1]["message"] not in _all_checkins() and _hours_since(rows[-1]["timestamp"]) >= CHECKIN_GAP_HOURS:
+    # Proactive check-in: only when asked (the chat page resuming a conversation),
+    # so browsing an old one stays read-only. Persisted, so the model sees it and a
+    # reload does not repeat it.
+    last_user_hours = None
+    if checkin and rows:
+        await db.db_execute(
+            cursor,
+            "SELECT MAX(timestamp) AS last_ts FROM chat_history WHERE user_id = ? AND is_bot = FALSE AND is_deleted = FALSE",
+            (rows[-1]["user_id"],),
+        )
+        latest = cursor.fetchone()
+        if latest and latest["last_ts"] is not None:
+            last_user_hours = _hours_since(latest["last_ts"])
+    if checkin and rows and _should_checkin(last_user_hours, rows[-1]["message"], _hours_since(rows[-1]["timestamp"])):
         now = datetime.now(CHECKIN_TZ)
         key = "checkin_morning" if now.hour < 12 else "checkin_afternoon" if now.hour < 18 else "checkin_evening"
         message, ts = get_text(key, lang), datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -345,8 +365,12 @@ async def create_conversation(request: Request):
 
 
 @router.get("/conversations/{conversation_id}/messages")
-async def get_conversation_messages(request: Request, conversation_id: int):
-    """Get the message history for one specific conversation."""
+async def get_conversation_messages(request: Request, conversation_id: int, checkin: bool = False):
+    """Get the message history for one specific conversation.
+
+    `?checkin=1` is sent only when the chat page opens the conversation the
+    user is resuming; the history page and deep links leave it off so that
+    browsing an old conversation never writes to it."""
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"history": []}, status_code=401)
@@ -360,7 +384,7 @@ async def get_conversation_messages(request: Request, conversation_id: int):
         await db.db_execute(c, "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND is_deleted = FALSE", (conversation_id, uid))
         if not c.fetchone():
             return JSONResponse({"history": [], "error": ERROR_NOT_FOUND}, status_code=404)
-        history = await load_conversation_messages(c, conn, conversation_id, lang)
+        history = await load_conversation_messages(c, conn, conversation_id, lang, checkin=checkin)
         return JSONResponse({"history": history})
     except Exception as e:
         logger.error(f"[CONVERSATIONS] fallback due to DB error: {e}")

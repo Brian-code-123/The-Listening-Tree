@@ -54,8 +54,10 @@ export async function createConversation(): Promise<number> {
   return data.conversation_id;
 }
 
-export async function fetchConversationMessages(id: number): Promise<ChatHistoryItem[]> {
-  const res = await fetch(`${API_BASE}/conversations/${id}/messages`, { credentials: "include" });
+/** `checkin` lets the bot open with a check-in after a long break; only pass it
+ * when resuming the latest conversation, never when browsing an old one. */
+export async function fetchConversationMessages(id: number, checkin = false): Promise<ChatHistoryItem[]> {
+  const res = await fetch(`${API_BASE}/conversations/${id}/messages${checkin ? "?checkin=1" : ""}`, { credentials: "include" });
   if (!res.ok) throw new Error(`conversation messages failed: ${res.status}`);
   const data = await res.json();
   return data.history ?? [];

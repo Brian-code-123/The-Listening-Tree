@@ -2111,6 +2111,17 @@ body {
     justify-content: center;
 }
 
+/* "Repeat every day" tick: its own full-width third row, so it never takes
+   the grid cell the submit button sits in (row 2, column 2). */
+.page-chat .add-reminder-form .reminder-repeat {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex; align-items: center; gap: 8px;
+    min-height: 44px;   /* comfortable touch target for older users (WCAG 2.2 AA minimum is 24px) */
+    font-size: 0.9rem; color: var(--text-primary); cursor: pointer;
+}
+.page-chat .add-reminder-form .reminder-repeat input { width: 24px; height: 24px; padding: 0; }
+
 /* Inputs styling (kept) */
 .page-chat .add-reminder-form input {
     padding: 8px 12px; border-radius: var(--radius-xs);

@@ -199,8 +199,8 @@ them with `npm run cap:add:ios` or `npm run cap:add:android`, then
 
 ### Automated testing
 
-- End-to-end (Playwright): 72 user-flow tests on each of Chromium, WebKit, Pixel 5 and iPhone 13 (288 runs), against the real Next.js and FastAPI stack: registration and login, language switching on every page, chat, the cognitive game, voice input, reminders and the site-wide alarm, conversation history and delete, profile, and the HK guide.
-- API integration (pytest, local PostgreSQL): 20 tests covering conversation ownership and delete, session language, translations, and security boundaries. Backend unit tests: 24.
+- End-to-end (Playwright): 84 user-flow tests on each of Chromium, WebKit, Pixel 5 and iPhone 13 (336 runs), against the real Next.js and FastAPI stack: registration and login, language switching on every page, chat, the cognitive game, voice input, reminders (including daily repeat), the site-wide alarm and the returning-user check-in, conversation history and delete, profile, and the HK guide.
+- API integration (pytest, local PostgreSQL): 21 tests covering conversation ownership and delete, session language, translations, security boundaries, and the expiry job keeping daily reminders. Backend unit tests: 25.
 - Unit and component tests (Vitest, Testing Library): 69 tests covering the language hooks, loading screen, delete-confirmation flow, the guard that keeps tests off non-local databases, and a check that English and Cantonese carry the same translation keys.
 - Load testing (k6): ramps to 150 concurrent virtual users against a local backend with 0% failed requests and a p95 latency of about 12 ms for authenticated requests. This is measured on a local machine, not on the Vercel deployment.
 - CI/CD automation: GitHub Actions runs the unit, integration and `web-next` tests, a Playwright end-to-end matrix (one job per browser project) and a k6 smoke run on every push and pull request to `main`/`develop`. See [docs/TESTING.md](docs/TESTING.md) for the test plan, criteria, results and how to repeat them.

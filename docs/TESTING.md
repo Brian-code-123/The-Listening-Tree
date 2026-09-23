@@ -1,9 +1,10 @@
 # Test Plan and Report
 
 This document covers the test plan, strategy, criteria, deliverables and results for
-The Listening Tree after the move from Jinja templates to the Next.js front end. Every
-number below comes from a run recorded on 2026-09-22 (environment in section 9); where a
-result is not yet available (for example the first CI run) it says so.
+The Listening Tree after the move from Jinja templates to the Next.js front end. The
+functional results (sections 5 to 7) were re-recorded on 2026-09-24 (environment in section 9).
+The stress results (section 8) were recorded on 2026-09-22 and have not been re-run. Where a
+result is not yet available it says so.
 
 ## 1. Testing Strategy
 
@@ -14,7 +15,7 @@ application layout that production uses.
 |---|---|---|
 | Black-box / end-to-end | Playwright | User flows through the real UI on 4 browser/device projects |
 | API integration | pytest against a live local PostgreSQL | Endpoint contracts, ownership rules, data effects, security boundaries |
-| Backend unit | pytest with a mocked database | Core flows without a database; the open-redirect guard |
+| Backend unit | pytest with a mocked database | Core flows without a database; the open-redirect guard; the reminder-command parser, the daily-reminder API and the check-in rule |
 | Component / hook unit | Vitest (jsdom, Testing Library) | Language hooks, loading screen, delete-confirm flow, translation parity |
 | Stress | k6 | Latency and error rate under concurrent load |
 
@@ -48,8 +49,10 @@ Design decisions that make the results trustworthy and repeatable:
 | Cognitive game (start, answer, exit) | `chat.spec.ts` | e2e |
 | Accessibility mode | `accessibility.spec.ts` | e2e |
 | Voice input (mocked Web Speech API) | `voice.spec.ts` | e2e (Chromium) |
-| Reminders: add, list, delete, validation, ownership | `reminders.spec.ts` | e2e (UI and API) |
-| Reminder alarm on a page other than chat | `reminder-alarm.spec.ts` | e2e (Chromium, WebKit) |
+| Reminders: add, list, delete, validation, ownership, daily repeat | `reminders.spec.ts` | e2e (UI and API) |
+| Reminder alarm on a page other than chat, and a daily reminder ringing again the next day | `reminder-alarm.spec.ts` | e2e (Chromium, WebKit) |
+| Returning-user check-in (6+ hours since the user's last message in any conversation) | `checkin.spec.ts`, `test_daily_reminder_checkin.py` | e2e, backend unit |
+| Daily reminders survive the nightly expiry job | `test_daily_reminders_live.py`, `reminders.spec.ts` | integration, e2e |
 | Conversation history: list, pin, rename, filter | `history.spec.ts` | e2e |
 | Conversation delete: cancel, confirm, persistence, other user, logged out | `history.spec.ts`, `test_conversations_and_session.py`, `ConversationCard.test.tsx` | e2e, integration, unit |
 | Profile: display name, password change | `profile.spec.ts` | e2e |
@@ -91,14 +94,16 @@ Not tested: see section 10.
 | Stress summary | `test-results/stress-summary.json` |
 | CI artifacts | `ci-artifacts-e2e-<project>` (one per browser project) and `ci-artifacts-stress` |
 
-The CI workflow (`.github/workflows/ci.yml`) was extended with these jobs but has not yet
-run on GitHub; CI run links will be added after the first push. The equivalent local runs
-are reported below.
+The CI workflow (`.github/workflows/ci.yml`) runs every job on each push to `main`. Its runs
+of 2026-09-23 (commits `668dcf1` and `4142a38`) failed on one test, the reminder form layout,
+which the new "repeat every day" tick had broken. The fix passes locally in both modes
+(section 6); the CI run link for the fix is added after that run has finished.
+The equivalent local runs are reported below.
 
 ## 5. Black-box test
 
 Black-box tests drive the UI or the public HTTP API only, with no knowledge of internals.
-There are 72 tests per project (13 spec files). Result: see section 6.
+There are 84 tests per project (14 spec files). Result: see section 6.
 
 | Spec | Tests | Scenarios |
 |---|---|---|
@@ -108,37 +113,48 @@ There are 72 tests per project (13 spec files). Result: see section 6.
 | `chat.spec.ts` | 6 | Send and reply; send button; reload persistence; new conversation; game start/answer/exit; dark theme persists |
 | `accessibility.spec.ts` | 3 | Landmarks and skip link; send and reply; clear |
 | `voice.spec.ts` | 2 | Mic fills the input with recognised speech; localized tooltip |
-| `reminders.spec.ts` | 7 | Add and delete in the UI; form layout; localized presets; API create/list/delete; validation (400); unauthenticated (401); another user gets 404 |
-| `reminder-alarm.spec.ts` | 2 | Alarm fires on `/history` with a looping sound, an alert and removal of the reminder; a reminder for another minute does not fire |
+| `reminders.spec.ts` | 13 | Add and delete in the UI; form layout (the repeat tick has its own row and does not move the button); localized presets; a daily reminder added with the tick, marked as repeating and kept after a reload; a one-off reminder not marked; API create/list/delete; repeat=daily stored and an unknown repeat rejected (400); a daily reminder still listed three days later while a one-off one is not; the chat commands "set reminder daily ..." and "設置提醒 每日 ..."; validation (400); unauthenticated (401); another user gets 404 |
+| `reminder-alarm.spec.ts` | 3 | Alarm fires on `/history` with a looping sound, an alert and removal of the reminder; a daily reminder rings, is kept, and rings again the next day in the same open tab; a reminder for another minute does not fire |
+| `checkin.spec.ts` | 5 | Check-in after 7 hours away, and only once; none after 2 hours; opening an old conversation through the API writes nothing; activity in another conversation suppresses the check-in on an old pinned one; an unanswered check-in does not block the next |
 | `history.spec.ts` | 8 | List; pin and filter; rename; delete (cancel, confirm, persistence); empty state; localized confirm text; another user gets 404; logged out gets 401 |
 | `profile.spec.ts` | 3 | Display name persists; wrong current password rejected; new password works for login |
 | `hk-guide.spec.ts` | 4 | Five tabs and cards; category filter; detail modal and Escape; localized "Last updated" |
 | `edge-cases.spec.ts` | 8 | HTML in a chat message, reminder label and conversation title never executes; whitespace-only message not sent; Chinese and emoji label intact; session expiring mid-chat gives an error bubble; a deleted conversation opened by link leaves a working chat; deleting while renaming |
 | `browser-compatibility.spec.ts` | 8 | See section 7 |
 
-Supporting layers: 20 API integration tests, 17 backend unit tests, and 69 component/unit
+Supporting layers: 21 API integration tests, 25 backend unit tests, and 69 component/unit
 tests (section 6).
 
 ## 6. Results
 
 | Suite | Result |
 |---|---|
-| Playwright, dev servers, 2 workers | 288 executions (72 x 4 projects): **278 passed, 10 skipped, 0 failed, 0 flaky** (6.0 min) |
-| Playwright, production build (CI mode), 1 worker | **278 passed, 10 skipped, 0 failed, 0 flaky** (7.3 min for all four projects) |
-| pytest, backend unit (mocked DB) | 17 passed |
-| pytest, API integration (live local PostgreSQL) | 20 passed |
+| Playwright, dev servers, 2 workers | 336 executions (84 x 4 projects): **324 passed, 12 skipped, 0 failed, 0 flaky** (8.2 min) |
+| Playwright, production build (CI mode), 1 worker | 336 executions: **323 passed, 12 skipped, 0 failed, 1 flaky** (10.3 min for all four projects) |
+| pytest, backend unit (mocked DB) | 25 passed |
+| pytest, API integration (live local PostgreSQL) | 21 passed |
 | Vitest, repository root | 16 passed (2 files) |
 | Vitest, `web-next` | 53 passed (7 files) |
 | k6 stress, full profile | thresholds passed (section 8) |
 
-The 10 skipped executions are intended: voice input runs on Chromium only, because the Web
-Speech API is Chromium-specific (4); the alarm timing test runs on desktop projects only
-(4); the reminder form layout measurement needs the desktop sidebar (2).
+The one flaky execution in the production-build run is `i18n.spec.ts:32` "login (logged out)
+switches zh-HK <-> en" on Chromium: it hit the 45 s test timeout once and passed on the retry. It
+did not reproduce in 40 consecutive runs of that test (login and register, 20 each) in the same
+mode, and the dev-server run and an earlier production-build run had none. A throwaway probe of
+the API path it uses (set the language, then read it back from `/me`, 200 times in a row in the
+same mode) found no wrong answer and a slowest round trip of 35 ms, which rules out the API and
+the proxy but not the browser navigation or machine load. The cause is not established
+(section 10).
+
+The 12 skipped executions are intended: voice input runs on Chromium only, because the Web
+Speech API is Chromium-specific (4); the alarm timing tests run on desktop projects only
+(6: three tests on the two phone projects); the reminder form layout measurement needs the
+desktop sidebar (2).
 
 ## 7. Browser test
 
 Projects: Desktop Chrome (Chromium), Desktop Safari (WebKit), Pixel 5 (Chromium mobile
-emulation) and iPhone 13 (WebKit mobile emulation). All 64 tests run on all four except the
+emulation) and iPhone 13 (WebKit mobile emulation). All 84 tests run on all four except the
 skips above, so every feature in section 2 is exercised on every browser engine and both
 phone form factors.
 
@@ -151,7 +167,7 @@ phone form factors.
 - A loading screen appears while the session check is slow, then the page replaces it.
 - Login and chat do not overflow horizontally on phone viewports.
 
-Result: all pass on all four projects (included in the totals in section 6).
+Result: all pass on all four projects (included in the totals in section 6; one test needed its retry in the production-build run, see section 10).
 
 ## 8. Stress test
 
@@ -188,9 +204,11 @@ need a breakpoint ramp, which was not done.
 
 ## 9. How to repeat
 
-Environment used for the recorded results: Apple M2, 16 GB, macOS 26.6.2; PostgreSQL 15.17;
-Node 25.6.1; Python 3.14.7; Playwright 1.59.1; k6 2.2.0. CI uses Ubuntu, Node 20, Python
-3.12 and PostgreSQL 16.
+Environment used for the functional results recorded on 2026-09-24: Apple M2, 16 GB,
+macOS 26.6.2; PostgreSQL 15.17; Node 25.6.1; Python 3.12.7 (Anaconda, the default `python`,
+not the project's `.venv`); Playwright 1.59.1. The stress results (section 8) were recorded
+on 2026-09-22 with the project's `.venv` (Python 3.14.7) and k6 2.2.0. CI uses Ubuntu,
+Node 20, Python 3.12 and PostgreSQL 16.
 
 ```bash
 brew install k6 && npm ci && npm ci --prefix web-next && npx playwright install
@@ -237,10 +255,21 @@ other's rate-limit counters (the rate-limit test now has its own reserved counte
   and no physical device. There is no visual (screenshot) comparison.
 - Fonts and icon fonts from CDNs are blocked in tests, so rendering uses system fonts.
 - Playwright is configured with one retry to absorb transport hiccups; a test that needs it
-  is reported as flaky, and the recorded runs above had none.
+  is reported as flaky. The dev-server run above had none; the production-build run had one
+  (`i18n.spec.ts:32`, a single 45 s timeout that passed on retry and did not reproduce in 40
+  repeats or in a 200-round-trip probe of its API calls), and its cause is not established. An earlier run on 2026-09-24 that overlapped with
+  other test commands on the same machine had 2 flaky tests at its very start (an `ENOENT` on the
+  `test-results` artifacts folder, then a timeout); runs with nothing else running had at most
+  the one above. Run one suite at a time.
 - The stress test does not measure the Vercel deployment and did not find a capacity limit.
-- The GitHub Actions jobs have not yet run (section 4). The `Secure` cookie flag only applies
+- The first GitHub Actions runs (2026-09-23) failed on the reminder form layout test (section 4). The `Secure` cookie flag only applies
   in production and is not asserted locally.
 - The test tooling never adopts a server that is already listening on its ports (a stale
   one could be using another database), so a leftover process on port 3100 or 5100 makes a
   run fail immediately; stop it and re-run.
+- The check-in can be inserted twice if the chat page is opened in two tabs at the same
+  moment (there is no lock). Stored chat timestamps are naive server-local time, so rows
+  written from a machine in another time zone can cause one early or late check-in.
+- Daily reminders use the native scheduler's daily repeat (`every: "day"`); no automated
+  test exercises it and it has not been checked on a physical device. Messages about
+  self-harm get no special handling (see the README, "Known gaps").

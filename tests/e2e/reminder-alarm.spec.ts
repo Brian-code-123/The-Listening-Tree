@@ -42,6 +42,35 @@ test.describe('Black-box: reminder alarm', () => {
       .toBe(0);
   });
 
+  test('a daily reminder rings, is kept, and rings again the next day in the same open tab', async ({ authedPage: page }) => {
+    const dialogs: string[] = [];
+    page.on('dialog', async (d) => {
+      dialogs.push(d.message());
+      await d.accept();
+    });
+    await page.addInitScript(() => {
+      HTMLMediaElement.prototype.play = () => Promise.resolve();
+    });
+    await page.clock.install({ time: new Date('2030-01-15T09:29:30+08:00') });
+
+    const api = page.context().request;
+    await api.post('/reminders', { form: { label: 'Morning walk', time: '09:30', repeat: 'daily' } });
+
+    const meDone = page.waitForResponse((r) => r.url().endsWith('/me') && r.ok());
+    await page.goto('/history');
+    await meDone;
+
+    await page.clock.fastForward(35_000); // -> 09:30:05
+    await expect.poll(() => dialogs.length, { timeout: 15_000 }).toBe(1);
+
+    // Ringing must not consume a daily reminder.
+    const list = (await (await api.get('/get_reminders')).json()).reminders;
+    expect(list.map((r: { label: string }) => r.label)).toEqual(['Morning walk']);
+
+    await page.clock.fastForward(24 * 60 * 60 * 1000); // -> 09:30:05 the next day
+    await expect.poll(() => dialogs.length, { timeout: 15_000 }).toBe(2);
+  });
+
   test('a reminder for another minute does not fire', async ({ authedPage: page }) => {
     const dialogs: string[] = [];
     page.on('dialog', async (d) => {

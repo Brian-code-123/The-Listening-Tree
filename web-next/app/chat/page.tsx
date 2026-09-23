@@ -88,7 +88,7 @@ export default function ChatPage() {
         if (conversations.length > 0) {
           const id = conversations[0].id;
           setConversationId(id);
-          setMessages(toDisplay(await fetchConversationMessages(id)));
+          setMessages(toDisplay(await fetchConversationMessages(id, true)));
         } else {
           const id = await createConversation();
           setConversationId(id);

@@ -116,7 +116,7 @@ export default function ReminderPanel({ lang, t, translations }: ReminderPanelPr
             <option value={translations.reminder_preset_6 ?? "Exercise"}>{translations.reminder_preset_6 ?? "Exercise"}</option>
           </datalist>
           <input id="reminderTime" type="time" required value={time} onChange={(e) => setTime(e.target.value)} />
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.9rem" }}>
+          <label className="reminder-repeat">
             <input type="checkbox" checked={daily} onChange={(e) => setDaily(e.target.checked)} />
             {t("reminder_daily", "Repeat every day")}
           </label>
