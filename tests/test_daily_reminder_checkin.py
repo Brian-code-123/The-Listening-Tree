@@ -69,3 +69,28 @@ def test_daily_reminder_repeat_roundtrip():
         assert client.post("/reminders", data={"label": "x", "time": "09:00", "repeat": "weekly"}).status_code == 400
         got = {r["label"]: r["repeat"] for r in client.get("/get_reminders").json()["reminders"]}
         assert got == {"walk": "daily", "pill": "once"}
+
+
+def test_split_repeat_strips_daily_word():
+    from app.routers.chat import _split_repeat
+
+    assert _split_repeat("daily bp meds") == ("bp meds", "daily")
+    assert _split_repeat("bp meds every day") == ("bp meds", "daily")
+    assert _split_repeat("每日 食藥") == ("食藥", "daily")
+    assert _split_repeat("食藥 每天") == ("食藥", "daily")
+    assert _split_repeat("bp meds") == ("bp meds", "once")
+    assert _split_repeat("daily") == ("daily", "once")  # nothing left to remind about
+    assert _split_repeat("dailyroutine") == ("dailyroutine", "once")
+
+
+def test_chat_command_creates_daily_reminder():
+    with TestClient(app) as client:
+        from tests.integration.test_reminders_crud import _new_user_email
+        email, pw = _new_user_email(), "TestPass123!"
+        client.post("/register", data={"email": email, "password": pw, "confirm_password": pw, "verification_code": "123456"}, follow_redirects=False)
+        client.post("/login", data={"email": email, "password": pw}, follow_redirects=False)
+        reply = client.post("/get_response", data={"msg": "set reminder daily bp meds 08:00"}).json()["response"]
+        assert reply == "Daily reminder set: bp meds every day at 08:00"
+        client.post("/get_response", data={"msg": "設置提醒 每日 食藥 09:00"})
+        got = {r["label"]: r["repeat"] for r in client.get("/get_reminders").json()["reminders"]}
+        assert got == {"bp meds": "daily", "食藥": "daily"}

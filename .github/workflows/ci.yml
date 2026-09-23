@@ -53,7 +53,7 @@ jobs:
           pip install pytest
 
       - name: Run backend unit tests (mocked DB, no live DB needed)
-        run: pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py
+        run: pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py tests/test_daily_reminder_checkin.py
 
   integration-tests:
     name: Pytest Integration Tests

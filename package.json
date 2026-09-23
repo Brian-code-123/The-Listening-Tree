@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "python run.py",
     "sync:translations": "python3 scripts/sync-translations.py",
-    "test:backend": "pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py",
+    "test:backend": "pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py tests/test_daily_reminder_checkin.py",
     "test:unit": "npx vitest run --config vitest.config.ts",
     "test:integration": "SKIP_ENV_LOCAL=1 DATABASE_URL=\"postgresql://$(whoami)@127.0.0.1:5432/listening_tree_e2e?sslmode=disable\" SUPABASE_POOLER_URL= POSTGRES_POOLER_URL= DATABASE_POOLER_URL= RUN_LIVE_DB=1 PYTHONPATH=. pytest -q tests/integration",
     "test:e2e": "playwright test",

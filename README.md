@@ -29,7 +29,7 @@ The Listening Tree is a bilingual AI-powered companion chatbot designed to reduc
 
 Elderly populations face severe digital and social barriers:
 
-- Loneliness crisis: around 25% of older adults experience social isolation, which is linked to accelerated cognitive decline and dementia risk.
+- Loneliness crisis: a study reported by the [South China Morning Post](https://www.scmp.com/news/hong-kong/society/article/3280406/experts-sound-alarm-growing-number-hong-kong-elderly-become-socially-isolated) (29 Sep 2024) found 53% of people aged 65 and over in Hong Kong were socially isolated in 2023–24, up from 41.2% in 2017–18. Worldwide, the WHO says loneliness is linked to more than 871,000 deaths a year and affects 1 in 6 people ([WHO news release, 30 Jun 2025](https://who.int/news/item/30-06-2025-social-connection-linked-to-improved-heath-and-reduced-risk-of-early-death)); the same Commission on Social Connection report is quoted as putting the added risk of dementia at 50% ([Health Policy Watch](https://healthpolicy-watch.news/loneliness-social-isolation-linked-to-871000-annual-deaths-who-finds/)).
 - Tech accessibility gaps: complex interfaces, tiny text, and confusing navigation make common apps difficult to use.
 - Health management burden: missed medication schedules can lead to health risks.
 - Limited social interaction: mobility or geographic restrictions can reduce daily social engagement and harm mental health.
@@ -41,17 +41,17 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Simplicity and personalization: easy, customizable daily reminders for medication, exercise, and hydration.
 - Voice-first interaction: hands-free operation via Cantonese and English voice commands.
 - Elderly-centric design: WCAG AA-aligned UI with large buttons, high contrast, and minimal clutter.
-- Security and reliability: rigorously tested system with strong data protection for user privacy.
+- Security and reliability: automated tests cover authentication, access control and the core flows; the privacy limits that remain are listed under [Security & Privacy](#security--privacy).
 
 ## Key Features
 
 - Bilingual AI chatbot: warm, patient conversations powered by Zhipu AI GLM-4 LLM in English and Cantonese.
 - Voice interaction: Web Speech API for real-time speech recognition and synthesis.
-- Smart reminder system: CRUD-managed medication and activity reminders. An in-app alarm (looping sound + on-screen alert) fires on whichever page is open; on the native mobile build, reminders are also scheduled as local OS notifications so they still fire while the app is backgrounded or closed.
+- Smart reminder system: medication and activity reminders that can repeat every day, created and deleted from the reminder panel or by chat command. An in-app alarm (looping sound + on-screen alert) fires on whichever page is open; on the native mobile build, reminders are also scheduled as local OS notifications so they still fire while the app is backgrounded or closed.
 - Conversation history: dedicated history page for browsing, pinning, tagging, renaming, and deleting past conversations, separate from the always-current active chat.
 - Cross-platform support: responsive web app plus native iOS and Android builds via Capacitor.
 - Accessibility optimization: large typography, high-contrast themes, and simplified navigation.
-- Cognitive wellness tools: bilingual memory games and daily wellness prompts.
+- Cognitive wellness tools: bilingual memory games, and a time-of-day check-in greeting ("How did you sleep? Have you had breakfast?") when the user comes back after 6 or more hours away.
 - HK localized utilities: public holiday calendar, local news feed, and daily life guidance.
 
 ## Tech Stack
@@ -185,9 +185,9 @@ them with `npm run cap:add:ios` or `npm run cap:add:android`, then
 
 ### 2. Reminder Management
 
-- Voice command to create reminders, for example: "Set daily 8 AM BP meds reminder".
-- AI confirms details in large text.
-- Edit or delete reminders through voice or simple UI gestures.
+- Create reminders from the reminder panel (tick "Repeat every day" for a daily one) or by chat command or dictation, for example `set reminder daily BP meds 08:00` or `設置提醒 每日 食藥 08:00`. Without "daily" a reminder rings once, on the day it was created.
+- AI confirms the details in large text.
+- Delete a reminder from the panel or with `delete reminder BP meds`. There is no edit: delete it and create it again.
 
 ### 3. Bilingual Interaction
 
@@ -200,7 +200,7 @@ them with `npm run cap:add:ios` or `npm run cap:add:android`, then
 ### Automated testing
 
 - End-to-end (Playwright): 72 user-flow tests on each of Chromium, WebKit, Pixel 5 and iPhone 13 (288 runs), against the real Next.js and FastAPI stack: registration and login, language switching on every page, chat, the cognitive game, voice input, reminders and the site-wide alarm, conversation history and delete, profile, and the HK guide.
-- API integration (pytest, local PostgreSQL): 20 tests covering conversation ownership and delete, session language, translations, and security boundaries. Backend unit tests: 17.
+- API integration (pytest, local PostgreSQL): 20 tests covering conversation ownership and delete, session language, translations, and security boundaries. Backend unit tests: 24.
 - Unit and component tests (Vitest, Testing Library): 69 tests covering the language hooks, loading screen, delete-confirmation flow, the guard that keeps tests off non-local databases, and a check that English and Cantonese carry the same translation keys.
 - Load testing (k6): ramps to 150 concurrent virtual users against a local backend with 0% failed requests and a p95 latency of about 12 ms for authenticated requests. This is measured on a local machine, not on the Vercel deployment.
 - CI/CD automation: GitHub Actions runs the unit, integration and `web-next` tests, a Playwright end-to-end matrix (one job per browser project) and a k6 smoke run on every push and pull request to `main`/`develop`. See [docs/TESTING.md](docs/TESTING.md) for the test plan, criteria, results and how to repeat them.
@@ -227,8 +227,15 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 - Access control: conversations and reminders belong to their owner; automated tests check that another user is refused on read, pin, tag, rename, delete and write.
 - Output handling: user-supplied text is rendered as text (tests cover HTML in messages, reminder labels and conversation titles), and the language-switch redirect only ever returns known local pages.
 
+### Where user data goes
+
+- Chat: each message and up to the last 20 messages of that conversation are sent to Zhipu AI (`open.bigmodel.cn`, a China-based provider) to generate the reply. Do not present the app as keeping conversations private to this service.
+- Voice: by default a browser's Web Speech API sends the audio to an online recognition service ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API/Using_the_Web_Speech_API)), so dictation is not on-device. Only browsers without the API fall back to uploading the recording to our `/transcribe` endpoint (Hugging Face Whisper, then Google Web Speech).
+- Consent: registration has a privacy notice but no explicit consent step for these transfers.
+
 ### Known gaps
 
+- No self-harm or crisis detection: a message about wanting to die gets the same LLM reply as any other message, with no hotline referral or alert to a carer. This must be added before real elderly users rely on it.
 - Encryption-at-rest relies on Supabase's underlying infrastructure and is not independently documented or verified at the application level.
 - No formal written threat model.
 - No documented data retention / deletion policy for user accounts and chat history.
@@ -242,6 +249,7 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 ## Future Improvements
 
 - Formal usability evaluation with an elderly test group, using the System Usability Scale (SUS) methodology.
+- Self-harm / crisis detection with a fixed hotline reply, and an explicit consent step for the third-party processing above.
 - Documented threat model and data retention / deletion policy.
 - Advanced analytics dashboard for usage and wellness tracking.
 - Offline mode support for low-connectivity environments.

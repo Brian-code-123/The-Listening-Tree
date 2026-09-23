@@ -3,6 +3,7 @@ state machine, and the AI fallthrough — plus voice transcription and
 device-token registration.
 """
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -89,12 +90,26 @@ def _parse_reminder_set_command(user_input_original: str, user_input_lower: str)
     return None, None, "Usage: set reminder [activity] [HH:MM]"
 
 
+_DAILY_WORD = re.compile(r"^(?:(?:daily|every day)\b|每日|每天)\s*|\s*(?:\b(?:daily|every day)|每日|每天)$", re.IGNORECASE)
+
+
+def _split_repeat(label: str):
+    """Strip a leading/trailing 'daily' / 'every day' / 每日 / 每天 from a reminder
+    label. Returns (label, "daily" | "once"); a label that is only that word is kept."""
+    stripped, n = _DAILY_WORD.subn("", label)
+    stripped = stripped.strip()
+    return (stripped, "daily") if n and stripped else (label, "once")
+
+
 async def _apply_reminder_set(uid: int, label: str, time_str: str, lang: str) -> str:
     """Create the reminder, or explain why the time was rejected."""
+    label, repeat = _split_repeat(label)
     try:
         h, m = map(int, time_str.split(':'))
         if 0 <= h <= 23 and 0 <= m <= 59:
-            await create_reminder(uid, label, time_str)
+            await create_reminder(uid, label, time_str, repeat)
+            if repeat == "daily":
+                return f"每日提醒已設置：{label}，每日 {time_str}" if lang == 'zh-HK' else f"Daily reminder set: {label} every day at {time_str}"
             return f"提醒已設置：{label}，時間 {time_str}" if lang == 'zh-HK' else f"Reminder set: {label} at {time_str}"
         return "時間無效。請用24小時格式 HH:MM" if lang == 'zh-HK' else "Invalid time. Use 24-hour format HH:MM"
     except (ValueError, IndexError):
