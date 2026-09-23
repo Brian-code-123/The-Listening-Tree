@@ -193,7 +193,7 @@ class _FakeCursor:
             return
 
         if "insert into reminders" in normalized:
-            user_id, label, reminder_time, created_at = params
+            user_id, label, reminder_time, repeat_type, created_at = params
             reminder_id = self.state["next_reminder_id"]
             self.state["next_reminder_id"] += 1
             self.state["reminders"].append(
@@ -203,6 +203,7 @@ class _FakeCursor:
                     "label": label,
                     "reminder_time": reminder_time,
                     "is_active": True,
+                    "repeat_type": repeat_type,
                     "created_at": created_at,
                 }
             )
@@ -242,7 +243,7 @@ class _FakeCursor:
             self.rowcount = updated
             return
 
-        if "select id, label, reminder_time, is_active from reminders" in normalized:
+        if "select id, label, reminder_time, is_active, repeat_type from reminders" in normalized:
             user_id, _today = params
             self._rows = [
                 {
@@ -250,6 +251,7 @@ class _FakeCursor:
                     "label": r["label"],
                     "reminder_time": r["reminder_time"],
                     "is_active": 1 if r["is_active"] else 0,
+                    "repeat_type": r["repeat_type"],
                 }
                 for r in self.state["reminders"]
                 if r["user_id"] == user_id

@@ -180,7 +180,7 @@ async def prune_user_chat_history(cursor, conversation_id: int) -> None:
 
 
 async def auto_expire_old_reminders() -> None:
-    """Deactivate reminders created before today.
+    """Deactivate one-off reminders created before today (daily ones persist).
 
     Runs once per hour (top of the hour) from the background thread.
     """
@@ -192,7 +192,7 @@ async def auto_expire_old_reminders() -> None:
         await db.db_execute(
             c,
             "UPDATE reminders SET is_active = FALSE, updated_at = ? "
-            "WHERE DATE(created_at) < ? AND is_active = TRUE",
+            "WHERE DATE(created_at) < ? AND is_active = TRUE AND COALESCE(repeat_type, 'once') <> 'daily'",
             (ts, today),
         )
         expired = db._safe_rowcount(c)

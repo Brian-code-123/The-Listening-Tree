@@ -5,6 +5,7 @@ export interface Reminder {
   label: string;
   time: string;
   active: boolean;
+  repeat?: "once" | "daily";
 }
 
 export async function fetchReminders(): Promise<Reminder[]> {
@@ -14,18 +15,18 @@ export async function fetchReminders(): Promise<Reminder[]> {
   return data.reminders ?? [];
 }
 
-export async function createReminder(label: string, time: string): Promise<Reminder> {
+export async function createReminder(label: string, time: string, repeat: "once" | "daily" = "once"): Promise<Reminder> {
   const res = await fetch(`${API_BASE}/reminders`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ label, time }),
+    body: new URLSearchParams({ label, time, repeat }),
   });
   const body = await res.json();
   if (!res.ok || !body.success) {
     throw new Error(body.message || `create reminder failed: ${res.status}`);
   }
-  return { id: body.id, label: body.label, time: body.time, active: true };
+  return { id: body.id, label: body.label, time: body.time, active: true, repeat };
 }
 
 export async function deleteReminder(id: number): Promise<void> {

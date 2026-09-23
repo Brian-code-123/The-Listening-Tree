@@ -47,7 +47,8 @@ export default function ReminderAlarm() {
       }
       const currentTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
       for (const r of list) {
-        const key = `${r.id}:${currentTime}`;
+        // Date in the key so a daily reminder fires again on a tab left open overnight.
+        const key = `${new Date().toDateString()}:${r.id}:${currentTime}`;
         if (r.time === currentTime && r.active && !firedForRef.current.has(key)) {
           firedForRef.current.add(key);
           const audio = new Audio(`${API_BASE}/static/notification.mp3`);
@@ -63,7 +64,8 @@ export default function ReminderAlarm() {
             alert(message);
             audio.pause();
             audio.currentTime = 0;
-            deleteReminder(r.id).catch(() => {});
+            // Daily reminders stay for tomorrow; one-off ones are consumed.
+            if (r.repeat !== "daily") deleteReminder(r.id).catch(() => {});
           }, 300);
         }
       }

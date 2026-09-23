@@ -103,7 +103,7 @@ export async function syncNativeReminders(reminders: Reminder[], lang: string): 
         id: i + 1,
         title: lang === "zh-HK" ? "⏰ 提醒" : "⏰ Reminder",
         body: r.label,
-        schedule: { at: when },
+        schedule: r.repeat === "daily" ? { at: when, every: "day" as const } : { at: when },
         sound: "notification.mp3",
       };
     });

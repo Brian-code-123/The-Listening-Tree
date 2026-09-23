@@ -19,6 +19,7 @@ export default function ReminderPanel({ lang, t, translations }: ReminderPanelPr
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [label, setLabel] = useState("");
   const [time, setTime] = useState("");
+  const [daily, setDaily] = useState(false);
 
   // Promise-callback form (rather than await) so setState never runs
   // synchronously in the mount effect's body below.
@@ -44,9 +45,10 @@ export default function ReminderPanel({ lang, t, translations }: ReminderPanelPr
     e.preventDefault();
     if (!label.trim() || !time) return;
     try {
-      await createReminder(label.trim(), time);
+      await createReminder(label.trim(), time, daily ? "daily" : "once");
       setLabel("");
       setTime("");
+      setDaily(false);
       refreshList();
     } catch {
       // Swallow — matches original's lack of an explicit error UI here.
@@ -83,6 +85,7 @@ export default function ReminderPanel({ lang, t, translations }: ReminderPanelPr
                   <div className="reminder-label">{r.label}</div>
                   <div className="reminder-time-badge">
                     <i className="fas fa-clock" /> {r.time}
+                    {r.repeat === "daily" && <> · <i className="fas fa-repeat" /> {t("reminder_daily", "Every day")}</>}
                   </div>
                 </div>
                 {r.active && (
@@ -113,6 +116,10 @@ export default function ReminderPanel({ lang, t, translations }: ReminderPanelPr
             <option value={translations.reminder_preset_6 ?? "Exercise"}>{translations.reminder_preset_6 ?? "Exercise"}</option>
           </datalist>
           <input id="reminderTime" type="time" required value={time} onChange={(e) => setTime(e.target.value)} />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.9rem" }}>
+            <input type="checkbox" checked={daily} onChange={(e) => setDaily(e.target.checked)} />
+            {t("reminder_daily", "Repeat every day")}
+          </label>
           <button type="submit" aria-label={t("add_reminder_button", "Add reminder")}>
             <i className="fas fa-plus" />
           </button>

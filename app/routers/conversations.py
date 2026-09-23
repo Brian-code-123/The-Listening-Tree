@@ -3,7 +3,9 @@ one conversation's messages. Also the shared helpers chat.py uses to resolve
 which conversation a new message belongs to.
 """
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
 
 from fastapi import APIRouter, Form, Request
@@ -58,16 +60,39 @@ async def get_or_create_active_conversation(cursor, user_id: int, lang: str, req
     return cursor.fetchone()["id"]
 
 
-async def load_conversation_messages(cursor, conn, conversation_id: int, lang: str) -> list:
+# How long the user must be away before the bot opens with a check-in.
+CHECKIN_GAP_HOURS = 6
+# Greeting wording follows the user's clock, not the server's (Vercel runs in UTC).
+try:
+    CHECKIN_TZ = ZoneInfo(os.environ.get("CHECKIN_TZ") or "Asia/Hong_Kong")
+except ZoneInfoNotFoundError:  # slim images without tzdata; HK has no DST
+    CHECKIN_TZ = timezone(timedelta(hours=8))
+
+
+def _all_checkins() -> set:
+    return {get_text(k, l) for k in ("checkin_morning", "checkin_afternoon", "checkin_evening") for l in TRANSLATIONS}
+
+
+def _hours_since(value) -> float:
+    """Hours since a chat_history timestamp (datetime or 'YYYY-MM-DD HH:MM:SS')."""
+    if not isinstance(value, datetime):
+        value = datetime.strptime(db._json_timestamp(value)[:19], '%Y-%m-%d %H:%M:%S')
+    return (datetime.now() - value.replace(tzinfo=None)).total_seconds() / 3600
+
+
+async def load_conversation_messages(cursor, conn, conversation_id: int, lang: str, checkin: bool = False) -> list:
     """Shared history-loading logic for one conversation.
 
     Extracted so both the legacy `/get_chat_history` endpoint and the new
     per-conversation endpoint return identical shapes and share the
     stale-greeting cleanup behaviour.
+
+    `checkin=True` (only the active-conversation load) lets the bot open with
+    a check-in; browsing an old conversation must stay read-only.
     """
     await db.db_execute(
         cursor,
-        "SELECT id, timestamp, is_bot, message FROM chat_history WHERE conversation_id = ? AND is_deleted = FALSE ORDER BY timestamp",
+        "SELECT id, user_id, timestamp, is_bot, message FROM chat_history WHERE conversation_id = ? AND is_deleted = FALSE ORDER BY timestamp",
         (conversation_id,),
     )
     rows = cursor.fetchall()
@@ -84,6 +109,22 @@ async def load_conversation_messages(cursor, conn, conversation_id: int, lang: s
             await db.db_execute(cursor, "UPDATE chat_history SET is_deleted = TRUE WHERE id = ?", (rows[0]["id"],))
             await conn.commit()
             rows = []
+
+    # Proactive check-in: the user is back after a long gap and
+    # hasn't already been greeted with a check-in, so open with a time-of-day greeting
+    # instead of silently showing yesterday's chat. Persisted so it's part
+    # of the conversation the LLM sees and doesn't repeat on reload.
+    if checkin and rows and rows[-1]["message"] not in _all_checkins() and _hours_since(rows[-1]["timestamp"]) >= CHECKIN_GAP_HOURS:
+        now = datetime.now(CHECKIN_TZ)
+        key = "checkin_morning" if now.hour < 12 else "checkin_afternoon" if now.hour < 18 else "checkin_evening"
+        message, ts = get_text(key, lang), datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        await db.db_execute(
+            cursor,
+            "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)",
+            (rows[-1]["user_id"], lang, ts, message, conversation_id),
+        )
+        await conn.commit()
+        rows = list(rows) + [{"timestamp": ts, "is_bot": True, "message": message}]
 
     history = [
         {
@@ -123,7 +164,7 @@ async def get_chat_history(request: Request):
         c = conn.cursor()
         conversation_id = await get_or_create_active_conversation(c, uid, lang, None)
         await conn.commit()
-        history = await load_conversation_messages(c, conn, conversation_id, lang)
+        history = await load_conversation_messages(c, conn, conversation_id, lang, checkin=True)
         return JSONResponse({"history": history})
     except Exception as e:
         # Graceful degradation for transient DB/network failures.

@@ -10,8 +10,11 @@ from datetime import datetime
 from app.db import queries as db
 
 
-async def create_reminder(uid: int, label: str, reminder_time: str) -> int:
+async def create_reminder(uid: int, label: str, reminder_time: str, repeat_type: str = "once") -> int:
     """Insert a new active reminder for *uid* and return its id.
+
+    `repeat_type` is "once" (default) or "daily"; daily reminders survive
+    past the day they were created and are not deleted after firing.
 
     Caller is responsible for validating `reminder_time` is HH:MM in a
     valid 24-hour range — this function does not re-validate it.
@@ -21,8 +24,8 @@ async def create_reminder(uid: int, label: str, reminder_time: str) -> int:
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     await db.db_execute(
         c,
-        "INSERT INTO reminders (user_id, label, reminder_time, is_active, created_at) VALUES (?, ?, ?, TRUE, ?) RETURNING id",
-        (uid, label, reminder_time, ts),
+        "INSERT INTO reminders (user_id, label, reminder_time, is_active, repeat_type, created_at) VALUES (?, ?, ?, TRUE, ?, ?) RETURNING id",
+        (uid, label, reminder_time, repeat_type, ts),
     )
     new_id = c.fetchone()["id"]
     await conn.commit()

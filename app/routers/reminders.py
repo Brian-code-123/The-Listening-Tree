@@ -49,11 +49,13 @@ async def get_reminders(request: Request):
     today = datetime.now().strftime('%Y-%m-%d')
     await db.db_execute(
         c,
-        "SELECT id, label, reminder_time, is_active FROM reminders WHERE user_id = ? AND DATE(created_at) = ? ORDER BY created_at DESC",
+        "SELECT id, label, reminder_time, is_active, repeat_type FROM reminders "
+        "WHERE user_id = ? AND (DATE(created_at) = ? OR (repeat_type = 'daily' AND is_active = TRUE)) "
+        "ORDER BY created_at DESC",
         (uid, today),
     )
     reminders = [
-        {"id": r["id"], "label": r["label"], "time": r["reminder_time"], "active": bool(r["is_active"])}
+        {"id": r["id"], "label": r["label"], "time": r["reminder_time"], "active": bool(r["is_active"]), "repeat": r["repeat_type"] or "once"}
         for r in c.fetchall()
     ]
     await conn.close()
@@ -61,7 +63,7 @@ async def get_reminders(request: Request):
 
 
 @router.post("/reminders")
-async def create_reminder_endpoint(request: Request, label: str = Form(...), time: str = Form(...)):
+async def create_reminder_endpoint(request: Request, label: str = Form(...), time: str = Form(...), repeat: str = Form("once")):
     """REST create — the Next.js /chat port's reminder panel uses this
     instead of synthesizing a "set reminder ..." chat command."""
     uid = get_user(request)
@@ -72,8 +74,10 @@ async def create_reminder_endpoint(request: Request, label: str = Form(...), tim
         return JSONResponse({"success": False, "message": "Label is required"}, status_code=400)
     if not _TIME_RE.match(time):
         return JSONResponse({"success": False, "message": "Time must be HH:MM (24-hour)"}, status_code=400)
-    new_id = await create_reminder(uid, label, time)
-    return JSONResponse({"success": True, "id": new_id, "label": label, "time": time})
+    if repeat not in ("once", "daily"):
+        return JSONResponse({"success": False, "message": "repeat must be once or daily"}, status_code=400)
+    new_id = await create_reminder(uid, label, time, repeat)
+    return JSONResponse({"success": True, "id": new_id, "label": label, "time": time, "repeat": repeat})
 
 
 @router.delete("/reminders/{reminder_id}")
