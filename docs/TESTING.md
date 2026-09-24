@@ -97,7 +97,8 @@ Not tested: see section 10.
 The CI workflow (`.github/workflows/ci.yml`) runs every job on each push to `main`. Its runs
 of 2026-09-23 (commits `668dcf1` and `4142a38`) failed on one test, the reminder form layout,
 which the new "repeat every day" tick had broken. The fix passes locally in both modes
-(section 6); the CI run link for the fix is added after that run has finished.
+(section 6) and in CI: [run 35902287611](https://github.com/Brian-code-123/The-Listening-Tree/actions/runs/35902287611)
+(commit `3227d44`, all 10 jobs succeeded).
 The equivalent local runs are reported below.
 
 ## 5. Black-box test
