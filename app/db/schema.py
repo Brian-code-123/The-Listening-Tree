@@ -189,6 +189,27 @@ _db_init_error: Optional[str] = None
 _db_init_lock = asyncio.Lock()
 
 
+async def _alembic_manages_schema() -> bool:
+    """True when this database carries an Alembic version stamp.
+
+    init_db() is ~30 sequential DDL round trips; run on every serverless
+    cold start against a database in another region, that alone costs
+    several seconds before the first request can be answered. One cheap
+    query tells us Alembic already owns the schema, so it can be skipped.
+    A missing table/connection error just means "not stamped".
+    """
+    try:
+        conn = await db.get_db()
+        try:
+            c = conn.cursor()
+            await c.execute("SELECT 1 FROM alembic_version LIMIT 1")
+            return c.fetchone() is not None
+        finally:
+            await conn.close()
+    except Exception:
+        return False
+
+
 async def ensure_db_initialized(strict: bool = False) -> bool:
     """Initialize DB schema once and cache the result for health checks."""
     global _db_initialized, _db_init_error
@@ -199,7 +220,10 @@ async def ensure_db_initialized(strict: bool = False) -> bool:
         if _db_initialized:
             return True
         try:
-            await init_db()
+            if await _alembic_manages_schema():
+                logger.info("[DB] Alembic-managed schema, skipping bootstrap DDL")
+            else:
+                await init_db()
             _db_initialized = True
             _db_init_error = None
             return True
