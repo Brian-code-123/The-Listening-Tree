@@ -123,7 +123,7 @@ There are 84 tests per project (14 spec files). Result: see section 6.
 | `edge-cases.spec.ts` | 8 | HTML in a chat message, reminder label and conversation title never executes; whitespace-only message not sent; Chinese and emoji label intact; session expiring mid-chat gives an error bubble; a deleted conversation opened by link leaves a working chat; deleting while renaming |
 | `browser-compatibility.spec.ts` | 8 | See section 7 |
 
-Supporting layers: 21 API integration tests, 25 backend unit tests, and 69 component/unit
+Supporting layers: 21 API integration tests, 28 backend unit tests, and 69 component/unit
 tests (section 6).
 
 ## 6. Results
@@ -132,7 +132,7 @@ tests (section 6).
 |---|---|
 | Playwright, dev servers, 2 workers | 336 executions (84 x 4 projects): **324 passed, 12 skipped, 0 failed, 0 flaky** (8.2 min) |
 | Playwright, production build (CI mode), 1 worker | 336 executions: **323 passed, 12 skipped, 0 failed, 1 flaky** (10.3 min for all four projects) |
-| pytest, backend unit (mocked DB) | 25 passed |
+| pytest, backend unit (mocked DB) | 28 passed |
 | pytest, API integration (live local PostgreSQL) | 21 passed |
 | Vitest, repository root | 16 passed (2 files) |
 | Vitest, `web-next` | 53 passed (7 files) |
