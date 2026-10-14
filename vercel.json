@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["hnd1"],
   "services": {
     "api": { "root": ".", "entrypoint": "api/index.py" },
     "web": { "root": "web-next" }
