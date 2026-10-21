@@ -9,11 +9,25 @@ export interface CurrentUser {
   lang?: string;
 }
 
+let inFlight: Promise<CurrentUser> | null = null;
+
 /** GET /me — session identity check + basic user info. Never throws on a
  * 401 (not logged in) — that's a normal, expected response shape here,
  * not an error. The 401 body still carries the session `lang`, which the
- * logged-out login/register pages need. */
-export async function fetchCurrentUser(): Promise<CurrentUser> {
+ * logged-out login/register pages need.
+ *
+ * Callers that overlap share one request: several components ask for /me
+ * on the same mount, and each extra request can cold-start its own
+ * serverless instance. Only the in-flight request is shared — nothing is
+ * cached once it settles, so a login or logout is always seen. */
+export function fetchCurrentUser(): Promise<CurrentUser> {
+  inFlight ??= requestCurrentUser().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
+}
+
+async function requestCurrentUser(): Promise<CurrentUser> {
   const res = await fetch(`${API_BASE}/me`, { credentials: "include" });
   if (res.status === 401) {
     const body = (await res.json().catch(() => ({}))) as { lang?: string };
