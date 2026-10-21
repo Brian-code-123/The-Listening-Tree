@@ -32,7 +32,7 @@ Do NOT attempt to scan for secrets yourself — that is handled separately.
 Do NOT reproduce any secret-looking value even if you see one; refer to it by location only.
 Output format: first line must be exactly 'STATUS: PASS' or 'STATUS: FAIL',
 followed by a markdown table of findings (empty if PASS)." \
-  --allowedTools "Read,Grep,Glob,Bash")
+  --allowedTools "Read,Grep,Glob,Bash" </dev/null)
 
 echo "$RESULT"
 
