@@ -1,7 +1,23 @@
 import type { Metadata, Viewport } from "next";
+import { Inter, Noto_Sans_HK } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
+// Self-hosted (bundled into our own CSS/assets) instead of CDN <link>s: a
+// cross-origin stylesheet in <head> blocks first paint, and the web-font swap
+// it triggered pushed the login page's CLS over the "good" threshold. Only the
+// core + solid + brands sheets are needed (no regular/v4-compat), and the same
+// 6.4.0 release as the CDN link this replaces, so every icon renders as before.
+import "@fortawesome/fontawesome-free/css/fontawesome.min.css";
+import "@fortawesome/fontawesome-free/css/solid.min.css";
+import "@fortawesome/fontawesome-free/css/brands.min.css";
 import "./globals.css";
 import ReminderAlarm from "./components/ReminderAlarm";
+
+// next/font self-hosts the files at build time and emits a size-adjusted
+// fallback face, so the swap from system font to web font doesn't shift layout.
+// Noto Sans HK ships hundreds of CJK slices; the browser only fetches the
+// unicode-range slices a page actually uses, and none are preloaded.
+const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-inter" });
+const notoSansHK = Noto_Sans_HK({ subsets: ["latin"], display: "swap", variable: "--font-noto-sans-hk", preload: false });
 
 export const metadata: Metadata = {
   title: "The Listening Tree",
@@ -21,20 +37,8 @@ const STATIC_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${inter.variable} ${notoSansHK.variable}`}>
       <head>
-        {/* Font Awesome + Google Fonts, same CDN sources the main app uses
-            (templates/conversation_history.html) — kept as CDN links here
-            rather than an npm icon package or next/font, to match the
-            "reimplementation, not a redesign" scope of this migration.
-            `next lint` warns with @next/next/no-page-custom-font (a Pages
-            Router-era rule about per-page <Head>s) even though this is the
-            App Router's root layout — the correct place for a site-wide
-            font link — so the warning is expected and non-blocking. */}
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+HK:wght@400;500;600;700&display=swap" rel="stylesheet" />
         {/* The backend's own TTS voice-selection logic (Cantonese-voice
             scoring heuristics) — loaded from the backend rather than
             reimplemented, so /accessibility and /chat's "read aloud"
