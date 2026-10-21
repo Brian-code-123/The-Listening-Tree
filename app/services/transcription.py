@@ -7,11 +7,6 @@ import os
 
 import httpx
 
-try:
-    import speech_recognition as sr
-except ImportError:
-    sr = None
-
 logger = logging.getLogger(__name__)
 
 # Hugging Face Inference API — Whisper large-v3 for server-side STT.
@@ -48,8 +43,12 @@ async def transcribe_with_hf_whisper(content: bytes) -> str:
 
 def transcribe_with_google_fallback(content: bytes, language: str) -> str:
     """Legacy SpeechRecognition + Google Web Speech backend fallback."""
-    if sr is None:
-        raise RuntimeError("Server STT dependency missing (SpeechRecognition).")
+    # Imported here, not at module load: it is ~40MB and only this fallback
+    # needs it, while every serverless cold start would pay for the import.
+    try:
+        import speech_recognition as sr
+    except ImportError:
+        raise RuntimeError("Server STT dependency missing (SpeechRecognition).") from None
     recognizer = sr.Recognizer()
     with sr.AudioFile(io.BytesIO(content)) as source:
         audio_data = recognizer.record(source)
