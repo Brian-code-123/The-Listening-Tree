@@ -39,6 +39,7 @@ export async function createUser(baseURL: string, tag = 'user'): Promise<TestUse
         email,
         password: E2E_PASSWORD,
         confirm_password: E2E_PASSWORD,
+        consent: 'true',
         verification_code: '123456',
       }),
     });

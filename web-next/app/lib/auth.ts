@@ -43,13 +43,18 @@ export function login(email: string, password: string, rememberMe: boolean) {
   });
 }
 
-export function register(email: string, password: string, confirmPassword: string, verificationCode: string) {
+export function register(email: string, password: string, confirmPassword: string, verificationCode: string, consent: boolean) {
   return postForm("/auth/register", {
     email,
     password,
     confirm_password: confirmPassword,
     verification_code: verificationCode,
+    consent: consent ? "true" : "",
   });
+}
+
+export function deleteAccount(password: string) {
+  return postForm("/auth/delete-account", { password });
 }
 
 export async function sendVerificationCode(email: string): Promise<{ status: number; body: { success: boolean; message: string } }> {
@@ -73,4 +78,14 @@ export function updatePassword(currentPassword: string, newPassword: string, con
     new_password: newPassword,
     confirm_new_password: confirmNewPassword,
   });
+}
+
+/** Ends the session on the server (and so every copy of its cookie). */
+export async function logout(): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) throw new Error(`logout failed: ${res.status}`);
 }

@@ -1,4 +1,5 @@
 """Zhipu AI (智谱AI) chat completion — the warm elderly-companion persona."""
+import json
 import logging
 import os
 import random
@@ -46,6 +47,11 @@ WARM_SYSTEM_PROMPT_ZH = """你係一個有禮貌、溫柔、有耐心嘅陪伴�
 重要：直接回答用戶嘅問題，唔好顯示你嘅思考過程或分析步驟。
 重要：你一定要用廣東話回答，唔好用普通話或者書面語。
 
+安全規則：
+- 唔好做診斷，亦唔好講藥物劑量；有健康擔心就建議睇醫生或藥劑師。
+- 如果用戶可能有危險或者緊急情況，叫佢即刻打 999。
+- 唔好問用戶要密碼、銀行資料或者驗證碼，亦唔好重複佢講過嘅呢啲資料。
+
 記住：你嘅目標係用禮貌、溫柔嘅態度陪伴老人家，唔係扮熟或者浮誇。"""
 
 # System prompt — English elderly companion
@@ -67,6 +73,11 @@ Your speaking style:
 - Keep responses short (2-4 sentences), easy to read and understand
 
 IMPORTANT: Answer the user's questions directly without showing your reasoning process or analysis steps.
+
+Safety rules:
+- Never diagnose, and never name medicine doses. For health worries, suggest seeing a doctor or pharmacist.
+- If the user may be in danger or in an emergency, tell them to call 999.
+- Never ask the user for, or repeat back, passwords, bank details or verification codes.
 
 Remember: Your goal is to make elderly people feel respected, cared for, and at ease — not overly familiar."""
 
@@ -96,24 +107,27 @@ WARM_FALLBACK_EN = [
 ]
 
 
-async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', display_name: Optional[str] = None, conversation_id: Optional[int] = None):
-    """Call Zhipu AI (智谱AI) for warm elderly conversation."""
-    system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
-    fallback = WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
+def _fallback_for(lang: str) -> list:
+    return WARM_FALLBACK_ZH if lang == 'zh-HK' else WARM_FALLBACK_EN
 
+
+async def build_ai_messages(cursor, user_input: str, user_id: int, lang: str = 'en', display_name: Optional[str] = None, conversation_id: Optional[int] = None, extra_system: Optional[str] = None) -> list:
+    """The message list sent to the model: system prompt, recent history, the new message."""
+    system_prompt = WARM_SYSTEM_PROMPT_ZH if lang == 'zh-HK' else WARM_SYSTEM_PROMPT_EN
+
+    # The name is already cleaned when written in /profile/name, but it goes into
+    # the system prompt, so flatten it again here: a leftover newline would let a
+    # name carry its own instructions.
+    display_name = " ".join((display_name or "").split())[:30] or None
     if display_name:
-        # `users.username` is already sanitized (control characters stripped,
-        # length-capped) when it's written in /profile/name, so it's safe to
-        # interpolate directly here.
         name_hint = (
             f"用戶嘅名叫{display_name}，可以間唔中親切噉叫返佢個名。"
             if lang == 'zh-HK'
             else f"The user's name is {display_name}; address them by name occasionally."
         )
         system_prompt = f"{system_prompt}\n\n{name_hint}"
-
-    if not ZHIPU_API_KEY:
-        return random.choice(fallback)
+    if extra_system:
+        system_prompt = f"{system_prompt}\n\n{extra_system}"
 
     messages = [{"role": "system", "content": system_prompt}]
 
@@ -141,7 +155,10 @@ async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', displ
         )
 
     messages.append({"role": "user", "content": user_input})
+    return messages
 
+
+def _payload(messages: list, stream: bool = False) -> dict:
     payload = {
         "model": ZHIPU_MODEL,
         "messages": messages,
@@ -149,17 +166,25 @@ async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', displ
         "top_p": 0.95,
         "max_tokens": 512,
     }
+    if stream:
+        payload["stream"] = True
+    return payload
 
+
+def _headers() -> dict:
+    return {"Authorization": f"Bearer {ZHIPU_API_KEY}", "Content-Type": "application/json"}
+
+
+async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', display_name: Optional[str] = None, conversation_id: Optional[int] = None, extra_system: Optional[str] = None):
+    """Call Zhipu AI (智谱AI) for warm elderly conversation."""
+    fallback = _fallback_for(lang)
+    if not ZHIPU_API_KEY:
+        return random.choice(fallback)
+
+    messages = await build_ai_messages(cursor, user_input, user_id, lang, display_name, conversation_id, extra_system)
     try:
         async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{ZHIPU_BASE_URL}/chat/completions",
-                json=payload,
-                headers={
-                    "Authorization": f"Bearer {ZHIPU_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-            )
+            resp = await client.post(f"{ZHIPU_BASE_URL}/chat/completions", json=_payload(messages), headers=_headers())
             resp.raise_for_status()
             result = resp.json()
 
@@ -174,3 +199,47 @@ async def call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', displ
     except Exception as e:
         logger.error(f"[AI] Error calling Zhipu ({lang}): {e}")
         return random.choice(fallback)
+
+
+# The reply is shown as it is written, so the user sees the first words after the
+# model's time-to-first-token (under a second) instead of waiting for all of it
+# (3 to 5 seconds). The model decodes at roughly 20 tokens a second whichever way
+# it is asked for; streaming changes what the user perceives, not the total.
+STREAM_FIRST_BYTE_TIMEOUT = 15  # seconds to wait for the first words before giving up
+STREAM_READ_TIMEOUT = 30  # seconds of silence mid-reply before giving up
+
+
+async def stream_ai(messages: list, lang: str = 'en'):
+    """Yield the reply in pieces. Never raises: if the model cannot start, one
+    warm fallback line is yielded instead; if it breaks mid-reply, what was
+    already sent stands."""
+    fallback = _fallback_for(lang)
+    if not ZHIPU_API_KEY:
+        yield random.choice(fallback)
+        return
+
+    sent_any = False
+    try:
+        timeout = httpx.Timeout(STREAM_READ_TIMEOUT, connect=STREAM_FIRST_BYTE_TIMEOUT)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", f"{ZHIPU_BASE_URL}/chat/completions", json=_payload(messages, stream=True), headers=_headers()) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        piece = json.loads(data)["choices"][0]["delta"].get("content") or ""
+                    except (ValueError, KeyError, IndexError):
+                        continue
+                    if piece:
+                        sent_any = True
+                        yield piece
+        if not sent_any:
+            raise ValueError("Empty response from API")
+    except Exception as e:
+        logger.error(f"[AI] Error streaming from Zhipu ({lang}): {type(e).__name__}: {e}")
+        if not sent_any:
+            yield random.choice(fallback)

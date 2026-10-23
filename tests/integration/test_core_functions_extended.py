@@ -16,6 +16,7 @@ sequenceDiagram
 """
 
 import asyncio
+import sys
 import types
 import uuid
 from datetime import datetime, timedelta
@@ -25,6 +26,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db import pool as db_pool
+from app.services.auth import code_digest
 from app.routers import chat as chat_router
 from app.services import transcription as stt
 from run import app
@@ -47,7 +49,7 @@ def _seed_verification_code(email: str, code: str = "123456") -> str:
         ts = datetime.now()
         await conn.execute(
             "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES ($1, $2, $3, $4)",
-            email, code, ts + timedelta(minutes=10), ts,
+            email, code_digest(email, code), ts + timedelta(minutes=10), ts,
         )
         await conn.close()
 
@@ -62,7 +64,7 @@ def _login_user(client: TestClient, email: str, password: str) -> None:
         data={
             'email': email,
             'password': password,
-            'confirm_password': password,
+            'confirm_password': password, "consent": "true",
             'verification_code': code,
         },
         follow_redirects=False,
@@ -106,7 +108,8 @@ def test_voice_transcribe_endpoint_with_mocked_stt(monkeypatch):
         UnknownValueError=Exception,
         RequestError=Exception,
     )
-    monkeypatch.setattr(stt, 'sr', fake_sr)
+    # transcription imports speech_recognition lazily, so the seam is sys.modules
+    monkeypatch.setitem(sys.modules, 'speech_recognition', fake_sr)
 
     email = _new_user_email()
     password = 'TestPass123!'
@@ -146,7 +149,7 @@ def test_cognitive_game_command_flow():
 
 
 def test_ai_chat_response_with_mocked_model(monkeypatch):
-    async def fake_call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', display_name=None, conversation_id=None):
+    async def fake_call_ai(cursor, user_input: str, user_id: int, lang: str = 'en', display_name=None, conversation_id=None, extra_system=None):
         assert user_input
         assert user_id
         assert lang in ('en', 'zh-HK')

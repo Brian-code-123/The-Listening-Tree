@@ -66,6 +66,10 @@ class _FakeCursor:
             self._one = None
             return
 
+        if "update users set consent_at" in normalized:
+            self.rowcount = 1
+            return
+
         if "insert into users" in normalized:
             email, password, created_at = params
             if email in self.state["users_by_email"]:
@@ -80,6 +84,8 @@ class _FakeCursor:
                 "last_login": None,
                 "failed_login_attempts": 0,
                 "locked_until": None,
+                "session_version": 0,
+                "is_active": True,
             }
             self.state["users_by_email"][email] = user
             self.state["users_by_id"][user_id] = user
@@ -96,6 +102,36 @@ class _FakeCursor:
                 "failed_login_attempts": user["failed_login_attempts"],
                 "locked_until": user["locked_until"],
             } if user else None
+            return
+
+        if "select id, email, password, session_version, is_active from users where lower(email) = lower(?)" in normalized:
+            user = self.state["users_by_email"].get(params[0].lower())
+            self._one = {
+                "id": user["id"], "email": user["email"], "password": user["password"],
+                "session_version": user["session_version"], "is_active": user["is_active"],
+            } if user else None
+            return
+
+        if "select session_version, is_active from users where id = ?" in normalized:
+            user = self.state["users_by_id"].get(params[0])
+            self._one = {"session_version": user["session_version"], "is_active": user["is_active"]} if user else None
+            return
+
+        if "update users set session_version = session_version + 1 where id = ?" in normalized:
+            user = self.state["users_by_id"].get(params[0])
+            if user:
+                user["session_version"] += 1
+                self.rowcount = 1
+            return
+
+        if "update users set password = ?, session_version = session_version + 1 where id = ? returning" in normalized:
+            password, user_id = params
+            user = self.state["users_by_id"].get(user_id)
+            if user:
+                user["password"] = password
+                user["session_version"] += 1
+                self._one = {"session_version": user["session_version"]}
+                self.rowcount = 1
             return
 
         if "select id, email, password from users where lower(email) = lower(?)" in normalized:
@@ -190,6 +226,10 @@ class _FakeCursor:
             )
             self._one = {"id": conv_id}
             self.rowcount = 1
+            return
+
+        if "select count(*) as n from reminders where user_id = ? and is_active = true" in normalized:
+            self._one = {"n": sum(1 for r in self.state["reminders"] if r["user_id"] == params[0] and r.get("is_active", True))}
             return
 
         if "insert into reminders" in normalized:

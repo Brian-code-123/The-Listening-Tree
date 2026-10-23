@@ -1,26 +1,28 @@
 """Auth routes: login/register/logout, Google Sign-In, and the profile
 (display name + password) settings that live alongside them.
 """
+import asyncio
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.core import config
-from app.core.session import _CONTROL_CHAR_PATTERN, get_lang, get_user, tpl_context
+from app.core.session import _CONTROL_CHAR_PATTERN, clear_login, get_lang, get_user, start_session, tpl_context
 from app.core.templates import templates
 from app.db import queries as db
 from app.services.auth import (
-    LOGIN_LOCKOUT_MINUTES,
-    LOGIN_MAX_ATTEMPTS,
-    hash_password,
-    is_password_hashed,
+    MAX_PASSWORD_LENGTH,
+    code_digest,
+    dummy_hash,
+    hash_password_async,
+    needs_rehash,
     validate_email,
     validate_password_strength,
-    verify_password,
+    verify_password_async,
 )
 from app.services.email import (
     VERIFICATION_CODE_TTL_MINUTES,
@@ -29,9 +31,20 @@ from app.services.email import (
     send_verification_email,
 )
 
-from app.services.rate_limit import check_and_increment, client_key
+from app.services.rate_limit import check_and_increment, client_ip, client_key, hit, reset_key
+from app.services.security_events import record_event
 
 logger = logging.getLogger(__name__)
+
+def _password_error(password: str, lang: str) -> Optional[str]:
+    """Localized reason a new password is unacceptable, or None."""
+    ok, _ = validate_password_strength(password)
+    if ok:
+        return None
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return f"Password must be at most {MAX_PASSWORD_LENGTH} characters" if lang == 'en' else f"密碼最多 {MAX_PASSWORD_LENGTH} 個字元"
+    return "Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元"
+
 
 # Generous enough for a real user's occasional retry (wrong password, typo'd
 # email, browser autofill double-submit), tight enough to slow down
@@ -40,6 +53,24 @@ LOGIN_RATE_LIMIT = 10
 REGISTER_RATE_LIMIT = 5
 SEND_CODE_RATE_LIMIT = 5
 RATE_LIMIT_WINDOW_SECONDS = 60
+
+# Failed-login budget. Counted per email *and* client address, so someone
+# guessing from one address cannot lock the real owner out from another, and
+# the window simply ends (no stored "locked until" that a stray typo can
+# re-arm). The per-email ceiling is higher: it only bounds guessing spread
+# thinly across many addresses.
+# Verification codes: one send per address per cooldown, a daily cap, and a
+# guess budget per address so a 6-digit code cannot be brute-forced.
+SEND_CODE_EMAIL_LIMIT = 1
+SEND_CODE_DAY_LIMIT = 10
+SEND_CODE_DAY_WINDOW = 24 * 60 * 60
+VERIFY_CODE_LIMIT = 5
+VERIFY_CODE_WINDOW = 10 * 60
+PASSWORD_CHANGE_LIMIT = 5
+PASSWORD_CHANGE_WINDOW = 10 * 60
+LOGIN_FAIL_LIMIT = 5
+LOGIN_FAIL_WINDOW = 15 * 60
+LOGIN_EMAIL_GLOBAL_LIMIT = 30
 
 LOGIN_PATH = "/login"
 REGISTER_TEMPLATE = "register.html"
@@ -66,58 +97,27 @@ async def login_page(request: Request, error: Optional[str] = None):
 # Next.js service, and a rewrite applies to every method, so a POST to
 # /login reaches the static page and comes back 405. /login stays
 # registered for the existing tests and the (now unrouted) Jinja form.
-def _lockout_message(user, lang: str) -> Optional[str]:
-    """Message to show while an account is locked out, or None if it isn't.
-
-    Rounds the remaining wait up so a few seconds left never reads as "0 min".
-    """
-    if not user or not user["locked_until"] or user["locked_until"] <= datetime.now():
-        return None
-    wait_minutes = max(1, int((user["locked_until"] - datetime.now()).total_seconds() // 60) + 1)
-    return (
-        f"Too many failed attempts. Try again in {wait_minutes} min." if lang == 'en'
-        else f"登入失敗次數過多，請 {wait_minutes} 分鐘後再試"
-    )
-
-
 async def _complete_successful_login(cursor, conn, request: Request, user, password: str, remember_me) -> None:
-    """Clear the failure counters, sign the user in, and load their language.
+    """Sign the user in and load their language.
 
     Takes the caller's cursor and connection; login_post owns the
     connection's lifetime.
     """
-    if not is_password_hashed(user["password"]):
-        # Transparent migration for legacy plaintext rows.
-        await db.db_execute(cursor, "UPDATE users SET password = ? WHERE id = ?", (hash_password(password), user["id"]))
+    if needs_rehash(user["password"]):
+        # The stored hash predates the current cost; replace it while we hold the plaintext.
+        await db.db_execute(cursor, "UPDATE users SET password = ? WHERE id = ?", (await hash_password_async(password), user["id"]))
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     await db.db_execute(
         cursor,
-        "UPDATE users SET last_login = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?",
+        "UPDATE users SET last_login = ? WHERE id = ?",
         (ts, user["id"]),
     )
     await conn.commit()
-    request.session['user_email'] = user["email"]
-    request.session['user_id'] = user["id"]
-    request.session['remember_me'] = bool(remember_me)
+    start_session(request, user_id=user["id"], email=user["email"], session_version=user["session_version"] or 0, remember_me=bool(remember_me))
     await db.db_execute(cursor, "SELECT pref_value FROM preferences WHERE user_id = ? AND pref_key = 'language'", (user["id"],))
     pref = cursor.fetchone()
     if pref:
         request.session['language'] = pref["pref_value"]
-
-
-async def _record_failed_attempt(cursor, conn, user) -> None:
-    """Count a failed login, locking the account once it hits the limit."""
-    attempts = (user["failed_login_attempts"] or 0) + 1
-    if attempts >= LOGIN_MAX_ATTEMPTS:
-        locked_until = (datetime.now() + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
-        await db.db_execute(
-            cursor,
-            "UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?",
-            (attempts, locked_until, user["id"]),
-        )
-    else:
-        await db.db_execute(cursor, "UPDATE users SET failed_login_attempts = ? WHERE id = ?", (attempts, user["id"]))
-    await conn.commit()
 
 
 @router.post("/auth/login", response_class=HTMLResponse)
@@ -136,9 +136,9 @@ async def login_post(
       - session['remember_me']: whether the session cookie should persist (90 days) or expire with the browser session
       - session['language']: User's preferred language (loaded from preferences table)
 
-    Failed attempts are tracked per account (`users.failed_login_attempts` /
-    `locked_until`) and lock the account for LOGIN_LOCKOUT_MINUTES after
-    LOGIN_MAX_ATTEMPTS consecutive failures, to slow down brute-force guessing.
+    Attempts are counted atomically per email + client address before the
+    password is checked (LOGIN_FAIL_LIMIT per LOGIN_FAIL_WINDOW) and the count
+    is cleared by a successful login; see the rate_limit service.
 
     Args:
         request: HTTP request object with session middleware
@@ -168,31 +168,59 @@ async def login_post(
     email = email.strip().lower()
     password = password.strip()
     generic_error = "Invalid email or password" if lang == 'en' else "電郵或密碼錯誤"
-    conn = await db.get_db()
-    c = conn.cursor()
-    try:
-        await db.db_execute(
-            c,
-            "SELECT id, email, password, failed_login_attempts, locked_until FROM users WHERE LOWER(email) = LOWER(?)",
-            (email,),
+    fail_key = f"login_fail:{email}:{client_ip(request)}"
+    email_key = f"login_fail_email:{email}"
+    # Count the attempt *before* spending a password hash on it: the increment
+    # is one atomic statement, so parallel guesses cannot all read the same
+    # value, and a refused attempt costs the server almost nothing.
+    attempts = await hit(fail_key, LOGIN_FAIL_WINDOW)
+    email_attempts = await hit(email_key, LOGIN_FAIL_WINDOW)
+    if attempts > LOGIN_FAIL_LIMIT or email_attempts > LOGIN_EMAIL_GLOBAL_LIMIT:
+        if attempts == LOGIN_FAIL_LIMIT + 1 or email_attempts == LOGIN_EMAIL_GLOBAL_LIMIT + 1:
+            # Once per lock, not once per refused attempt, so an attack cannot flood the table.
+            await record_event("login_locked", request=request, email=email)
+        # Same answer whether or not the account exists.
+        locked_msg = (
+            "Too many failed attempts. Please wait 15 minutes and try again." if lang == 'en'
+            else "登入失敗次數過多，請 15 分鐘後再試"
         )
+        return fail(locked_msg, status_code=429)
+    # Never hold a pooled connection while asking for another (reset_key and
+    # record_event each take their own) or while hashing: with every connection
+    # held by a request waiting for a second, the pool deadlocks. So the lookup,
+    # the hash check and the sign-in write each borrow a connection in turn.
+    conn = await db.get_db()
+    try:
+        c = conn.cursor()
+        await db.db_execute(c, "SELECT id, email, password, session_version, is_active FROM users WHERE LOWER(email) = LOWER(?)", (email,))
         user = c.fetchone()
-
-        locked_msg = _lockout_message(user, lang)
-        if locked_msg is not None:
-            return fail(locked_msg, status_code=429)
-
-        if user and verify_password(password, user["password"]):
-            await _complete_successful_login(c, conn, request, user, password, remember_me)
-            if wants_json:
-                return JSONResponse({"success": True, "redirect": "/"})
-            return RedirectResponse(url="/", status_code=303)
-
-        if user:
-            await _record_failed_attempt(c, conn, user)
-        return fail(generic_error)
     finally:
         await conn.close()
+    if user and user["is_active"] is False:
+        user = None  # a disabled account answers exactly like an unknown one
+
+    # An unknown email still verifies against a throwaway hash, so how long
+    # the answer takes does not reveal whether the account exists.
+    if len(password) > MAX_PASSWORD_LENGTH:
+        await record_event("login_failure", request=request, email=email, user_id=user["id"] if user else None, detail={"reason": "too_long"})
+        return fail(generic_error)  # cannot be anyone's password, so do not hash it
+    if await verify_password_async(password, user["password"] if user else dummy_hash()) and user:
+        conn = await db.get_db()
+        try:
+            await _complete_successful_login(conn.cursor(), conn, request, user, password, remember_me)
+        finally:
+            await conn.close()
+        await reset_key(fail_key)
+        await record_event("login_success", request=request, email=email, user_id=user["id"])
+        if wants_json:
+            return JSONResponse({"success": True, "redirect": "/"})
+        return RedirectResponse(url="/", status_code=303)
+
+    await record_event(
+        "login_failure", request=request, email=email, user_id=user["id"] if user else None,
+        detail={"reason": "bad_password" if user else "unknown_email"},
+    )
+    return fail(generic_error)
 
 
 @router.get("/register", response_class=HTMLResponse)
@@ -228,49 +256,52 @@ async def send_verification_code(request: Request):
             status_code=400,
         )
 
+    # Limits first, and for every address: if only unregistered addresses ever hit
+    # a 429, the limiter itself would tell an attacker which ones are taken.
+    if not await check_and_increment(f"send_code_email:{email}", SEND_CODE_EMAIL_LIMIT, VERIFICATION_RESEND_COOLDOWN_SECONDS):
+        return JSONResponse(
+            {"success": False, "message": "Please wait before requesting another code" if lang == 'en' else "請稍等先再發送驗證碼"},
+            status_code=429,
+        )
+    if not await check_and_increment(f"send_code_day:{email}", SEND_CODE_DAY_LIMIT, SEND_CODE_DAY_WINDOW):
+        return JSONResponse(
+            {"success": False, "message": "Too many codes requested for this email today. Please try again tomorrow." if lang == 'en' else "今日為呢個電郵要求驗證碼太多次，請明天再試"},
+            status_code=429,
+        )
+
+    sent_message = "Verification code sent" if lang == 'en' else "驗證碼已發送"
     conn = await db.get_db()
     c = conn.cursor()
     try:
         await db.db_execute(c, "SELECT id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
         if c.fetchone():
+            # Same answer as for a free address, and nothing is sent, so this
+            # endpoint cannot be used to find out who has an account.
             await conn.close()
-            return JSONResponse(
-                {"success": False, "message": "Email already registered" if lang == 'en' else "電郵已註冊"},
-                status_code=400,
-            )
-
-        await db.db_execute(
-            c,
-            "SELECT created_at FROM email_verifications WHERE LOWER(email) = LOWER(?) ORDER BY created_at DESC LIMIT 1",
-            (email,),
-        )
-        last = c.fetchone()
-        if last and (datetime.now() - last["created_at"]).total_seconds() < VERIFICATION_RESEND_COOLDOWN_SECONDS:
-            await conn.close()
-            return JSONResponse(
-                {"success": False, "message": "Please wait before requesting another code" if lang == 'en' else "請稍等先再發送驗證碼"},
-                status_code=429,
-            )
+            return JSONResponse({"success": True, "message": sent_message})
 
         code = generate_verification_code()
         ts = datetime.now()
         expires_at = ts.timestamp() + VERIFICATION_CODE_TTL_MINUTES * 60
         expires_at_str = datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d %H:%M:%S')
+        # A new code retires the older ones, so only one guessable value is live.
+        await db.db_execute(c, "UPDATE email_verifications SET used = TRUE WHERE LOWER(email) = LOWER(?) AND used = FALSE", (email,))
         await db.db_execute(
             c,
             "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES (?, ?, ?, ?)",
-            (email, code, expires_at_str, ts.strftime('%Y-%m-%d %H:%M:%S')),
+            (email, code_digest(email, code), expires_at_str, ts.strftime('%Y-%m-%d %H:%M:%S')),
         )
         await conn.commit()
         await conn.close()
 
-        sent = send_verification_email(email, code, lang)
+        sent = await asyncio.to_thread(send_verification_email, email, code, lang)
         if not sent:
             return JSONResponse(
                 {"success": False, "message": "Failed to send verification email" if lang == 'en' else "驗證碼郵件發送失敗"},
                 status_code=500,
             )
-        return JSONResponse({"success": True, "message": "Verification code sent" if lang == 'en' else "驗證碼已發送"})
+        await record_event("code_sent", request=request, email=email)
+        return JSONResponse({"success": True, "message": sent_message})
     except Exception as e:
         await conn.close()
         logger.error(f"send_verification_code failed: {e}")
@@ -291,9 +322,9 @@ def _validate_registration_fields(email: str, password: str, confirm_password: s
     if not is_valid_email:
         return ("Invalid email format" if lang == 'en' else "電郵格式無效", "email")
 
-    is_valid_password, _ = validate_password_strength(password)
-    if not is_valid_password:
-        return ("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", "password")
+    password_error = _password_error(password, lang)
+    if password_error:
+        return (password_error, "password")
 
     if password != confirm_password:
         return ("Passwords do not match" if lang == 'en' else "密碼唔一致", "confirm_password")
@@ -309,7 +340,7 @@ async def _find_valid_verification(cursor, email: str, verification_code: str):
     await db.db_execute(
         cursor,
         "SELECT id FROM email_verifications WHERE LOWER(email) = LOWER(?) AND code = ? AND used = FALSE AND expires_at > ? ORDER BY created_at DESC LIMIT 1",
-        (email, verification_code, datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+        (email, code_digest(email, verification_code), datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
     )
     return cursor.fetchone()
 
@@ -322,15 +353,19 @@ async def _create_user_and_start_session(cursor, conn, request: Request, email: 
     one of its own.
     """
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    await db.db_execute(cursor, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, hash_password(password), ts))
+    await db.db_execute(cursor, "INSERT INTO users (email, password, created_at) VALUES (?, ?, ?)", (email, await hash_password_async(password), ts))
     await db.db_execute(cursor, "UPDATE email_verifications SET used = TRUE WHERE id = ?", (verification_id,))
     await conn.commit()
     await db.db_execute(cursor, "SELECT id, email, password FROM users WHERE LOWER(email) = LOWER(?)", (email,))
     created_user = cursor.fetchone()
     if created_user:
-        request.session['user_email'] = created_user["email"]
-        request.session['user_id'] = created_user["id"]
-        request.session['remember_me'] = True
+        await db.db_execute(
+            cursor,
+            "UPDATE users SET consent_at = ?, consent_version = ? WHERE id = ?",
+            (ts, config.PRIVACY_NOTICE_VERSION, created_user["id"]),
+        )
+        await conn.commit()
+        start_session(request, user_id=created_user["id"], email=created_user["email"], session_version=0, remember_me=True)
 
 
 @router.post("/auth/register", response_class=HTMLResponse)
@@ -341,6 +376,7 @@ async def register_post(
     password: str = Form(...),
     confirm_password: str = Form(...),
     verification_code: str = Form(...),
+    consent: str = Form(""),
 ):
     """Create a new user account (registration).
 
@@ -380,6 +416,12 @@ async def register_post(
             return JSONResponse({"success": False, "field": "email", "message": too_many_msg}, status_code=429)
         return templates.TemplateResponse(REGISTER_TEMPLATE, tpl_context(request, error=too_many_msg), status_code=429)
 
+    if consent.strip().lower() not in {"true", "on", "1", "yes"}:
+        return fail(
+            "Please agree to the privacy notice to register" if lang == 'en' else "請先同意私隱聲明才可註冊",
+            field="consent",
+        )
+
     email = email.strip().lower()
     password = password.strip()
     confirm_password = confirm_password.strip()
@@ -390,30 +432,47 @@ async def register_post(
         message, field = field_error
         return fail(message, field=field)
 
-    conn = await db.get_db()
-    c = conn.cursor()
+    verify_key = f"verify_code:{email}"
+    if not await check_and_increment(verify_key, VERIFY_CODE_LIMIT, VERIFY_CODE_WINDOW):
+        return fail(
+            "Too many incorrect codes. Please wait a few minutes and request a new code." if lang == 'en' else "驗證碼錯誤次數過多，請稍後再要求新驗證碼",
+            field="verification_code",
+            status_code=429,
+        )
+    # One pooled connection at a time (see login_post): reset_key and record_event
+    # borrow their own, so none may be held while they run.
     try:
-        verification = await _find_valid_verification(c, email, verification_code)
+        conn = await db.get_db()
+        try:
+            verification = await _find_valid_verification(conn.cursor(), email, verification_code)
+        finally:
+            await conn.close()
         if not verification:
+            await record_event("code_failed", request=request, email=email)
             return fail("Verification code is incorrect or has expired" if lang == 'en' else "驗證碼錯誤或已過期", field="verification_code")
 
-        await _create_user_and_start_session(c, conn, request, email, password, verification["id"])
+        conn = await db.get_db()
+        try:
+            await _create_user_and_start_session(conn.cursor(), conn, request, email, password, verification["id"])
+        finally:
+            await conn.close()
+        await reset_key(verify_key)
+        await record_event("register", request=request, email=email, user_id=request.session.get("user_id"))
         if wants_json:
             return JSONResponse({"success": True, "redirect": "/"})
         return RedirectResponse(url="/", status_code=303)
     except db.PgIntegrityError:
         return fail("Email already exists" if lang == 'en' else "電郵已存在", field="email")
     except Exception as e:
-        logger.error(f"Registration failed: {e}")
+        # The exception text can carry the address or database detail, so log only its type.
+        logger.error("Registration failed (%s)", type(e).__name__)
         return fail(
-            "Service temporarily unavailable. Your account data remains in database; please try again."
+            "Service temporarily unavailable. Please try again in a moment."
             if lang == 'en'
-            else "服務暫時不可用。帳號資料會保留喺資料庫，請稍後再試。",
+            else "服務暫時不可用，請稍後再試。",
             field="email",
             status_code=500,
         )
-    finally:
-        await conn.close()
 
 
 @router.get("/auth/google")
@@ -432,32 +491,44 @@ class _GoogleAccountConflict(Exception):
 async def _resolve_or_create_google_user(c, google_id: str, email: str, display_name: str):
     """Find the user behind a Google identity, creating them if needed.
 
-    Works on the caller's cursor and never opens or closes a connection —
-    google_callback owns that.
+    Returns (user, event): `event` is the security event to record
+    ("google_login" or "google_link"). Works on the caller's cursor and never
+    opens or closes a connection — google_callback owns that. A disabled
+    account is refused like a conflict.
     """
-    await db.db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
+    await db.db_execute(c, "SELECT id, email, session_version, is_active FROM users WHERE google_id = ?", (google_id,))
     user = c.fetchone()
     if user:
-        return user
+        if user["is_active"] is False:
+            raise _GoogleAccountConflict()
+        return user, "google_login"
 
-    await db.db_execute(c, "SELECT id, email, google_id FROM users WHERE LOWER(email) = LOWER(?)", (email,))
+    await db.db_execute(c, "SELECT id, email, google_id, session_version, is_active FROM users WHERE LOWER(email) = LOWER(?)", (email,))
     existing = c.fetchone()
-    if existing and existing["google_id"]:
+    if existing and (existing["google_id"] or existing["is_active"] is False):
         raise _GoogleAccountConflict()
 
     if existing:
-        await db.db_execute(c, "UPDATE users SET google_id = ?, auth_provider = 'google' WHERE id = ?", (google_id, existing["id"]))
-        return existing
+        # The password stays usable: whoever registered it proved they own the
+        # mailbox, the same proof Google just gave. But sessions opened before
+        # the link are ended, so linking never leaves an older session behind.
+        await db.db_execute(
+            c,
+            "UPDATE users SET google_id = ?, auth_provider = 'google', session_version = session_version + 1 WHERE id = ? RETURNING session_version",
+            (google_id, existing["id"]),
+        )
+        new_version = c.fetchone()["session_version"]
+        return {"id": existing["id"], "email": existing["email"], "session_version": new_version}, "google_link"
 
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    synthetic_password = hash_password(secrets.token_hex(32))
+    synthetic_password = await hash_password_async(secrets.token_hex(32))
     await db.db_execute(
         c,
         "INSERT INTO users (email, password, username, google_id, auth_provider, created_at) VALUES (?, ?, ?, ?, 'google', ?)",
         (email, synthetic_password, display_name or None, google_id, ts),
     )
-    await db.db_execute(c, "SELECT id, email FROM users WHERE google_id = ?", (google_id,))
-    return c.fetchone()
+    await db.db_execute(c, "SELECT id, email, session_version FROM users WHERE google_id = ?", (google_id,))
+    return c.fetchone(), "google_login"
 
 
 @router.get("/auth/google/callback", name="google_callback")
@@ -493,18 +564,17 @@ async def google_callback(request: Request):
     c = conn.cursor()
     try:
         try:
-            user = await _resolve_or_create_google_user(c, google_id, email, display_name)
+            user, event = await _resolve_or_create_google_user(c, google_id, email, display_name)
         except _GoogleAccountConflict:
             return RedirectResponse(url=f"{LOGIN_PATH}?error=google_failed", status_code=303)
 
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         await db.db_execute(c, "UPDATE users SET last_login = ? WHERE id = ?", (ts, user["id"]))
         await conn.commit()
-        request.session['user_email'] = user["email"]
-        request.session['user_id'] = user["id"]
-        request.session['remember_me'] = True
+        start_session(request, user_id=user["id"], email=user["email"], session_version=user["session_version"] or 0, remember_me=True)
     finally:
         await conn.close()
+    await record_event(event, request=request, user_id=user["id"], email=email)
 
     return RedirectResponse(url="/", status_code=303)
 
@@ -514,9 +584,25 @@ async def forgot_password(request: Request):
     return RedirectResponse(url=LOGIN_PATH, status_code=303)
 
 
-@router.get("/logout")
+# POST only: a GET would let any page sign a visitor out with an <img> tag. The
+# session version is bumped so a copied cookie stops working as well, not just
+# this browser's copy.
+@router.post("/auth/logout")
+@router.post("/logout")
 async def logout(request: Request):
-    request.session.clear()
+    uid = get_user(request)
+    if uid is not None:
+        conn = await db.get_db()
+        try:
+            c = conn.cursor()
+            await db.db_execute(c, "UPDATE users SET session_version = session_version + 1 WHERE id = ?", (uid,))
+            await conn.commit()
+        finally:
+            await conn.close()
+        await record_event("logout", request=request, user_id=uid)
+    clear_login(request)
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"success": True})
     return RedirectResponse(url=LOGIN_PATH, status_code=303)
 
 
@@ -622,24 +708,39 @@ async def update_profile_password(
     new_password = new_password.strip()
     confirm_new_password = confirm_new_password.strip()
 
+    if not await check_and_increment(f"pwchange:{uid}", PASSWORD_CHANGE_LIMIT, PASSWORD_CHANGE_WINDOW):
+        return fail("Too many attempts. Please wait a few minutes." if lang == 'en' else "嘗試次數過多，請稍後再試", field="current_password", status_code=429)
+
     conn = await db.get_db()
     c = conn.cursor()
     await db.db_execute(c, "SELECT password FROM users WHERE id = ?", (uid,))
     user_row = c.fetchone()
-    if not user_row or not verify_password(current_password, user_row["password"]):
+    if (
+        not user_row
+        or len(current_password) > MAX_PASSWORD_LENGTH
+        or not await verify_password_async(current_password, user_row["password"])
+    ):
         await conn.close()
         return fail("Current password is incorrect" if lang == 'en' else "現時密碼不正確", field="current_password")
 
-    is_valid_password, _ = validate_password_strength(new_password)
-    if not is_valid_password:
+    new_password_error = _password_error(new_password, lang)
+    if new_password_error:
         await conn.close()
-        return fail("Password must be at least 8 characters" if lang == 'en' else "密碼最少需要 8 個字元", field="new_password")
+        return fail(new_password_error, field="new_password")
 
     if new_password != confirm_new_password:
         await conn.close()
         return fail("Passwords do not match" if lang == 'en' else "密碼唔一致", field="confirm_new_password")
 
-    await db.db_execute(c, "UPDATE users SET password = ? WHERE id = ?", (hash_password(new_password), uid))
+    # Every other signed-in browser must start over; this one stays signed in.
+    await db.db_execute(
+        c,
+        "UPDATE users SET password = ?, session_version = session_version + 1 WHERE id = ? RETURNING session_version",
+        (await hash_password_async(new_password), uid),
+    )
+    new_version = c.fetchone()["session_version"]
     await conn.commit()
     await conn.close()
+    request.session["sv"] = new_version
+    await record_event("password_change", request=request, user_id=uid)
     return JSONResponse({"success": True, "message": "Password updated" if lang == 'en' else "密碼已更新"})

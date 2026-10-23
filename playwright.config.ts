@@ -58,6 +58,10 @@ export default defineConfig({
         GOOGLE_CLIENT_ID: '',
         GOOGLE_CLIENT_SECRET: '',
         LOG_LEVEL: 'WARNING',
+        // Next's proxy is the only client the backend sees here; the rate-limit
+        // spec fakes client addresses through X-Forwarded-For, which the app
+        // only believes behind a declared proxy.
+        TRUSTED_PROXY: '1',
         SECRET_KEY: process.env.SECRET_KEY || 'e2e-secret-key',
       },
       url: `http://127.0.0.1:${API_PORT}/health`,

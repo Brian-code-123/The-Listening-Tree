@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db import pool as db_pool
+from app.services.auth import code_digest
 from run import app
 
 
@@ -41,7 +42,7 @@ def _seed_verification_code(email: str, code: str = "123456") -> str:
         ts = datetime.now()
         await conn.execute(
             "INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES ($1, $2, $3, $4)",
-            email, code, ts + timedelta(minutes=10), ts,
+            email, code_digest(email, code), ts + timedelta(minutes=10), ts,
         )
         await conn.close()
 
@@ -62,7 +63,7 @@ def test_reminders_crud_flow():
             data={
                 'email': email,
                 'password': password,
-                'confirm_password': password,
+                'confirm_password': password, "consent": "true",
                 'verification_code': code,
             },
             follow_redirects=False,

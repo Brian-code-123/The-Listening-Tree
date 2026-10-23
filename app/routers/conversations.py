@@ -12,6 +12,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import JSONResponse
 
 from app.core import config
+from app.core.limits import DbId
 from app.core.session import _CONTROL_CHAR_PATTERN, get_lang, get_user
 from app.db import queries as db
 from translations import TRANSLATIONS, get_text
@@ -227,7 +228,7 @@ async def list_conversations(request: Request):
 
 
 @router.post("/conversations/{conversation_id}/pin")
-async def toggle_conversation_pin(request: Request, conversation_id: int):
+async def toggle_conversation_pin(request: Request, conversation_id: DbId):
     """Flip a conversation's pinned state; pinned ones sort first."""
     uid = get_user(request)
     if uid is None:
@@ -252,7 +253,7 @@ async def toggle_conversation_pin(request: Request, conversation_id: int):
 
 
 @router.post("/conversations/{conversation_id}/tag")
-async def set_conversation_tag(request: Request, conversation_id: int, tag: str = Form("")):
+async def set_conversation_tag(request: Request, conversation_id: DbId, tag: str = Form("")):
     """Set (or clear, with an empty value) a conversation's category tag."""
     uid = get_user(request)
     if uid is None:
@@ -278,7 +279,7 @@ async def set_conversation_tag(request: Request, conversation_id: int, tag: str 
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(request: Request, conversation_id: int):
+async def delete_conversation(request: Request, conversation_id: DbId):
     """Soft-delete a conversation. Mirrors toggle_conversation_pin's
     select-then-update ownership check — a conversation belonging to
     another user (or already deleted) is reported as not-found rather
@@ -304,7 +305,7 @@ async def delete_conversation(request: Request, conversation_id: int):
 
 
 @router.post("/conversations/{conversation_id}/title")
-async def rename_conversation(request: Request, conversation_id: int, title: str = Form(...)):
+async def rename_conversation(request: Request, conversation_id: DbId, title: str = Form(...)):
     """Rename a conversation. An empty result after cleanup falls back to
     the auto-generated title (first-message text) instead of storing blank."""
     uid = get_user(request)
@@ -365,7 +366,7 @@ async def create_conversation(request: Request):
 
 
 @router.get("/conversations/{conversation_id}/messages")
-async def get_conversation_messages(request: Request, conversation_id: int, checkin: bool = False):
+async def get_conversation_messages(request: Request, conversation_id: DbId, checkin: bool = False):
     """Get the message history for one specific conversation.
 
     `?checkin=1` is sent only when the chat page opens the conversation the

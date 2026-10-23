@@ -72,7 +72,9 @@
         const clean = cleanSpeechText(text);
         if (!clean) return;
 
-        window.speechSynthesis.cancel();
+        // A queued piece (the next sentence of a reply being streamed) must not cut
+        // off the one still being spoken; a fresh reply replaces whatever was playing.
+        if (options.queue !== true) window.speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(clean);
         const useCantonese = prefersCantonese(currentLang, clean);

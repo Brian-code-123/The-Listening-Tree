@@ -95,9 +95,11 @@ async def fetch_hk_news(lang: str = 'en'):
     if NEWS_API_KEY:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
+                # The key goes in a header: a query string ends up in logs and error text.
                 resp = await client.get(
                     "https://newsapi.org/v2/top-headlines",
-                    params={"country": "hk", "pageSize": 8, "apiKey": NEWS_API_KEY}
+                    params={"country": "hk", "pageSize": 8},
+                    headers={"X-Api-Key": NEWS_API_KEY},
                 )
                 resp.raise_for_status()
                 data = resp.json()

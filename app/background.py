@@ -6,7 +6,7 @@ functions can't run a perpetual loop.
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.core import config
 from app.db import queries as db
@@ -37,18 +37,17 @@ async def run_periodic_tasks():
             try:
                 c = conn.cursor()
                 query = (
-                    "SELECT u.email, r.label, r.reminder_time FROM reminders r "
-                    "JOIN users u ON r.user_id = u.id "
+                    "SELECT r.user_id, r.reminder_time FROM reminders r "
                     "WHERE r.is_active = TRUE AND DATE(r.created_at) = ?"
                 )
                 await db.db_execute(c, query, (today,))
                 for row in c.fetchall():
-                    email = row["email"]
-                    label = row["label"]
                     rtime = row["reminder_time"]
                     if rtime == current_time:
-                        # In a real app, this would trigger a push notification or WebSocket msg
-                        logger.info(f"[REMINDER] {email}: {label} at {rtime}")
+                        # In a real app, this would trigger a push notification or WebSocket msg.
+                        # Only the user id is logged: an email address or a reminder label
+                        # (which can name a medicine) does not belong in application logs.
+                        logger.info(f"[REMINDER] reminder due for user {row['user_id']} at {rtime}")
             finally:
                 await conn.close()
 
@@ -201,3 +200,49 @@ async def auto_expire_old_reminders() -> None:
         await conn.close()
     if expired > 0:
         logger.info(f"[EXPIRE] Marked {expired} old reminders as inactive")
+
+
+async def _purge(sql: str, params: tuple = ()) -> int:
+    conn = await db.get_db()
+    try:
+        c = conn.cursor()
+        await db.db_execute(c, sql, params)
+        count = db._safe_rowcount(c)
+        await conn.commit()
+    finally:
+        await conn.close()
+    return count
+
+
+async def purge_expired_verifications() -> int:
+    """Delete verification codes that are used, or expired for over a day."""
+    return await _purge(
+        "DELETE FROM email_verifications WHERE used = TRUE OR expires_at < NOW() - INTERVAL '1 day'"
+    )
+
+
+async def purge_soft_deleted(days: int = 30) -> int:
+    """Hard-delete chat rows and conversations soft-deleted over `days` ago.
+
+    The app only ever sets `is_deleted`; without this the "deleted" text stays
+    in the database for ever. Messages of a purged conversation go first.
+    """
+    interval = timedelta(days=int(days))
+    total = await _purge(
+        "DELETE FROM chat_history WHERE conversation_id IN "
+        "(SELECT id FROM conversations WHERE is_deleted = TRUE AND updated_at < NOW() - CAST(? AS INTERVAL))",
+        (interval,),
+    )
+    total += await _purge(
+        "DELETE FROM chat_history WHERE is_deleted = TRUE AND timestamp < NOW() - CAST(? AS INTERVAL)",
+        (interval,),
+    )
+    total += await _purge(
+        "DELETE FROM conversations WHERE is_deleted = TRUE AND updated_at < NOW() - CAST(? AS INTERVAL)",
+        (interval,),
+    )
+    return total
+
+
+async def purge_old_security_events(days: int = 180) -> int:
+    return await _purge("DELETE FROM security_events WHERE ts < NOW() - CAST(? AS INTERVAL)", (timedelta(days=int(days)),))

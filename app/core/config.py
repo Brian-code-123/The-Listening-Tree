@@ -53,6 +53,9 @@ IN_PRODUCTION = ON_VERCEL or os.environ.get("ENVIRONMENT") == "production"
 
 # Session secret: prefer explicit environment variable for production stability.
 # If not provided, fall back to a generated ephemeral key (NOT recommended).
+# Version of the privacy notice a new user agrees to; bump it when the text changes.
+PRIVACY_NOTICE_VERSION = "2026-10"
+
 SECRET_KEY = os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET") or secrets.token_hex(16)
 if IN_PRODUCTION and not (os.environ.get("SECRET_KEY") or os.environ.get("SESSION_SECRET") or os.environ.get("FASTAPI_SECRET")):
     raise RuntimeError("SECRET_KEY (or SESSION_SECRET/FASTAPI_SECRET) is required in production to prevent session loss across restarts.")

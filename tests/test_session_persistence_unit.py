@@ -35,6 +35,9 @@ class _FakeCursor:
             self._last = None
             return
 
+        if "update users set consent_at" in normalized:
+            return
+
         if "insert into users" in normalized:
             email, password, _ts = params
             if email in self.state["users"]:
@@ -44,16 +47,21 @@ class _FakeCursor:
                 "id": new_id,
                 "email": email,
                 "password": password,
-                "failed_login_attempts": 0,
-                "locked_until": None,
+                "session_version": 0,
+                "is_active": True,
             }
             self._last = None
             return
 
-        if "select id, email, password, failed_login_attempts, locked_until from users where lower(email) = lower(?)" in normalized:
+        if "select id, email, password, session_version, is_active from users where lower(email) = lower(?)" in normalized:
             email = params[0]
             user = self.state["users"].get(email.lower())
             self._last = dict(user) if user else None
+            return
+
+        if "select session_version, is_active from users where id = ?" in normalized:
+            user = next((u for u in self.state["users"].values() if u["id"] == params[0]), None)
+            self._last = {"session_version": user["session_version"], "is_active": user["is_active"]} if user else None
             return
 
         if "select id, email, password from users where lower(email) = lower(?)" in normalized:
@@ -75,9 +83,6 @@ class _FakeCursor:
             self._last = None
             return
 
-        if "update users set failed_login_attempts" in normalized:
-            self._last = None
-            return
 
         if "select pref_value from preferences" in normalized:
             self._last = None
@@ -124,7 +129,7 @@ def test_existing_user_can_login_without_reregister(monkeypatch):
             data={
                 "email": "User@Test.com",
                 "password": "TestPass123!",
-                "confirm_password": "TestPass123!",
+                "confirm_password": "TestPass123!", "consent": "true",
                 "verification_code": "123456",
             },
             follow_redirects=False,
@@ -132,7 +137,7 @@ def test_existing_user_can_login_without_reregister(monkeypatch):
         assert register_resp.status_code == 303
         assert register_resp.headers.get("location") == "/"
 
-        client.get("/logout", follow_redirects=False)
+        client.post("/logout", follow_redirects=False)
 
         login_resp = client.post(
             "/login",

@@ -10,6 +10,8 @@ import re
 from datetime import datetime
 
 from fastapi import APIRouter, Form, Request
+
+from app.core.limits import DbId
 from fastapi.responses import JSONResponse
 
 from app.core.session import get_user
@@ -18,6 +20,9 @@ from app.services.reminders import (
     create_reminder,
     delete_reminder_by_id,
     delete_reminder_by_label,
+    MAX_ACTIVE_REMINDERS,
+    MAX_REMINDER_LABEL,
+    ReminderLimitReached,
 )
 
 router = APIRouter()
@@ -63,7 +68,7 @@ async def get_reminders(request: Request):
 
 
 @router.post("/reminders")
-async def create_reminder_endpoint(request: Request, label: str = Form(...), time: str = Form(...), repeat: str = Form("once")):
+async def create_reminder_endpoint(request: Request, label: str = Form(..., max_length=MAX_REMINDER_LABEL), time: str = Form(...), repeat: str = Form("once")):
     """REST create — the Next.js /chat port's reminder panel uses this
     instead of synthesizing a "set reminder ..." chat command."""
     uid = get_user(request)
@@ -76,12 +81,15 @@ async def create_reminder_endpoint(request: Request, label: str = Form(...), tim
         return JSONResponse({"success": False, "message": "Time must be HH:MM (24-hour)"}, status_code=400)
     if repeat not in ("once", "daily"):
         return JSONResponse({"success": False, "message": "repeat must be once or daily"}, status_code=400)
-    new_id = await create_reminder(uid, label, time, repeat)
+    try:
+        new_id = await create_reminder(uid, label, time, repeat)
+    except ReminderLimitReached:
+        return JSONResponse({"success": False, "message": f"Reminder limit reached ({MAX_ACTIVE_REMINDERS}). Delete one first."}, status_code=400)
     return JSONResponse({"success": True, "id": new_id, "label": label, "time": time, "repeat": repeat})
 
 
 @router.delete("/reminders/{reminder_id}")
-async def delete_reminder_endpoint(request: Request, reminder_id: int):
+async def delete_reminder_endpoint(request: Request, reminder_id: DbId):
     """REST delete, keyed on id — not label, since labels aren't unique
     and a by-label delete would be ambiguous when duplicates exist."""
     uid = get_user(request)

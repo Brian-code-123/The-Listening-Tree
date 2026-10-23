@@ -26,7 +26,8 @@ done
 curl -fs "http://127.0.0.1:$API_PORT/health" >/dev/null || { echo "Backend did not start on port $API_PORT" >&2; exit 1; }
 
 export E2E_DATABASE_URL="$DB_URL" STRESS_BASE_URL="http://127.0.0.1:$API_PORT"
-CREDS=$(npx tsx tests/stress/seed-user.ts)
+# The seed script hashes the verification code with the backend's key, so it must match.
+CREDS=$(SECRET_KEY=stress-secret npx tsx tests/stress/seed-user.ts)
 K6_EMAIL=$(echo "$CREDS" | python3 -c 'import sys,json;print(json.load(sys.stdin)["email"])')
 K6_PASSWORD=$(echo "$CREDS" | python3 -c 'import sys,json;print(json.load(sys.stdin)["password"])')
 

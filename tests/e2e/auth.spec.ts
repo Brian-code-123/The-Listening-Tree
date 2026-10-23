@@ -14,6 +14,7 @@ test.describe('Black-box: authentication', () => {
       await page.locator('#email').fill(email);
       await page.locator('#password').fill(E2E_PASSWORD);
       await page.locator('#confirm_password').fill(E2E_PASSWORD);
+      await page.locator('#consent').check();
       await page.locator('#verification_code').fill('123456');
       await page.locator(SUBMIT).click();
       await expect(page).toHaveURL(/\/$/);
@@ -29,6 +30,7 @@ test.describe('Black-box: authentication', () => {
     await page.locator('#email').fill(uniqueEmail('badcode'));
     await page.locator('#password').fill(E2E_PASSWORD);
     await page.locator('#confirm_password').fill(E2E_PASSWORD);
+    await page.locator('#consent').check();
     await page.locator('#verification_code').fill('000000');
     await page.locator(SUBMIT).click();
     await expect(page.locator('.field-error').filter({ hasText: /incorrect|expired/i })).toBeVisible();
@@ -41,6 +43,7 @@ test.describe('Black-box: authentication', () => {
     await page.locator('#confirm_password').fill('Different123!');
     await expect(page.locator('.password-match.no-match')).toBeVisible();
     await page.locator('#confirm_password').fill(E2E_PASSWORD);
+    await page.locator('#consent').check();
     await expect(page.locator('.password-match.match')).toBeVisible();
   });
 
@@ -73,7 +76,7 @@ test.describe('Black-box: authentication', () => {
 
   test('logging out returns to the login page', async ({ authedPage: page }) => {
     await page.goto('/');
-    await page.locator('a[href$="/logout"]').first().click();
+    await page.getByRole('button', { name: /logout|登出/i }).first().click();
     await expect(page).toHaveURL(/\/login$/);
   });
 
@@ -88,11 +91,18 @@ test.describe('Black-box: authentication', () => {
     // shared resetRateLimits() (run by parallel workers) deliberately leaves alone.
     const ip = `203.0.113.${1 + Math.floor(Math.random() * 250)}`;
     const key = `login:${ip}`;
+    // The limit is a fixed one-minute window. Twelve requests that straddle the
+    // minute boundary are counted in two windows and never reach 10, so start
+    // early in a window rather than in its last seconds.
+    const second = new Date().getUTCSeconds();
+    if (second > 45) await new Promise((r) => setTimeout(r, (61 - second) * 1000));
     try {
       const statuses: number[] = [];
       for (let i = 0; i < 12; i++) {
         const res = await request.post('/auth/login', {
-          form: { email: 'nobody@example.com', password: 'x' },
+          // A different address each time: guessing at one address is stopped
+          // by the lockout (below), and this test is about the per-IP limit.
+          form: { email: `nobody${i}@example.com`, password: 'x' },
           headers: { Accept: 'application/json', 'X-Forwarded-For': ip },
         });
         statuses.push(res.status());
@@ -102,6 +112,32 @@ test.describe('Black-box: authentication', () => {
       expect(statuses.slice(10)).toEqual([429, 429]);
     } finally {
       await clearRateLimitKey(key);
+    }
+  });
+
+  test('repeated wrong passwords lock that address out, not the account owner elsewhere', async ({ request, user }) => {
+    const attacker = `203.0.113.${1 + Math.floor(Math.random() * 120)}`;
+    const owner = `203.0.113.${130 + Math.floor(Math.random() * 120)}`;
+    const keys = [`login_fail:${user.email.toLowerCase()}:${attacker}`, `login:${attacker}`, `login:${owner}`];
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        const res = await request.post('/auth/login', {
+          form: { email: user.email, password: `wrong-${i}` },
+          headers: { Accept: 'application/json', 'X-Forwarded-For': attacker },
+        });
+        statuses.push(res.status());
+      }
+      expect(statuses.slice(0, 5)).not.toContain(429);
+      expect(statuses[5]).toBe(429);
+
+      const real = await request.post('/auth/login', {
+        form: { email: user.email, password: user.password },
+        headers: { Accept: 'application/json', 'X-Forwarded-For': owner },
+      });
+      expect((await real.json()).success).toBe(true);
+    } finally {
+      for (const key of keys) await clearRateLimitKey(key);
     }
   });
 });

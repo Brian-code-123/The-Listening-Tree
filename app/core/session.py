@@ -2,6 +2,7 @@
 middleware — used by nearly every router.
 """
 import re
+import time
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
@@ -14,6 +15,36 @@ _CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x1f]")
 def get_user(request: Request) -> int | None:
     """Return the logged-in user's DB id, or *None* if unauthenticated."""
     return request.session.get("user_id")
+
+
+def start_session(request: Request, *, user_id: int, email: str, session_version: int, remember_me: bool | None) -> None:
+    """Begin a fresh signed-in session.
+
+    Anything left from a previous session (an old user's game state, an OAuth
+    state value) is dropped; only the chosen language carries over. With
+    `remember_me` False the session also gets a server-checked expiry, with
+    None (registration) neither a flag nor an expiry is set.
+    """
+    from app.core.session_guard import SESSION_NO_REMEMBER_SECONDS
+
+    language = request.session.get("language")
+    request.session.clear()
+    now = int(time.time())
+    request.session.update({"user_id": user_id, "user_email": email, "sv": session_version, "iat": now})
+    if remember_me is not None:
+        request.session["remember_me"] = bool(remember_me)
+        if not remember_me:
+            request.session["exp"] = now + SESSION_NO_REMEMBER_SECONDS
+    if language:
+        request.session["language"] = language
+
+
+def clear_login(request: Request) -> None:
+    """Sign out of this request's session but keep the chosen language."""
+    language = request.session.get("language")
+    request.session.clear()
+    if language:
+        request.session["language"] = language
 
 
 def get_lang(request: Request) -> str:

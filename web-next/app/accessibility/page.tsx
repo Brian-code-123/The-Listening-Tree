@@ -7,6 +7,7 @@ import { useTranslations } from "../lib/i18n";
 import { speakText } from "../lib/tts";
 import { useRequireAuth } from "../lib/useRequireAuth";
 import PageLoading from "../components/PageLoading";
+import LogoutButton from "../components/LogoutButton";
 
 interface DisplayMessage {
   sender: "user" | "bot";
@@ -159,9 +160,9 @@ export default function AccessibilityPage() {
             <a href={`${API_BASE}/`} className="btn-accessible btn-secondary-accessible" aria-label={t("normal_mode", "Switch to normal mode")}>
               <i className="fas fa-desktop" aria-hidden="true" /> <span>{t("normal_mode", "Normal Mode")}</span>
             </a>
-            <a href={`${API_BASE}/logout`} className="btn-accessible btn-danger-accessible" aria-label={t("logout", "Logout from application")}>
+            <LogoutButton className="btn-accessible btn-danger-accessible" ariaLabel={t("logout", "Logout from application")}>
               <i className="fas fa-sign-out-alt" aria-hidden="true" /> <span>{t("logout", "Logout")}</span>
-            </a>
+            </LogoutButton>
           </div>
         </nav>
 

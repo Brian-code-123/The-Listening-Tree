@@ -7,19 +7,26 @@ import `app` from here.
 import asyncio
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.background import run_periodic_tasks
 from app.core import config
 from app.core.session import RememberMeCookieMiddleware
+from app.core.session_guard import SessionRevocationMiddleware
 from app.core.templates import BASE_DIR, CachedStaticFiles
 from app.db import pool as db_pool
+from app.core.body_limit import BodySizeLimitMiddleware
+from app.core.security_headers import SECURITY_HEADERS, SecurityHeadersMiddleware, cors_origins
+from app.core.session import get_lang
 from app.db import schema
-from app.routers import auth, chat, conversations, health, hk_guide, pages, reminders
+from app.services.rate_limit import RateLimitUnavailable
+from app.routers import account, auth, chat, conversations, health, hk_guide, internal, pages, reminders
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +63,37 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 # Application initialisation
 # ---------------------------------------------------------------------------
+# The interactive docs and the OpenAPI schema list every route; in production
+# that is a free map of the attack surface, so they exist only locally.
 app = FastAPI(
     title="The Listening Tree",
     description="Bilingual AI companion chatbot for elderly wellness",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None if config.IN_PRODUCTION else "/docs",
+    redoc_url=None if config.IN_PRODUCTION else "/redoc",
+    openapi_url=None if config.IN_PRODUCTION else "/openapi.json",
 )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_error(request: Request, exc: Exception):
+    """Whatever went wrong, the caller gets a fixed message and an id to quote;
+    the exception text (which can carry SQL values or an email address) stays out
+    of the response and out of the log."""
+    request_id = request.headers.get("x-vercel-id") or uuid.uuid4().hex
+    logger.error("Unhandled %s on %s %s [%s]", type(exc).__name__, request.method, request.url.path, request_id)
+    return JSONResponse({"detail": "Internal error", "request_id": request_id}, status_code=500, headers=SECURITY_HEADERS)
+
+
+
+@app.exception_handler(RateLimitUnavailable)
+async def _rate_limiter_down(request: Request, exc: RateLimitUnavailable):
+    """The limiter fails closed: no counter means no safe way to let a request
+    through, but the caller gets a plain "try again" instead of a stack trace."""
+    message = "Service is busy. Please try again in a moment." if get_lang(request) == "en" else "服務繁忙，請稍後再試"
+    return JSONResponse({"success": False, "message": message, "error": message, "text": ""}, status_code=503)
+
 
 # The app is currently only ever called same-origin (Jinja-rendered pages'
 # own AJAX calls, and the Capacitor mobile build's WebView navigates
@@ -73,22 +105,14 @@ app = FastAPI(
 # browsers refuse to combine that with `allow_origins=["*"]` anyway.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://the-listening-tree.vercel.app",
-        "capacitor://localhost",
-        "http://localhost",
-        "http://localhost:5000",
-        "http://localhost:5001",
-        # web-next/ — local-only Next.js proof of concept (see
-        # docs/FRONTEND_ROADMAP.md), never deployed. Safe to add since
-        # allow_origins is an explicit allowlist, not a wildcard.
-        "http://localhost:3001",
-    ],
+    allow_origins=cors_origins(config.IN_PRODUCTION),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Accept-Language"],
 )
 
+# Added before SessionMiddleware so it sits *inside* it and can read the session.
+app.add_middleware(SessionRevocationMiddleware)
 app.add_middleware(
     SessionMiddleware,
     secret_key=config.SECRET_KEY,
@@ -100,13 +124,20 @@ app.add_middleware(
 # Added after SessionMiddleware so it sits *outside* it: SessionMiddleware
 # writes the Set-Cookie header first, then this one gets to rewrite it.
 app.add_middleware(RememberMeCookieMiddleware)
+# Inside the security headers (so a 413 carries them) but outside the session, so
+# an oversized body is refused before anything is parsed or looked up.
+app.add_middleware(BodySizeLimitMiddleware)
+# Outermost, so every response (including redirects and CORS replies) gets the headers.
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.mount("/static", CachedStaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
 
 app.include_router(pages.router)
 app.include_router(auth.router)
+app.include_router(account.router)
 app.include_router(chat.router)
 app.include_router(reminders.router)
 app.include_router(conversations.router)
 app.include_router(hk_guide.router)
 app.include_router(health.router)
+app.include_router(internal.router)

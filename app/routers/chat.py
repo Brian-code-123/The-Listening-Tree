@@ -2,22 +2,35 @@
 state machine, and the AI fallthrough — plus voice transcription and
 device-token registration.
 """
+import asyncio
+import json
 import logging
 import re
 from datetime import datetime
 from typing import Optional
 
+import anyio
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.background import prune_user_chat_history
 from app.core import config
+from app.core.limits import MAX_DB_ID
 from app.core.session import get_lang, get_user
 from app.db import queries as db
 from app.routers.conversations import get_or_create_active_conversation
-from app.services.ai import call_ai
+from app.services.ai import build_ai_messages, call_ai, stream_ai
+from app.services.safety import check_message, scam_hint
+from app.services.security_events import record_event
 from app.services.quiz import is_quiz_answer_correct, questions, questions_zh
-from app.services.reminders import create_reminder, delete_reminder_by_label
+from app.services.reminders import (
+    MAX_ACTIVE_REMINDERS,
+    MAX_REMINDER_LABEL,
+    ReminderLabelTooLong,
+    ReminderLimitReached,
+    create_reminder,
+    delete_reminder_by_label,
+)
 from app.services import transcription as stt
 from app.services.rate_limit import check_and_increment, client_key
 from translations import get_text
@@ -31,6 +44,12 @@ router = APIRouter()
 # routes' limits — generous enough for real use, still bounds a script
 # hammering the Whisper/SpeechRecognition backends.
 TRANSCRIBE_RATE_LIMIT = 20
+# One signed-in user: a short burst allowance plus a daily ceiling, because every
+# message that is not a command is a paid call to the language model.
+MAX_MESSAGE_CHARS = 2000
+CHAT_USER_LIMIT = 20
+CHAT_USER_WINDOW_SECONDS = 60
+CHAT_USER_DAILY = 300
 RATE_LIMIT_WINDOW_SECONDS = 60
 
 
@@ -112,6 +131,10 @@ async def _apply_reminder_set(uid: int, label: str, time_str: str, lang: str) ->
                 return f"每日提醒已設置：{label}，每日 {time_str}" if lang == 'zh-HK' else f"Daily reminder set: {label} every day at {time_str}"
             return f"提醒已設置：{label}，時間 {time_str}" if lang == 'zh-HK' else f"Reminder set: {label} at {time_str}"
         return "時間無效。請用24小時格式 HH:MM" if lang == 'zh-HK' else "Invalid time. Use 24-hour format HH:MM"
+    except ReminderLimitReached:
+        return f"已達提醒上限（{MAX_ACTIVE_REMINDERS} 個），請先刪除一個。" if lang == 'zh-HK' else f"Reminder limit reached ({MAX_ACTIVE_REMINDERS}). Delete one first."
+    except ReminderLabelTooLong:
+        return f"提醒名稱太長（最多 {MAX_REMINDER_LABEL} 個字元）。" if lang == 'zh-HK' else f"That reminder name is too long (max {MAX_REMINDER_LABEL} characters)."
     except (ValueError, IndexError):
         # Malformed time strings (bad separators, non-numeric values).
         return "時間格式錯誤。請用 HH:MM" if lang == 'zh-HK' else "Invalid time format. Use HH:MM"
@@ -134,11 +157,21 @@ async def _handle_reminder_delete(uid: int, user_input_original: str, user_input
     return "搵唔到呢個提醒。" if lang == 'zh-HK' else "No reminder found with that name."
 
 
+# The only preference the app reads back is the language (applied at sign-in), so
+# only that can be set, and only to a language the app has. Anything else would
+# be stored forever and some of it fed into the session.
+_PREFERENCE_VALUES = {"language": {"en": "en", "zh-hk": "zh-HK"}}
+
+
 async def _handle_set_preference(c, conn, uid: int, user_input_lower: str, timestamp: str) -> str:
     parts = user_input_lower.split(maxsplit=4)
     if len(parts) < 4:
         return "Usage: set preference [key] [value]"
     key, value = parts[2], parts[3]
+    allowed = _PREFERENCE_VALUES.get(key)
+    if allowed is None or value not in allowed:
+        return "Unknown preference. Supported: language (en or zh-HK)"
+    value = allowed[value]
     await db.db_insert_or_replace_preference(c, uid, key, value, timestamp)
     await conn.commit()
     return f"Preference updated: {key} = {value}"
@@ -321,11 +354,45 @@ async def _handle_quiz_game(request: Request, c, uid: int, lang: str, user_input
     return None
 
 
-async def _handle_ai_fallback(c, uid: int, lang: str, user_input_original: str, conversation_id: int) -> str:
+async def _handle_ai_fallback(c, uid: int, lang: str, user_input_original: str, conversation_id: int, extra_system: Optional[str] = None) -> str:
     await db.db_execute(c, "SELECT username FROM users WHERE id = ?", (uid,))
     user_row = c.fetchone()
     display_name = user_row["username"] if user_row else None
-    return await call_ai(c, user_input_original, uid, lang, display_name=display_name, conversation_id=conversation_id)
+    return await call_ai(c, user_input_original, uid, lang, display_name=display_name, conversation_id=conversation_id, extra_system=extra_system)
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _stream_reply(uid: int, lang: str, timestamp: str, conversation_id: int, messages: list):
+    """Server-sent events: `{"delta": "..."}` pieces, then `{"done": true, "response": "<all>"}`.
+    Whatever was produced is saved when the stream ends, even if the client left early."""
+    parts: list[str] = []
+    try:
+        async for piece in stream_ai(messages, lang):
+            parts.append(piece)
+            yield _sse({"delta": piece})
+        yield _sse({"done": True, "response": "".join(parts)})
+    finally:
+        reply = "".join(parts)
+        if reply:
+            # A browser that leaves mid-reply cancels this task, and anyio re-raises
+            # the cancellation at every await in it, which would drop the reply and
+            # leak the connection. Shielded, the save finishes first.
+            with anyio.CancelScope(shield=True):
+                conn = await db.get_db()
+                try:
+                    c = conn.cursor()
+                    await db.db_execute(
+                        c,
+                        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)",
+                        (uid, lang, timestamp, reply, conversation_id),
+                    )
+                    await prune_user_chat_history(c, conversation_id)
+                    await conn.commit()
+                finally:
+                    await conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -336,80 +403,140 @@ async def _handle_ai_fallback(c, uid: int, lang: str, user_input_original: str, 
 # Zhipu AI LLM for general conversation.
 # ---------------------------------------------------------------------------
 @router.post("/get_response")
-async def get_response(request: Request, msg: str = Form(...), conversation_id: Optional[int] = Form(None)):
+async def get_response(
+    request: Request,
+    msg: str = Form(..., max_length=MAX_MESSAGE_CHARS),
+    conversation_id: Optional[int] = Form(None, ge=1, le=MAX_DB_ID),
+):
     """Process user message and return AI/command response."""
     uid = get_user(request)
     if uid is None:
         return JSONResponse({"response": "Please log in."}, status_code=401)
 
     lang = get_lang(request)
+    if not msg.strip():
+        return JSONResponse({"response": "Please enter a message." if lang == "en" else "請輸入訊息。"}, status_code=400)
+    if not (
+        await check_and_increment(f"chat:{uid}", CHAT_USER_LIMIT, CHAT_USER_WINDOW_SECONDS)
+        and await check_and_increment(f"chat_day:{uid}", CHAT_USER_DAILY, 24 * 60 * 60)
+    ):
+        return JSONResponse(
+            {"response": "You are sending messages too quickly. Please wait a moment." if lang == "en" else "你發送訊息太快，請稍等一陣。"},
+            status_code=429,
+        )
     user_input_original = msg.strip()
     user_input_lower = user_input_original.lower()
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+    safety = check_message(user_input_original, lang)
+    if safety.kind is not None:
+        # Before any connection is taken: the event borrows its own, and holding
+        # one while borrowing another can deadlock the pool. The event carries the
+        # category only, never the words the user wrote.
+        await record_event("safety_trigger", request=request, user_id=uid, detail={"kind": safety.kind})
+
     conn = await db.get_db()
-    c = conn.cursor()
+    try:
+        c = conn.cursor()
 
-    # conversation_id is optional so older/other callers (voice shortcuts,
-    # the reminder-delete quick action) keep working unchanged — they just
-    # land in the user's most recent conversation instead of a specific one.
-    conversation_id = await get_or_create_active_conversation(c, uid, lang, conversation_id)
+        # conversation_id is optional so older/other callers (voice shortcuts,
+        # the reminder-delete quick action) keep working unchanged — they just
+        # land in the user's most recent conversation instead of a specific one.
+        conversation_id = await get_or_create_active_conversation(c, uid, lang, conversation_id)
 
-    # Store user message
-    await db.db_execute(
-        c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, FALSE, ?, FALSE, ?)",
-        (uid, lang, timestamp, user_input_original, conversation_id),
-    )
-    # Auto-title from the first message in this conversation; COALESCE makes
-    # this a no-op once a title already exists.
-    preview_title = user_input_original.replace("\n", " ").replace("\r", " ").strip()[:40]
-    await db.db_execute(
-        c,
-        "UPDATE conversations SET title = COALESCE(title, ?), updated_at = ? WHERE id = ?",
-        (preview_title or None, timestamp, conversation_id),
-    )
-    await conn.commit()
+        # Store user message
+        await db.db_execute(
+            c,
+            "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, FALSE, ?, FALSE, ?)",
+            (uid, lang, timestamp, user_input_original, conversation_id),
+        )
+        # Auto-title from the first message in this conversation; COALESCE makes
+        # this a no-op once a title already exists.
+        preview_title = user_input_original.replace("\n", " ").replace("\r", " ").strip()[:40]
+        await db.db_execute(
+            c,
+            "UPDATE conversations SET title = COALESCE(title, ?), updated_at = ? WHERE id = ?",
+            (preview_title or None, timestamp, conversation_id),
+        )
+        await conn.commit()
 
-    guide_response = _guide_trigger_response(user_input_original, user_input_lower, lang)
+        guide_response = _guide_trigger_response(user_input_original, user_input_lower, lang)
 
-    if guide_response is not None:
-        response = guide_response
+        if safety.reply is not None:
+            response = safety.reply
 
-    elif user_input_lower.startswith("set reminder") or user_input_lower.startswith("設置提醒"):
-        label, time_str, usage_error = _parse_reminder_set_command(user_input_original, user_input_lower)
-        if usage_error is not None:
-            await db.db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, usage_error, conversation_id))
-            await conn.commit(); await conn.close()
-            return JSONResponse({"response": usage_error})
-        response = await _apply_reminder_set(uid, label, time_str, lang)
+        elif guide_response is not None:
+            response = guide_response
 
-    elif user_input_lower.startswith("delete reminder") or user_input_lower.startswith("刪除提醒"):
-        response = await _handle_reminder_delete(uid, user_input_original, user_input_lower, lang)
+        elif user_input_lower.startswith("set reminder") or user_input_lower.startswith("設置提醒"):
+            label, time_str, usage_error = _parse_reminder_set_command(user_input_original, user_input_lower)
+            if usage_error is not None:
+                await db.db_execute(c, "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)", (uid, lang, timestamp, usage_error, conversation_id))
+                await conn.commit(); await conn.close()
+                return JSONResponse({"response": usage_error})
+            # The reminder service borrows its own connection, so give ours back first.
+            await conn.commit()
+            await conn.close()
+            response = await _apply_reminder_set(uid, label, time_str, lang)
+            conn = await db.get_db()
+            c = conn.cursor()
 
-    elif user_input_lower.startswith("set preference"):
-        response = await _handle_set_preference(c, conn, uid, user_input_lower, timestamp)
+        elif user_input_lower.startswith("delete reminder") or user_input_lower.startswith("刪除提醒"):
+            await conn.commit()
+            await conn.close()
+            response = await _handle_reminder_delete(uid, user_input_original, user_input_lower, lang)
+            conn = await db.get_db()
+            c = conn.cursor()
 
-    else:
-        game_response = await _handle_quiz_game(request, c, uid, lang, user_input_original, user_input_lower)
-        if game_response is not None:
-            response = game_response
+        elif user_input_lower.startswith("set preference"):
+            response = await _handle_set_preference(c, conn, uid, user_input_lower, timestamp)
+
         else:
-            response = await _handle_ai_fallback(c, uid, lang, user_input_original, conversation_id)
+            game_response = await _handle_quiz_game(request, c, uid, lang, user_input_original, user_input_lower)
+            if game_response is not None:
+                response = game_response
+            elif "text/event-stream" in request.headers.get("accept", ""):
+                # Slow path, asked for as a stream: hand the model's words to the
+                # client as they arrive. The user's message is already saved; the
+                # reply is saved when the stream ends.
+                await db.db_execute(c, "SELECT username FROM users WHERE id = ?", (uid,))
+                user_row = c.fetchone()
+                messages = await build_ai_messages(
+                    c, user_input_original, uid, lang,
+                    display_name=user_row["username"] if user_row else None,
+                    conversation_id=conversation_id,
+                    extra_system=scam_hint(lang) if safety.kind == "scam" else None,
+                )
+                await conn.commit()
+                await conn.close()  # not held open for the seconds the model takes
+                return StreamingResponse(
+                    _stream_reply(uid, lang, timestamp, conversation_id, messages),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+                )
+            else:
+                response = await _handle_ai_fallback(
+                    c, uid, lang, user_input_original, conversation_id,
+                    extra_system=scam_hint(lang) if safety.kind == "scam" else None,
+                )
 
-    # Store bot response
-    await db.db_execute(
-        c,
-        "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)",
-        (uid, lang, timestamp, response, conversation_id),
-    )
+        # Store bot response
+        await db.db_execute(
+            c,
+            "INSERT INTO chat_history (user_id, lang, timestamp, is_bot, message, is_deleted, conversation_id) VALUES (?, ?, ?, TRUE, ?, FALSE, ?)",
+            (uid, lang, timestamp, response, conversation_id),
+        )
 
-    # Keep recent history stable across Vercel/local/mobile by pruning oldest rows.
-    await prune_user_chat_history(c, conversation_id)
-    await conn.commit()
-    await conn.close()
+        # Keep recent history stable across Vercel/local/mobile by pruning oldest rows.
+        await prune_user_chat_history(c, conversation_id)
+        await conn.commit()
+        await conn.close()
 
-    return JSONResponse({"response": response})
+        return JSONResponse({"response": response})
+    finally:
+        # Idempotent, so the explicit closes on early returns stay harmless; this
+        # one covers an exception, which would otherwise leave the pool a connection short.
+        await conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +556,7 @@ def _reject_upload_before_reading(request: Request, audio: UploadFile) -> Option
     non-audio upload is turned away without reading the body first.
     """
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > stt.MAX_TRANSCRIBE_UPLOAD_BYTES:
+    if content_length and content_length.isdigit() and int(content_length) > stt.MAX_TRANSCRIBE_UPLOAD_BYTES:
         return JSONResponse({"text": "", "error": "Audio file too large."}, status_code=413)
     if audio.content_type and not audio.content_type.startswith("audio/"):
         return JSONResponse({"text": "", "error": "Expected an audio file."}, status_code=415)
@@ -464,21 +591,22 @@ async def _run_stt(content: bytes, language: str, lang: str) -> JSONResponse:
         except Exception as e:
             logger.warning(f"[STT] Whisper (HF) error, falling back: {e}")
 
-    if stt.sr is None:
+    try:
+        # Blocking network call (about a second): off the event loop, or every
+        # other request on this instance waits for it.
+        text = await asyncio.to_thread(stt.transcribe_with_google_fallback, content, language)
+        return JSONResponse({"text": text, "engine": "google-web-speech"})
+    except stt.SttDependencyMissing:
         return JSONResponse(
             {"text": "", "error": "Server STT dependency missing (SpeechRecognition)."},
             status_code=503,
         )
-
-    try:
-        text = stt.transcribe_with_google_fallback(content, language)
-        return JSONResponse({"text": text, "engine": "google-web-speech"})
-    except stt.sr.UnknownValueError:
+    except stt.SpeechUnintelligible:
         return JSONResponse(
             {"text": "", "error": get_text("no_speech_detected", lang)},
             status_code=422,
         )
-    except stt.sr.RequestError as e:
+    except stt.SpeechServiceError as e:
         logger.error(f"[STT] upstream request error: {e}")
         return JSONResponse(
             {"text": "", "error": get_text("error_network", lang)},
@@ -528,7 +656,7 @@ async def register_device(request: Request):
         uid = get_user(request)
         if uid and token:
             # In a real setup, save this `token` to the database for this user
-            logger.info(f"[Push] Registered device token for {uid}: {token}")
+            logger.info("[Push] Device token registered")
             return JSONResponse({"status": "ok"})
     except Exception:
         pass

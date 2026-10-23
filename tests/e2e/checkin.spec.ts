@@ -9,7 +9,9 @@ async function sendAndWaitForReply(page: Page, text: string) {
   await input.fill(text);
   await input.press('Enter');
   await expect(page.locator('.msg_cotainer_send').last()).toContainText(text);
-  await expect(page.locator('.msg_cotainer')).toHaveCount(1); // welcome replaced by the real reply
+  await expect(page.locator('.msg_cotainer')).toHaveCount(1); // welcome replaced by the reply bubble
+  // The bubble appears at once and fills in as the reply streams; wait until it is whole.
+  await expect(page.locator('.msg_cotainer[aria-busy="true"]')).toHaveCount(0);
 }
 
 async function ageMessages(email: string, hours: number) {

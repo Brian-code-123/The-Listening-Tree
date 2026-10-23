@@ -145,11 +145,12 @@ class _ConnShim:
     unless a transaction is explicitly started.
     """
 
-    __slots__ = ("_raw", "_in_tx")
+    __slots__ = ("_raw", "_in_tx", "_closed")
 
     def __init__(self, raw: "asyncpg.Connection"):
         self._raw = raw
         self._in_tx = False
+        self._closed = False
 
     async def _ensure_tx(self) -> None:
         # Plain SQL BEGIN, not asyncpg's `Transaction` helper object — that
@@ -170,6 +171,9 @@ class _ConnShim:
             self._in_tx = False
 
     async def close(self) -> None:
+        if self._closed:
+            return  # releasing twice would hand the pool a connection it already has back
+        self._closed = True
         if self._in_tx:
             try:
                 await self._raw.execute("ROLLBACK")

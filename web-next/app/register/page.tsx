@@ -22,6 +22,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
+  const [consent, setConsent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -79,7 +80,7 @@ export default function RegisterPage() {
     setFormError("");
     setSubmitting(true);
     try {
-      const { body } = await register(email, password, confirmPassword, verificationCode);
+      const { body } = await register(email, password, confirmPassword, verificationCode, consent);
       if (body.success) {
         window.location.href = body.redirect || "/";
         return;
@@ -238,6 +239,19 @@ export default function RegisterPage() {
               {verifyStatus && (
                 <div className={`field-status ${verifyStatus.isError ? "is-error" : "is-success"}`}>{verifyStatus.message}</div>
               )}
+            </div>
+
+            <div className="form-group mb-3">
+              <label htmlFor="consent" className="form-label" style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                <input type="checkbox" id="consent" required checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+                <span>
+                  {t("consent_label", "I have read and agree to the")}{" "}
+                  <a href="/privacy" target="_blank" rel="noopener noreferrer">
+                    {t("privacy_link", "privacy notice")}
+                  </a>
+                </span>
+              </label>
+              <div className="field-error">{fieldErrors.consent}</div>
             </div>
 
             {formError && (

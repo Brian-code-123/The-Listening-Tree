@@ -276,11 +276,13 @@
             const label = sender === 'user' ? '{{ translations.you if translations else "You" }}' : '{{ translations.assistant if translations else "Assistant" }}';
             if (!time) time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-            messageDiv.innerHTML = `
-                <div class="message-label">${label}</div>
-                <div>${text}</div>
-                <div class="message-time">${time}</div>
-            `;
+            // textContent, not innerHTML: `text` can be the user's or the model's words.
+            [['message-label', label], [null, text], ['message-time', time]].forEach(([cls, value]) => {
+                const part = document.createElement('div');
+                if (cls) part.className = cls;
+                part.textContent = value;
+                messageDiv.appendChild(part);
+            });
 
             messagesArea.appendChild(messageDiv);
             messagesArea.scrollTop = messagesArea.scrollHeight;

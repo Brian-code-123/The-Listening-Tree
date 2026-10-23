@@ -17,6 +17,10 @@
     { "source": "/profile", "destination": { "service": "web" } },
     { "source": "/accessibility", "destination": { "service": "web" } },
     { "source": "/hk_guide", "destination": { "service": "web" } },
+    { "source": "/privacy", "destination": { "service": "web" } },
     { "source": "/(.*)", "destination": { "service": "api" } }
+  ],
+  "crons": [
+    { "path": "/internal/cron/cleanup", "schedule": "0 19 * * *" }
   ]
 }

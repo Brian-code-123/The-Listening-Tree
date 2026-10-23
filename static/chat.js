@@ -935,17 +935,20 @@
                     return;
                 }
                 data.articles.forEach(article => {
-                    const html = `<div class="news-item fade-in" onclick="window.open('${article.url}', '_blank')">
-                        <div class="news-title">${article.title}</div>
-                        <div class="news-desc">${article.description || ''}</div>
-                        <div class="news-meta">
-                            <span class="news-source">${article.source}</span>
-                            <button class="news-voice-btn" onclick="event.stopPropagation(); speakNewsItem('${article.title.replace(/'/g, "\\'")}', '${(article.description || '').replace(/'/g, "\\'")}')" title="${window.CHAT_I18N.voiceRead}">
-                                <i class="fas fa-volume-up"></i>
-                            </button>
-                        </div>
-                    </div>`;
-                    $('#newsContainer').append(html);
+                    // News text comes from a third party: build with .text()/.data(), never
+                    // splice it into HTML or an inline handler.
+                    const $item = $('<div class="news-item fade-in"></div>').on('click', () => {
+                        if (/^https?:\/\//i.test(article.url || '')) window.open(article.url, '_blank', 'noopener,noreferrer');
+                    });
+                    const $voice = $('<button class="news-voice-btn"><i class="fas fa-volume-up"></i></button>')
+                        .attr('title', window.CHAT_I18N.voiceRead)
+                        .on('click', (e) => { e.stopPropagation(); speakNewsItem(article.title || '', article.description || ''); });
+                    $item.append(
+                        $('<div class="news-title"></div>').text(article.title || ''),
+                        $('<div class="news-desc"></div>').text(article.description || ''),
+                        $('<div class="news-meta"></div>').append($('<span class="news-source"></span>').text(article.source || ''), $voice)
+                    );
+                    $('#newsContainer').append($item);
                 });
             }).fail(function() {
                 $('#newsContainer').html('<p style="text-align:center;color:var(--text-muted);padding:20px;font-size:0.9rem;">' + window.CHAT_I18N.noNews + '</p>');

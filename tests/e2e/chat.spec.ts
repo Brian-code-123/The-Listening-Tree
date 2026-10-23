@@ -19,6 +19,34 @@ async function sendFirstMessageAndWaitForReply(page: Page, text: string) {
 }
 
 test.describe('Black-box: chat', () => {
+  test('the reply is spoken once, after it has arrived, and replaces earlier speech', async ({ authedPage: page }) => {
+    await page.addInitScript(() => {
+      const spoken: string[] = [];
+      let cancels = 0;
+      (window as unknown as Record<string, unknown>).__spoken = spoken;
+      (window as unknown as Record<string, unknown>).__cancels = () => cancels;
+      const fake = {
+        speak: (u: { text: string }) => spoken.push(u.text),
+        cancel: () => { cancels += 1; },
+        getVoices: () => [{ name: 'x', lang: 'en-US' }],
+        onvoiceschanged: null,
+      };
+      Object.defineProperty(window, 'speechSynthesis', { value: fake, configurable: true });
+      (window as unknown as Record<string, unknown>).SpeechSynthesisUtterance = function (this: { text: string }, t: string) { this.text = t; };
+    });
+    await page.goto('/');
+    await send(page, 'hello there');
+    await expect(page.locator('.msg_cotainer[aria-busy="true"]')).toHaveCount(0);
+    const reply = (await page.locator('.msg_cotainer').last().innerText()).replace(/\d{2}:\d{2}\s*$/, '').trim();
+    const spoken = await page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
+    expect(spoken.length).toBeGreaterThan(0);
+    // Everything spoken is part of the reply, and nothing is spoken twice.
+    expect(new Set(spoken).size).toBe(spoken.length);
+    spoken.forEach((piece) => expect(reply.replace(/\s+/g, ' ')).toContain(piece.replace(/\s+/g, ' ').trim().slice(0, 12)));
+    // Only the first piece cancels earlier speech; later pieces queue behind it.
+    expect(await page.evaluate(() => (window as unknown as { __cancels: () => number }).__cancels())).toBe(1);
+  });
+
   test('sending a message shows it and produces a bot reply', async ({ authedPage: page }) => {
     await page.goto('/');
     await expect(page.locator('.msg_cotainer')).toHaveCount(1); // welcome bubble

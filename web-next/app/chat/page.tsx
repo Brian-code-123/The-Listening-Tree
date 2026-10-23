@@ -8,11 +8,11 @@ import {
   fetchChatHistory,
   fetchConversationMessages,
   fetchConversations,
-  sendChatMessage,
+  streamChatMessage,
   type ChatHistoryItem,
 } from "../lib/chat";
 import { useTranslations } from "../lib/i18n";
-import { speakText } from "../lib/tts";
+import { nextSentences, speakText } from "../lib/tts";
 import { useRequireAuth } from "../lib/useRequireAuth";
 import { useTheme } from "../lib/useTheme";
 import PageLoading from "../components/PageLoading";
@@ -20,6 +20,7 @@ import CalendarCard from "./components/CalendarCard";
 import NewsCard from "./components/NewsCard";
 import ReminderPanel from "./components/ReminderPanel";
 import VoiceRecorder, { type MicState } from "./components/VoiceRecorder";
+import LogoutButton from "../components/LogoutButton";
 
 interface DisplayMessage {
   sender: "user" | "bot";
@@ -59,8 +60,8 @@ export default function ChatPage() {
   const loadedRef = useRef(false);
 
   const speak = useCallback(
-    (text: string) => {
-      speakText(text, lang, ttsEnabled);
+    (text: string, queue = false) => {
+      speakText(text, lang, ttsEnabled, queue);
     },
     [lang, ttsEnabled]
   );
@@ -130,14 +131,35 @@ export default function ChatPage() {
     const text = input.trim();
     if (!text) return;
     const time = nowTime();
-    setMessages((prev) => [...prev, { sender: "user", text, time }]);
+    // An empty bot bubble goes up at once (shown as "…") so the user sees the
+    // app has heard them; the model's words fill it in as they arrive.
+    setMessages((prev) => [...prev, { sender: "user", text, time }, { sender: "bot", text: "", time }]);
     setInput("");
+    const setLastBot = (reply: string) =>
+      setMessages((prev) => prev.map((m, i) => (i === prev.length - 1 && m.sender === "bot" ? { ...m, text: reply } : m)));
+    let shownSoFar = "";
+    // Speech starts with the first finished sentence, not when the reply is whole.
+    let spokenTo = 0;
+    let spokeAny = false;
+    const speakFinished = (soFar: string) => {
+      const { sentences, next } = nextSentences(soFar, spokenTo);
+      sentences.forEach((s) => {
+        speak(s, spokeAny);
+        spokeAny = true;
+      });
+      spokenTo = next;
+    };
     try {
-      const reply = await sendChatMessage(text, conversationId);
-      setMessages((prev) => [...prev, { sender: "bot", text: reply, time }]);
-      speak(reply);
+      const reply = await streamChatMessage(text, conversationId, (soFar) => {
+        shownSoFar = soFar;
+        setLastBot(soFar);
+        speakFinished(soFar);
+      });
+      const rest = reply.slice(spokenTo).trim();
+      if (rest) speak(rest, spokeAny);
     } catch {
-      setMessages((prev) => [...prev, { sender: "bot", text: t("error_generic", "Something went wrong."), time }]);
+      // Keep any words that already arrived; only an empty bubble becomes the error.
+      if (!shownSoFar) setLastBot(t("error_generic", "Something went wrong."));
     }
   }
 
@@ -203,9 +225,7 @@ export default function ChatPage() {
                   <a href="/profile" className="btn btn-sm btn-outline-light" title={t("profile_nav", "My Profile")}>
                     <i className="fas fa-user-circle" />
                   </a>
-                  <a href={`${API_BASE}/logout`} className="btn btn-sm btn-danger">
-                    {t("logout", "Logout")}
-                  </a>
+                  <LogoutButton className="btn btn-sm btn-danger">{t("logout", "Logout")}</LogoutButton>
                 </div>
               </div>
             </div>
@@ -248,8 +268,8 @@ export default function ChatPage() {
                         <img src={`${API_BASE}/static/Chatbot.png`} className="rounded-circle user_img_msg" alt="" />
                       </div>
                     )}
-                    <div className={m.sender === "bot" ? "msg_cotainer" : "msg_cotainer_send"}>
-                      {m.text}
+                    <div className={m.sender === "bot" ? "msg_cotainer" : "msg_cotainer_send"} aria-busy={m.sender === "bot" && !m.text ? true : undefined}>
+                      {m.text || "…"}
                       <span className="msg_time">{m.time}</span>
                     </div>
                     {m.sender === "user" && (

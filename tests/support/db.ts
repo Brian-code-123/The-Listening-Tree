@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import pg from 'pg';
 import { assertLocalDb, e2eDbUrl } from './env';
 
@@ -42,11 +43,18 @@ export async function rateLimitCount(key: string): Promise<number> {
   return Number(res.rows[0].n);
 }
 
+// The backend stores a keyed hash of the code, not the code (see code_digest in
+// app/services/auth.py); the key is the SECRET_KEY the e2e backend runs with.
+function codeDigest(email: string, code: string): string {
+  const key = process.env.SECRET_KEY || 'e2e-secret-key';
+  return createHmac('sha256', key).update(`${email.trim().toLowerCase()}:${code}`).digest('hex');
+}
+
 export async function seedVerificationCode(email: string, code = '123456') {
   const now = new Date();
   await query(
     'INSERT INTO email_verifications (email, code, expires_at, created_at) VALUES ($1, $2, $3, $4)',
-    [email, code, localTs(new Date(now.getTime() + 10 * 60_000)), localTs(now)],
+    [email, codeDigest(email, code), localTs(new Date(now.getTime() + 10 * 60_000)), localTs(now)],
   );
 }
 

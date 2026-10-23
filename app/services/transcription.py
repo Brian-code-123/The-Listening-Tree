@@ -9,6 +9,18 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+class SttDependencyMissing(RuntimeError):
+    """SpeechRecognition is not installed."""
+
+
+class SpeechUnintelligible(Exception):
+    """The audio held no recognisable speech."""
+
+
+class SpeechServiceError(Exception):
+    """The upstream recogniser could not be reached or refused the request."""
+
 # Hugging Face Inference API — Whisper large-v3 for server-side STT.
 HF_API_KEY = os.environ.get("HF_API_KEY")
 HF_WHISPER_MODEL = os.environ.get("HF_WHISPER_MODEL") or "openai/whisper-large-v3"
@@ -48,8 +60,13 @@ def transcribe_with_google_fallback(content: bytes, language: str) -> str:
     try:
         import speech_recognition as sr
     except ImportError:
-        raise RuntimeError("Server STT dependency missing (SpeechRecognition).") from None
+        raise SttDependencyMissing("Server STT dependency missing (SpeechRecognition).") from None
     recognizer = sr.Recognizer()
     with sr.AudioFile(io.BytesIO(content)) as source:
         audio_data = recognizer.record(source)
-    return recognizer.recognize_google(audio_data, language=language).strip()
+    try:
+        return recognizer.recognize_google(audio_data, language=language).strip()
+    except sr.UnknownValueError as e:
+        raise SpeechUnintelligible() from e
+    except sr.RequestError as e:
+        raise SpeechServiceError(str(e)) from e

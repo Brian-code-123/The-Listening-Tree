@@ -93,7 +93,7 @@ def test_daily_reminder_repeat_roundtrip():
     with TestClient(app) as client:
         from tests.integration.helpers import new_user_email
         email, pw = new_user_email(), "TestPass123!"
-        client.post("/register", data={"email": email, "password": pw, "confirm_password": pw, "verification_code": "123456"}, follow_redirects=False)
+        client.post("/register", data={"email": email, "password": pw, "confirm_password": pw, "consent": "true", "verification_code": "123456"}, follow_redirects=False)
         client.post("/login", data={"email": email, "password": pw}, follow_redirects=False)
         assert client.post("/reminders", data={"label": "walk", "time": "08:00", "repeat": "daily"}).json()["repeat"] == "daily"
         client.post("/reminders", data={"label": "pill", "time": "09:00"})
@@ -118,7 +118,7 @@ def test_chat_command_creates_daily_reminder():
     with TestClient(app) as client:
         from tests.integration.helpers import new_user_email
         email, pw = new_user_email(), "TestPass123!"
-        client.post("/register", data={"email": email, "password": pw, "confirm_password": pw, "verification_code": "123456"}, follow_redirects=False)
+        client.post("/register", data={"email": email, "password": pw, "confirm_password": pw, "consent": "true", "verification_code": "123456"}, follow_redirects=False)
         client.post("/login", data={"email": email, "password": pw}, follow_redirects=False)
         reply = client.post("/get_response", data={"msg": "set reminder daily bp meds 08:00"}).json()["response"]
         assert reply == "Daily reminder set: bp meds every day at 08:00"

@@ -60,7 +60,12 @@ export function authedFlow(data) {
     const r = http.get(`${BASE}${path}`, params);
     check(r, { [`${path} is 200`]: (x) => x.status === 200 });
   }
-  const chat = http.post(`${BASE}/get_response`, { msg: 'hello' }, params);
-  check(chat, { 'chat reply is 200': (x) => x.status === 200 });
+  // All VUs share one user, and a user may send 20 chat messages a minute, so
+  // most of these are answered 429 on purpose. What must never happen is a 5xx.
+  const chat = http.post(`${BASE}/get_response`, { msg: 'hello' }, {
+    ...params,
+    responseCallback: http.expectedStatuses(200, 429),
+  });
+  check(chat, { 'chat is answered 200 or limited with 429, never an error': (x) => x.status === 200 || x.status === 429 });
   sleep(1);
 }

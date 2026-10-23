@@ -65,7 +65,7 @@ def test_register_login_chat_and_reminders_flow():
             data={
                 "email": email,
                 "password": password,
-                "confirm_password": password,
+                "confirm_password": password, "consent": "true",
                 "verification_code": "123456",
             },
             follow_redirects=False,
@@ -119,7 +119,7 @@ def test_quiz_flow():
             data={
                 "email": email,
                 "password": password,
-                "confirm_password": password,
+                "confirm_password": password, "consent": "true",
                 "verification_code": "123456",
             },
             follow_redirects=False,
@@ -156,7 +156,7 @@ def test_existing_user_can_login_without_reregister():
             data={
                 "email": email,
                 "password": password,
-                "confirm_password": password,
+                "confirm_password": password, "consent": "true",
                 "verification_code": "123456",
             },
             follow_redirects=False,
@@ -169,7 +169,7 @@ def test_existing_user_can_login_without_reregister():
             data={
                 "email": email.upper(),
                 "password": password,
-                "confirm_password": password,
+                "confirm_password": password, "consent": "true",
                 "verification_code": "123456",
             },
             follow_redirects=True,
@@ -177,7 +177,7 @@ def test_existing_user_can_login_without_reregister():
         assert duplicate_register.status_code == 200
         assert "Email already exists" in duplicate_register.text or "電郵已存在" in duplicate_register.text
 
-        logout_resp = client.get("/logout", follow_redirects=False)
+        logout_resp = client.post("/logout", follow_redirects=False)
         assert logout_resp.status_code == 303
 
         login_again = client.post(

@@ -6,6 +6,8 @@ import { updateDisplayName, updatePassword } from "../lib/auth";
 import { useTranslations } from "../lib/i18n";
 import { useRequireAuth } from "../lib/useRequireAuth";
 import PageLoading from "../components/PageLoading";
+import LogoutButton from "../components/LogoutButton";
+import { deleteAccount } from "../lib/auth";
 
 export default function ProfilePage() {
   const { user, checking } = useRequireAuth();
@@ -27,6 +29,24 @@ export default function ProfilePage() {
   const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>({});
   const [passwordStatus, setPasswordStatus] = useState<{ message: string; isError: boolean } | null>(null);
   const [savingPassword, setSavingPassword] = useState(false);
+
+  const [deleting, setDeleting] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+
+  async function handleDeleteAccount() {
+    setDeleteError("");
+    try {
+      const { body } = await deleteAccount(deletePassword);
+      if (body.success) {
+        window.location.href = "/login";
+        return;
+      }
+      setDeleteError(body.message ?? "");
+    } catch {
+      setDeleteError(t("network_error", "Network error, please try again"));
+    }
+  }
 
   async function handleNameSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -108,12 +128,12 @@ export default function ProfilePage() {
               </span>
               <span>{t("app_name", "The Listening Tree")}</span>
             </a>
-            <a href={`${API_BASE}/logout`} className="btn-accessible btn-danger-accessible" aria-label={t("logout", "Logout")}>
+            <LogoutButton className="btn-accessible btn-danger-accessible" ariaLabel={t("logout", "Logout")}>
               <span aria-hidden="true">
                 <i className="fas fa-sign-out-alt" />
               </span>
               <span>{t("logout", "Logout")}</span>
-            </a>
+            </LogoutButton>
           </div>
         </nav>
 
@@ -212,6 +232,36 @@ export default function ProfilePage() {
               )}
             </form>
           </div>
+          <section className="profile-section" aria-labelledby="data-heading">
+            <h2 id="data-heading">{t("privacy_title", "Your Privacy Matters")}</h2>
+            <p>
+              <a href={`${API_BASE}/account/export`} className="btn-accessible" download>
+                {t("download_my_data", "Download my data")}
+              </a>{" "}
+              <a href="/privacy">{t("privacy_link", "privacy notice")}</a>
+            </p>
+            {!deleting ? (
+              <button type="button" className="btn-accessible btn-danger-accessible" onClick={() => setDeleting(true)}>
+                {t("delete_account", "Delete my account")}
+              </button>
+            ) : (
+              <div role="alertdialog" aria-label={t("delete_account", "Delete my account")}>
+                <p>{t("delete_account_warning", "This permanently erases your account, chats and reminders. It cannot be undone.")}</p>
+                <input
+                  type="password"
+                  className="form-control"
+                  autoComplete="current-password"
+                  placeholder={t("delete_account_password", "Enter your password to confirm")}
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                />
+                {deleteError && <div className="field-error">{deleteError}</div>}
+                <button type="button" className="btn-accessible btn-danger-accessible" onClick={handleDeleteAccount}>
+                  {t("delete_account_confirm", "Delete everything")}
+                </button>
+              </div>
+            )}
+          </section>
         </main>
       </div>
     </div>

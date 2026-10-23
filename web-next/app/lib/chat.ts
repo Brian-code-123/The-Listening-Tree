@@ -32,6 +32,67 @@ export async function sendChatMessage(msg: string, conversationId?: number | nul
   return data.response ?? "";
 }
 
+/** POST /get_response asking for a server-sent stream, so the reply can be shown
+ * as it is written (first words in under a second, instead of the whole reply
+ * after several). `onText` receives the reply so far each time it grows.
+ *
+ * Commands, games and safety replies come back as ordinary JSON even when a
+ * stream is asked for; that case calls `onText` once with the whole reply. */
+export async function streamChatMessage(
+  msg: string,
+  conversationId: number | null | undefined,
+  onText: (replySoFar: string) => void,
+): Promise<string> {
+  const body = new URLSearchParams({ msg });
+  if (conversationId != null) body.set("conversation_id", String(conversationId));
+  const res = await fetch(`${API_BASE}/get_response`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/event-stream" },
+    body,
+  });
+  if (!res.ok) throw new Error(`get_response failed: ${res.status}`);
+
+  if (!(res.headers.get("content-type") ?? "").includes("text/event-stream") || !res.body) {
+    const data = await res.json();
+    const reply: string = data.response ?? "";
+    onText(reply);
+    return reply;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let reply = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let end: number;
+    while ((end = buffer.indexOf("\n\n")) !== -1) {
+      const block = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      const line = block.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      let event: { delta?: string; done?: boolean; response?: string };
+      try {
+        event = JSON.parse(line.slice(5));
+      } catch {
+        continue;
+      }
+      if (event.delta) {
+        reply += event.delta;
+        onText(reply);
+      }
+      if (event.done && event.response != null) {
+        reply = event.response;
+        onText(reply);
+      }
+    }
+  }
+  return reply;
+}
+
 export interface ConversationSummary {
   id: number;
   title: string;

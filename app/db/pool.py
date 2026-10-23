@@ -109,7 +109,7 @@ async def create_pool() -> "asyncpg.Pool":
         # (and CI, which monkeypatches get_db() but not pool creation) from
         # requiring a reachable database just to construct the pool object.
         min_size=0,
-        max_size=10,
+        max_size=int(os.environ.get("DB_POOL_MAX") or 10),
         statement_cache_size=0,  # required behind Supabase's transaction-pooling PgBouncer
         command_timeout=15,       # bounds a stuck query instead of freezing the whole server
         # The background task only touches the DB once every 60s — well past
