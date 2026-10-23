@@ -15,7 +15,7 @@ python-multipart==0.0.31
 jinja2==3.1.6
 itsdangerous==2.2.0
 httpx==0.28.1
-Authlib==1.6.12
+Authlib==1.9.1
 email_validator==2.2.0
 python-dotenv==1.2.2
 asyncpg==0.30.0
