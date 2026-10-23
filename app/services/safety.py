@@ -29,15 +29,19 @@ _IDIOMS = re.compile(
 )
 
 _CRISIS = re.compile(
-    r"想死|唔想活|不想活|想自殺|自殺|輕生|結束(自己)?(嘅)?生命|了結(自己)?|跳樓|割脈|"
-    r"suicid|kill myself|end my (own )?life|want to die|wanna die|don'?t want to (live|be alive)|"
-    r"better off dead|take my own life",
+    r"想死|唔想活|不想活|唔想再活|不想再活|活唔落去|活不下去|想自殺|自殺|輕生|結束(自己)?(嘅)?(生命|一切)|了結(自己)?|跳樓|割脈|"
+    r"死咗(都)?好|死左(都)?好|瞓去唔醒|睡去不醒|想消失|"
+    r"suicid|kill myself|end my (own )?life|end it all|want to die|wanna die|wish i (was|were) dead|don'?t want to (live|be alive|be here)( anymore)?|"
+    r"no reason to live|better off dead|take my own life|overdose|take all (of )?my (pills|medic)",
     re.IGNORECASE,
 )
 
+# Physical chest symptoms only. A bare 心 is left out on purpose: 心痛, 心翳 and 心緊
+# are how people say they are heartbroken or worried (missing a late spouse, a son
+# who does not visit), and answering that with "call 999" is wrong and frightening.
 _EMERGENCY = re.compile(
-    r"(胸口|心口|心臟|心).{0,3}(好|很|非常|太)?.{0,2}(痛|绞|絞|翳|緊)|呼吸困難|透唔到氣|喘唔到氣|唔夠氣|"
-    r"中風|半身(麻|不遂)|面歪|口歪|突然(暈|昏)|暈倒|昏迷|跌低.{0,4}(起唔到|郁唔到)|起唔到身|大量(出血|流血)|嘔血|"
+    r"(胸口|心口|心臟|胸).{0,3}(好|很|非常|太)?.{0,2}(痛|絞|悶|壓|翳)|呼吸困難|透唔到氣|喘唔到氣|唔夠氣|"
+    r"中風|半身(麻|不遂)|面歪|口歪|突然(暈|昏)|暈倒|昏迷|跌低.{0,4}(起唔到|郁唔到)|跌倒.{0,4}(起唔到|郁唔到)|起唔到身|大量(出血|流血)|嘔血|"
     r"chest (pain|tightness|pressure)|can'?t breathe|cannot breathe|trouble breathing|short of breath|"
     r"stroke|face (is )?droop|slurred speech|passed out|fainted|unconscious|fell and can'?t get up|bleeding (heavily|badly)",
     re.IGNORECASE,

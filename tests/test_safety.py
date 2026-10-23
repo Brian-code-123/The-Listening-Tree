@@ -7,6 +7,15 @@ from app.services.safety import check_message
 @pytest.mark.parametrize("text,lang,kind", [
     ("我想死", "zh-HK", "crisis"),
     ("I want to end my life", "en", "crisis"),
+    ("我唔想再活落去", "zh-HK", "crisis"),
+    ("我想結束一切", "zh-HK", "crisis"),
+    ("死咗都好", "zh-HK", "crisis"),
+    ("我食咗好多藥想瞓去唔醒", "zh-HK", "crisis"),
+    ("I want to end it all", "en", "crisis"),
+    ("there is no reason to live", "en", "crisis"),
+    ("I think I took an overdose", "en", "crisis"),
+    ("我心口好痛", "zh-HK", "emergency"),
+    ("我跌低咗起唔到身", "zh-HK", "emergency"),
     ("我唔想活喇", "zh-HK", "crisis"),
     ("胸口好痛", "zh-HK", "emergency"),
     ("I have chest pain", "en", "emergency"),
@@ -19,6 +28,12 @@ def test_true_positives(text, lang, kind):
 
 
 @pytest.mark.parametrize("text,lang", [
+    # Heartache is not a heart attack: people mourning a spouse say these every day.
+    ("我好掛住老伴，心好痛", "zh-HK"),
+    ("睇到張相我心痛", "zh-HK"),
+    ("個仔唔返嚟探我，我心都翳晒", "zh-HK"),
+    ("我個心好緊張", "zh-HK"),
+    ("my heart aches for my late husband", "en"),
     ("my heart is happy today", "en"),
     ("笑死我喇", "zh-HK"),
     ("我想死你", "zh-HK"),
