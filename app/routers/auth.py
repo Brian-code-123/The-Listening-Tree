@@ -87,6 +87,7 @@ async def login_page(request: Request, error: Optional[str] = None):
     if error == "google_failed":
         google_error = "Google sign-in failed. Please try again or use your password." if lang == 'en' else "Google 登入失敗，請再試一次或用密碼登入"
     return templates.TemplateResponse(
+        request,
         "login.html",
         tpl_context(request, error=google_error, google_enabled=config.GOOGLE_LOGIN_ENABLED),
     )
@@ -159,6 +160,7 @@ async def login_post(
         if wants_json:
             return JSONResponse({"success": False, "message": message}, status_code=status_code)
         return templates.TemplateResponse(
+            request,
             "login.html", tpl_context(request, error=message, google_enabled=config.GOOGLE_LOGIN_ENABLED), status_code=status_code
         )
 
@@ -227,7 +229,7 @@ async def login_post(
 async def register_page(request: Request):
     if get_user(request) is not None:
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse(REGISTER_TEMPLATE, tpl_context(request))
+    return templates.TemplateResponse(request, REGISTER_TEMPLATE, tpl_context(request))
 
 
 @router.post("/send_verification_code")
@@ -408,13 +410,13 @@ async def register_post(
     def fail(message: str, field: str = "email", status_code: int = 400):
         if wants_json:
             return JSONResponse({"success": False, "field": field, "message": message}, status_code=status_code)
-        return templates.TemplateResponse(REGISTER_TEMPLATE, tpl_context(request, error=message))
+        return templates.TemplateResponse(request, REGISTER_TEMPLATE, tpl_context(request, error=message))
 
     if not await check_and_increment(client_key(request, "register"), REGISTER_RATE_LIMIT, RATE_LIMIT_WINDOW_SECONDS):
         too_many_msg = "Too many attempts. Please wait a moment and try again." if lang == 'en' else "嘗試次數過多，請稍等再試"
         if wants_json:
             return JSONResponse({"success": False, "field": "email", "message": too_many_msg}, status_code=429)
-        return templates.TemplateResponse(REGISTER_TEMPLATE, tpl_context(request, error=too_many_msg), status_code=429)
+        return templates.TemplateResponse(request, REGISTER_TEMPLATE, tpl_context(request, error=too_many_msg), status_code=429)
 
     if consent.strip().lower() not in {"true", "on", "1", "yes"}:
         return fail(
@@ -650,6 +652,7 @@ async def profile_page(request: Request):
     user_row = c.fetchone()
     await conn.close()
     return templates.TemplateResponse(
+        request,
         "profile.html",
         tpl_context(
             request,

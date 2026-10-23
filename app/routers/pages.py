@@ -17,8 +17,8 @@ router = APIRouter()
 async def index(request: Request):
     uid = get_user(request)
     if uid is None:
-        return templates.TemplateResponse("login.html", tpl_context(request, google_enabled=config.GOOGLE_LOGIN_ENABLED))
-    return templates.TemplateResponse("chat.html", tpl_context(request))
+        return templates.TemplateResponse(request, "login.html", tpl_context(request, google_enabled=config.GOOGLE_LOGIN_ENABLED))
+    return templates.TemplateResponse(request, "chat.html", tpl_context(request))
 
 
 @router.get("/set_language/{lang}")
@@ -44,7 +44,7 @@ async def accessibility_mode(request: Request):
     uid = get_user(request)
     if uid is None:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("accessibility.html", tpl_context(request))
+    return templates.TemplateResponse(request, "accessibility.html", tpl_context(request))
 
 
 @router.get("/translations/{lang}")

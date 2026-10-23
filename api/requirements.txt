@@ -10,7 +10,8 @@
 # browsers without native Web Speech API support) working. Don't drop it
 # again without also setting HF_API_KEY, or the fallback goes dead silently.
 
-fastapi==0.115.12
+fastapi==0.161.1
+starlette==1.9.0
 python-multipart==0.0.31
 jinja2==3.1.6
 itsdangerous==2.2.0

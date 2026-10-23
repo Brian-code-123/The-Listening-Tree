@@ -66,7 +66,7 @@ async def hk_guide_page(request: Request):
     uid = get_user(request)
     if uid is None:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("hk_guide.html", tpl_context(request))
+    return templates.TemplateResponse(request, "hk_guide.html", tpl_context(request))
 
 
 @router.get("/get_hk_guide")
