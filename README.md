@@ -41,7 +41,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 - Simplicity and personalization: easy, customizable daily reminders for medication, exercise, and hydration.
 - Voice-first interaction: hands-free operation via Cantonese and English voice commands.
 - Elderly-centric design: WCAG AA-aligned UI with large buttons, high contrast, and minimal clutter.
-- Security and reliability: automated tests cover authentication, access control and the core flows; the privacy limits that remain are listed under [Security & Privacy](#security--privacy).
+- Security and reliability: automated tests cover authentication, access control and the core flows; the design and its known limits are in [Security & Privacy](#security--privacy).
 
 ## Key Features
 
@@ -60,7 +60,7 @@ The Listening Tree delivers a compassionate, intuitive AI companion tailored for
 
 - Core: Next.js 16 (App Router) with React 19 and TypeScript, in `web-next/`
 - Styling: plain CSS (`web-next/app/globals.css`), ported from the original stylesheet. No CSS framework — the ported markup still carries Bootstrap's utility class names, so the handful actually used are defined directly rather than pulling in the framework
-- Libraries: FullCalendar (`@fullcalendar/react`) for the holiday calendar; Font Awesome and Google Fonts from CDN
+- Libraries: FullCalendar (`@fullcalendar/react`) for the holiday calendar; Font Awesome (the npm package) and Google Fonts through `next/font`, both self-hosted at build time
 - Legacy: the original Jinja2 templates (`templates/`, Bootstrap 5 + jQuery + FullCalendar via CDN) are still in the repo and still served by their FastAPI routes, kept until the migrated pages have proven stable in production
 - Voice: Web Speech API for browser-native speech-to-text and text-to-speech, with a server-side `/transcribe` fallback (Hugging Face Whisper, then legacy Google Web Speech via `SpeechRecognition`) for browsers without Web Speech API support
 - Mobile build: Capacitor 6 for iOS and Android packaging, with `@capacitor/local-notifications` for background reminder alarms
@@ -197,13 +197,15 @@ them with `npm run cap:add:ios` or `npm run cap:add:android`, then
 
 ## Testing & Evaluation Methodology
 
-### Automated testing
+The suite checks the system the way a user meets it. Current results, how to repeat them, and what was not measured are in [docs/TESTING.md](docs/TESTING.md).
 
-- End-to-end (Playwright): 84 user-flow tests on each of Chromium, WebKit, Pixel 5 and iPhone 13 (336 runs), against the real Next.js and FastAPI stack: registration and login, language switching on every page, chat, the cognitive game, voice input, reminders (including daily repeat), the site-wide alarm and the returning-user check-in, conversation history and delete, profile, and the HK guide.
-- API integration (pytest, local PostgreSQL): 21 tests covering conversation ownership and delete, session language, translations, security boundaries, and the expiry job keeping daily reminders. Backend unit tests: 28.
-- Unit and component tests (Vitest, Testing Library): 69 tests covering the language hooks, loading screen, delete-confirmation flow, the guard that keeps tests off non-local databases, and a check that English and Cantonese carry the same translation keys.
-- Load testing (k6): ramps to 150 concurrent virtual users against a local backend with 0% failed requests and a p95 latency of about 12 ms for authenticated requests. This is measured on a local machine, not on the Vercel deployment.
-- CI/CD automation: GitHub Actions runs the unit, integration and `web-next` tests, a Playwright end-to-end matrix (one job per browser project) and a k6 smoke run on every push and pull request to `main`/`develop`. See [docs/TESTING.md](docs/TESTING.md) for the test plan, criteria, results and how to repeat them.
+### What the automated tests cover
+
+- End-to-end (Playwright, Chromium, WebKit, Pixel 5, iPhone 13): user flows against the real Next.js and FastAPI stack, such as registration and sign-in, language switching on every page, chat, the cognitive game, voice input, reminders, conversation history, profile, and the HK guide.
+- API integration (pytest, local PostgreSQL): conversation ownership, session language, security boundaries and the security hardening (lockout, verification codes, session revocation, limits, safety replies, retention job, account delete and export, pool behaviour under load).
+- Backend unit tests (mocked database) and component and hook tests (Vitest, Testing Library): password policy, client-IP handling, security headers, safety rules, translation parity, the language hooks and the streaming chat client.
+- Load testing (k6): a single-user profile, a 50-user run with a slow mock model and a sign-in burst, and a small run against the real free model. Measured on a local machine, not on the Vercel deployment.
+- CI/CD: GitHub Actions runs the unit, integration and `web-next` tests, the Playwright matrix (one job per browser project), a k6 smoke run, a secret scan and dependency audits on every push and pull request to `main`/`develop`.
 
 ### Known evaluation gaps
 
@@ -218,38 +220,25 @@ These are tracked as future work (see [Future Improvements](#future-improvements
 
 ## Security & Privacy
 
-- Password storage: PBKDF2-HMAC-SHA256 with a unique per-user salt (390,000 iterations), never plaintext or reversibly encrypted.
-- Session integrity: session signing key is read from `SECRET_KEY`/`SESSION_SECRET`; in production, startup fails fast if no persistent secret is configured, preventing silent use of a throwaway key that would invalidate all sessions on restart.
-- Verification code abuse prevention: `/send_verification_code` enforces a server-side cooldown per email address, rejecting rapid repeat requests with HTTP 429.
-- Database access: connections use Supabase's managed connection pooler rather than raw per-request connections; credentials are read from environment variables, never hardcoded.
-- SQL injection prevention: all queries use parameterized placeholders via the `db_execute` helper.
-- Rate limiting: per-IP limits of 10 login attempts, 5 registrations and 5 verification-code requests per minute, stored in PostgreSQL so they hold across serverless instances, in addition to account lockout after repeated failures.
-- Access control: conversations and reminders belong to their owner; automated tests check that another user is refused on read, pin, tag, rename, delete and write.
-- Output handling: user-supplied text is rendered as text (tests cover HTML in messages, reminder labels and conversation titles), and the language-switch redirect only ever returns known local pages.
+The full design, the reasons behind each choice, what it costs and what it cannot do are in [docs/SECURITY.md](docs/SECURITY.md). In short:
 
-### Where user data goes
+- **Sign-in:** PBKDF2-HMAC-SHA256 passwords, a lockout that counts per email and address atomically, verification codes stored only as keyed hashes, and answers that do not reveal whether an account exists.
+- **Sessions:** a signed cookie plus a per-user version checked against the database, so logging out or changing the password ends every older session.
+- **Abuse limits:** shared counters in PostgreSQL for sign-in, registration, chat (per user), uploads and public data, plus caps on message, request body and reminder size.
+- **Safety and privacy:** crisis and emergency messages get a fixed reply with the Hong Kong help lines instead of the model; users can download or delete their data, read a privacy notice and give consent; a daily job enforces retention; security events are logged without personal data.
+- **Exposure:** security headers on every response (the Content-Security-Policy starts report-only), API docs off in production, supply-chain audits and a secret scan in CI.
+- **Honest limits:** no external penetration test, no multi-factor sign-in or CAPTCHA by design, chat text goes to Zhipu AI (China-based) and is stored as plain text, and the privacy notice needs the owner's review. These and more are listed in [Known gaps and limits](docs/SECURITY.md#known-gaps-and-limits).
 
-- Chat: each message and up to the last 20 messages of that conversation are sent to Zhipu AI (`open.bigmodel.cn`, a China-based provider) to generate the reply. Do not present the app as keeping conversations private to this service.
-- Voice: by default a browser's Web Speech API sends the audio to an online recognition service ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API/Using_the_Web_Speech_API)), so dictation is not on-device. Only browsers without the API fall back to uploading the recording to our `/transcribe` endpoint (Hugging Face Whisper, then Google Web Speech).
-- Consent: registration has a privacy notice but no explicit consent step for these transfers.
-
-### Known gaps
-
-- No self-harm or crisis detection: a message about wanting to die gets the same LLM reply as any other message, with no hotline referral or alert to a carer. This must be added before real elderly users rely on it.
-- Encryption-at-rest relies on Supabase's underlying infrastructure and is not independently documented or verified at the application level.
-- No formal written threat model.
-- No documented data retention / deletion policy for user accounts and chat history.
+Steps the owner must take before the features are live are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#before-this-goes-live).
 
 ## Deployment
 
-- Web: hosted on Vercel at https://the-listening-tree.vercel.app/
-- Mobile: native iOS and Android apps built via Capacitor for App Store and Google Play readiness.
-- Database: managed PostgreSQL on Supabase for secure and scalable storage.
+Web on Vercel (https://the-listening-tree.vercel.app/), native iOS and Android through Capacitor, and managed PostgreSQL on Supabase. Environment variables, the order of steps and the go-live checklist are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Future Improvements
 
 - Formal usability evaluation with an elderly test group, using the System Usability Scale (SUS) methodology.
-- Self-harm / crisis detection with a fixed hotline reply, and an explicit consent step for the third-party processing above.
+- Clinical review of the crisis wording, and a separate consent choice for each third-party processor.
 - Documented threat model and data retention / deletion policy.
 - Advanced analytics dashboard for usage and wellness tracking.
 - Offline mode support for low-connectivity environments.

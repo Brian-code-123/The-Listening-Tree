@@ -6,6 +6,35 @@ functional results (sections 5 to 7) were re-recorded on 2026-09-24 (environment
 The stress results (section 8) were recorded on 2026-09-22 and have not been re-run. Where a
 result is not yet available it says so.
 
+## Latest results (22 to 23 Oct 2026, final code)
+
+Run on a developer laptop against a local PostgreSQL, so these are local numbers; none was measured on the Vercel deployment. How to repeat each one, the criteria and the history are in the sections below.
+
+**Correctness**
+
+| Suite | Result |
+|---|---|
+| Backend unit tests (mocked database) | 93 passed |
+| API integration tests (local PostgreSQL) | 108 passed |
+| Component and hook tests, `web-next` (Vitest) | 112 passed; `tsc` clean; lint 0 errors |
+| Unit tests, repository root (Vitest) | 16 passed |
+| End to end (Playwright: Chromium, WebKit, Pixel 5, iPhone 13) | 352 passed, 12 skipped by design, 0 failed |
+| Dependency audit (`npm audit --omit=dev`, `pip-audit`) | 0 findings in shipped code (dev tooling still lists advisories, see Known gaps) |
+
+**Performance and load**
+
+| Test | Result |
+|---|---|
+| Single user, 15 virtual users for 25 s (k6 smoke) | signed-in p95 9.4 ms, public p95 2.5 ms, 0 % errors. The hardening changed this by under 1 ms (before: 7.4 ms and 3.0 ms). |
+| 50 users chatting with a slow mock model, plus a burst of 30 sign-ins (k6, two runs) | 0 errors; sign-in burst done in 14 s; `/me` p95 86 to 200 ms during the burst; whole 3.5 s mock reply p95 4.5 to 4.7 s |
+| 10 users, 30 messages to the real free model (`glm-4-flash`) | all 30 answered; first words median 0.85 s (max 2.2 s); whole reply median 3.3 s (p90 5.5 s) |
+| Chat as the user sees it | first words after about 1 s (was a 2.6 s wait for the whole reply); the model itself writes about 20 tokens a second, so the whole reply takes 2 to 4 s |
+| Password hashing | 207 ms per sign-in (was 141 ms at 390k rounds), in a worker thread so other requests are not delayed |
+
+**What the testing found and fixed** (each has a regression test): the connection pool deadlocked when 10 or more sign-ins arrived together (found by the many-user test, not the single-user one); a browser leaving mid-reply lost the reply and leaked a connection; the speech fallback froze the whole server for about a second; a failed model call leaked a database connection and later hung the pool; one rate-limit test was flaky because of a fixed-window boundary.
+
+**Not measured:** performance on the Vercel deployment (session-check cost, real password-hash time, whether the stream is delivered unbuffered, function concurrency), Zhipu's concurrency limit above about 10 simultaneous users, Core Web Vitals after the changes, and server-side speech-to-text with real speech (the Hugging Face account had no credit when checked).
+
 ## 1. Testing Strategy
 
 The suite tests the system the way a user meets it: through the browser, against the same
@@ -60,6 +89,9 @@ Design decisions that make the results trustworthy and repeatable:
 | Page rendering, no app errors, loading screen, no horizontal overflow | `browser-compatibility.spec.ts`, `PageLoading.test.tsx` | e2e, unit |
 | Translation completeness (same keys in both languages) | `translations-parity.test.ts`, integration test | unit, integration |
 | Security boundaries: another user cannot read, pin, tag, rename or write into someone else's conversation; logged-out requests get no data; SQL-injection-shaped login; session cookie flags | `test_security_boundaries.py` | integration |
+| Security hardening: schema; atomic per-email+IP lockout and timing; password policy and rehash; verification-code limits and enumeration; security events and log hygiene; session revocation; Google linking; message/body/reminder/public-data limits; crisis and scam pre-check; cron retention; account delete and export | `test_security_schema.py`, `test_security_login.py`, `test_security_passwords.py`, `test_security_codes.py`, `test_security_events.py`, `test_security_session.py`, `test_security_google.py`, `test_security_limits.py`, `test_security_safety.py`, `test_cron_cleanup.py`, `test_account.py` | integration |
+| Security hardening (no database): trusted client IP, password policy, security headers (and parity with `next.config.ts`), safety keyword rules, prompt hygiene | `test_rate_limit_ip.py`, `test_password_policy.py`, `test_security_headers.py`, `test_safety.py`, `test_prompt_hygiene.py` | backend unit |
+| Sessions end on the server; rate limits per address; privacy notice and consent tick | `tests/e2e/security.spec.ts` | e2e |
 | Open-redirect guard on the language switch (look-alike hosts, scheme-relative and backslash paths, malformed Referer) | `test_redirect_target.py` | unit |
 | Injection and odd input: HTML in a chat message, reminder label and conversation title is shown as text; whitespace-only message; Chinese and emoji text | `edge-cases.spec.ts` | e2e |
 | Things changing under the user: session expiring mid-chat, a conversation deleted elsewhere then opened, deleting while renaming | `edge-cases.spec.ts` | e2e |
@@ -123,7 +155,7 @@ There are 84 tests per project (14 spec files). Result: see section 6.
 | `edge-cases.spec.ts` | 8 | HTML in a chat message, reminder label and conversation title never executes; whitespace-only message not sent; Chinese and emoji label intact; session expiring mid-chat gives an error bubble; a deleted conversation opened by link leaves a working chat; deleting while renaming |
 | `browser-compatibility.spec.ts` | 8 | See section 7 |
 
-Supporting layers: 21 API integration tests, 28 backend unit tests, and 69 component/unit
+Supporting layers: 24 API integration tests, 33 backend unit tests, and 111 component/unit
 tests (section 6).
 
 ## 6. Results
@@ -132,10 +164,10 @@ tests (section 6).
 |---|---|
 | Playwright, dev servers, 2 workers | 336 executions (84 x 4 projects): **324 passed, 12 skipped, 0 failed, 0 flaky** (8.2 min) |
 | Playwright, production build (CI mode), 1 worker | 336 executions: **323 passed, 12 skipped, 0 failed, 1 flaky** (10.3 min for all four projects) |
-| pytest, backend unit (mocked DB) | 28 passed |
-| pytest, API integration (live local PostgreSQL) | 21 passed |
+| pytest, backend unit (mocked DB) | 33 passed |
+| pytest, API integration (live local PostgreSQL) | 24 passed |
 | Vitest, repository root | 16 passed (2 files) |
-| Vitest, `web-next` | 53 passed (7 files) |
+| Vitest, `web-next` | 95 passed (9 files) |
 | k6 stress, full profile | thresholds passed (section 8) |
 
 The one flaky execution in the production-build run is `i18n.spec.ts:32` "login (logged out)
@@ -274,3 +306,103 @@ other's rate-limit counters (the rate-limit test now has its own reserved counte
 - Daily reminders use the native scheduler's daily repeat (`every: "day"`); no automated
   test exercises it and it has not been checked on a physical device. Messages about
   self-harm get no special handling (see the README, "Known gaps").
+
+## Non-functional requirements after the security hardening (22 Oct 2026)
+
+Measured on a local machine (Apple silicon, local PostgreSQL, k6 smoke profile: 15 virtual users, 25 s), the same script against the commit before the hardening and after it. **These are local numbers; nothing here was measured on the Vercel deployment.**
+
+| Requirement | Target | Before | After | Verdict |
+|---|---|---|---|---|
+| Signed-in request latency (p95) | < 1500 ms | 7.4 ms | 8.3 ms | Met. The per-request session check (one indexed lookup) costs about 0.5 ms locally. |
+| Public request latency (p95) | < 500 ms | 3.0 ms | 3.8 ms | Met. |
+| Error rate | < 1 % | 0 % | 0 % | Met. Chat answers 429 once a user passes 20 messages a minute; the load test accepts 200 or 429 and fails on any 5xx. |
+| Password hash cost (one sign-in) | no event-loop stall | 141 ms (390k) | 207 ms (600k) | +66 ms per sign-in. Hashing runs in a worker thread; a test checks other requests are not delayed while hashing. Serverless CPUs are slower than this laptop, so expect more on Vercel; not measured. |
+| Cold start (`import run`) | no regression | 0.72–0.86 s | 0.73–1.15 s | No measurable change (noisy). |
+| Extra database round trips | few | — | session check +1 on every signed-in request; chat +2 (two limiter upserts); sign-in +2 to +3 | Cheap in the same region (function and database are both in Tokyo) but **not measured on Vercel**. |
+| Behaviour when the database is down | no stack traces | — | limiter: 503 with a clean body; session check: request allowed and logged | Covered by tests. |
+| Request body size | bounded | unbounded | 1 MB (11 MB for voice), checked before parsing | Covered by tests. |
+| Page weight / Core Web Vitals | no regression | — | privacy page and consent checkbox added; no new third-party scripts | Not re-measured. |
+
+Not measured and worth doing after deploy: the session check's cost on Vercel (look at p95 of `/me` in the runtime logs), real PBKDF2 time on a Vercel function, and whether the CSP report-only policy raises violations in a real browser.
+
+### Chat and speech-to-text response time (22 Oct 2026, real external calls)
+
+Timed from a laptop in Hong Kong against the live providers with the project's own keys, so the figure includes the network to the provider. These calls are the slowest thing in the app and the app cannot make them faster; the table says what the user waits for.
+
+| Path | Result | Notes |
+|---|---|---|
+| Chat reply, English (Zhipu `glm-4-flash`, 8 calls) | min 3.1 s, median 4.1 s, p90 about 5.1 s, max 10.9 s | Reply of about 360 characters. The app's own overhead (limiter, session check, two writes) is a few milliseconds and is lost in this. |
+| Chat reply, Cantonese (8 calls) | min 2.4 s, median 3.5 s, p90 about 3.8 s, max 5.4 s | Replies are shorter. |
+| Chat, model unreachable | up to the 60 s client timeout, then a warm fixed fallback reply | The user waits the full timeout before the fallback appears; a shorter timeout is a product decision. |
+| Speech-to-text, Whisper via Hugging Face | **fails: HTTP 402, "no remaining credits"** (0.5 s to fail) | The key in `.env.local` has no credit. If production uses the same account, server transcription never uses Whisper. |
+| Speech-to-text, Google fallback | not measured with real speech | This machine's speech synthesiser does not work in the sandbox, so no real speech clip could be made, and the clip used got "Bad Request" from Google. The failed Whisper try plus the fallback together took about 1 s. |
+
+Findings from this check:
+
+1. **The Hugging Face account is out of credit.** Most browsers use the built-in Web Speech API instead and never reach `/transcribe`, so users may not notice. Top up the account or remove `HF_API_KEY` to skip the wasted 0.5 s round trip.
+2. **Fixed:** the Google fallback was a blocking call made inside an async route, so each use froze every other request on that instance for about a second. It now runs in a worker thread (test: `test_google_fallback_does_not_block_the_event_loop`).
+3. **Fixed:** `get_response` could leak a database connection when anything inside it raised, which later hung the pool. It now releases the connection in a `finally` and `close()` is idempotent (test: `test_a_failing_model_call_does_not_leak_a_database_connection`).
+4. **Chat now streams** (below).
+
+#### Why chat was slow, and what changed
+
+Root cause, measured: the wait is the model writing, not connections or our code. `glm-4-flash` decodes about 20 tokens a second (a 64-token reply is about 3 s), reusing the HTTP connection made no difference, and our own overhead is a few milliseconds. The faster Zhipu models (`glm-4-flashx`, `glm-4-air`) answer "insufficient balance" on this account, so a faster model needs a paid top-up.
+
+What the app can change is what the user *sees*: the model's first words arrive after about 0.8 s, so the reply is now sent as server-sent events and shown as it is written, with an empty "…" bubble up at once.
+
+Measured through the real server and live model (6 streamed messages, 3 plain, English and Cantonese):
+
+| | min | median | max |
+|---|---|---|---|
+| Before: wait until the reply appears | 2.1 s | 2.6 s | 3.7 s |
+| After: first words appear | 1.0 s | **1.0 s** | 1.9 s |
+| After: whole reply complete | 2.0 s | 2.6 s | 3.8 s |
+
+The whole reply takes the same time; the user stops staring at a blank screen after one second. Industry practice for chat is time-to-first-token under about a second, which this meets. Speech now starts with the first finished sentence (`nextSentences` in `lib/tts.ts`; later sentences queue behind it instead of cutting it off). Not done: the first-word figure includes about 0.2 s of our own database work that could be trimmed.
+
+Not verified: that the Vercel Python runtime delivers the stream unbuffered. It is covered locally by integration tests (`test_chat_streaming.py`) and the client falls back to a plain JSON reply if the server does not stream, so the worst case is the old behaviour; check the first-words time on the deployed site after release.
+
+### Final run, 22 Oct 2026
+
+| Suite | Result |
+|---|---|
+| Backend unit (mocked database) | 93 passed |
+| API integration (local PostgreSQL) | 105 passed |
+| Vitest, `web-next` | 112 passed; lint 0 errors; `tsc` clean |
+| Vitest, repository root | 16 passed |
+| Playwright, all four projects (Chromium, WebKit, Pixel 5, iPhone 13) | 351 passed, 12 skipped, 1 flaky |
+| k6 smoke | all thresholds met |
+
+The one flaky test was the per-IP login limit on WebKit: the limit is a fixed one-minute window, so twelve requests that straddled a minute boundary were counted in two windows and never reached 10. The test now starts early in a window (6 repeated runs with no retries all passed). The same boundary effect exists for real users, who can send up to twice the limit across a boundary; that is the documented cost of a fixed window.
+
+### Many users at once, with a slow model (22 Oct 2026)
+
+`npm run test:stress:multiuser` starts a mock Zhipu server (`tests/stress/mock_zhipu.py`: half a second to the first words, about 3.5 s for a whole reply), 50 different signed-in users each chatting every 3 seconds with streaming, a burst of 30 sign-ins in the middle of the run, and two watchers polling `/me`. It uses the local e2e database and never the real model or any quota.
+
+**It found a real defect that the single-user test could not.** The first run hung: all 60 sign-ins timed out after 60 s, 25 % of chat requests stalled, and `/me` waited up to a minute, with no server errors at all. Cause: the database pool holds at most 10 connections, and the sign-in handler kept one connection while asking for a second (`reset_key` and `record_event` each borrow their own). With 10 sign-ins in flight every connection was held by a request waiting for another, so the pool deadlocked. Registration and the chat safety event had the same shape, and the chat reminder commands already did.
+
+Fixes: the sign-in, registration and chat handlers now give a connection back before borrowing another (and before hashing a password), the pool size is configurable with `DB_POOL_MAX`, and `tests/integration/test_pool_deadlock.py` runs four times more simultaneous sign-ins, chats (including safety messages and reminder commands) and registrations than a 3-connection pool has connections. That test hung for 40 s before the fix and finishes in a few seconds after it.
+
+| After the fix (two runs) | Result |
+|---|---|
+| Sign-in burst of 30 (60 sign-ins) | all 200; the burst finishes in 14 s instead of timing out |
+| `/me` while the burst runs | p95 86 to 200 ms (max about 0.8 s) |
+| Whole chat reply with the 3.5 s mock model | p95 4.5 to 4.7 s, no stalls |
+| Server errors, connection resets | 0 |
+
+Two test-design lessons are recorded in the script: k6 buffers a streamed body, so it measures the whole reply and not the first words (those were timed separately above); and the sign-in burst sleeps 8 s, not 5, because uvicorn closes an idle connection after 5 s and a client that reuses it at that instant sees a reset.
+
+Still not tested: the real Zhipu concurrency limit (needs your quota and approval), the Vercel runtime (function concurrency, cold starts under load), and the full 100-user profile of the single-user test.
+
+### Small real-model check (23 Oct 2026)
+
+`npm run test:stress:realai`: 10 different users, 3 messages each about 10 seconds apart, streamed, to the live free `glm-4-flash` through a local backend and the local e2e database (about 30 model calls, no production data, key read from `.env.local` and never printed).
+
+| | Result |
+|---|---|
+| Requests | 30, all answered 200 with a real model reply (0 fallbacks, 0 rate-limit answers from Zhipu) |
+| First words | min 0.71 s, median 0.85 s, p90 1.65 s, max 2.19 s |
+| Whole reply | min 1.40 s, median 3.33 s, p90 5.46 s, max 7.25 s |
+
+At this size (about 10 users at once) Zhipu's free tier did not push back. Its concurrency limit at higher load is still unknown, and so is how the Vercel runtime behaves with many streams open.
+
