@@ -48,18 +48,27 @@ test.describe('Black-box: browser security headers', () => {
   });
 
   test('every page loads without a Content-Security-Policy violation', async ({ authedPage: page }) => {
-    const violations: string[] = [];
-    page.on('console', (message) => {
-      if (/content security policy|\[report only\]/i.test(message.text())) violations.push(message.text());
+    // The browser's own `securitypolicyviolation` event, not console text: WebKit also
+    // prints harmless notices about the policy itself (such as "frame-ancestors is
+    // ignored in a report-only policy"), and those are not violations.
+    await page.addInitScript(() => {
+      const seen: string[] = [];
+      (window as unknown as { __csp: string[] }).__csp = seen;
+      document.addEventListener('securitypolicyviolation', (e) => seen.push(`${e.violatedDirective} blocked ${e.blockedURI}`));
     });
+    const violations: string[] = [];
+    const collect = async () => {
+      await page.waitForLoadState('networkidle');
+      violations.push(...(await page.evaluate(() => (window as unknown as { __csp: string[] }).__csp)));
+    };
     for (const path of ['/', '/history', '/profile', '/accessibility', '/hk_guide']) {
       await page.goto(path);
-      await page.waitForLoadState('networkidle');
+      await collect();
     }
     await page.context().clearCookies();
     for (const path of ['/login', '/register']) {
       await page.goto(path);
-      await page.waitForLoadState('networkidle');
+      await collect();
     }
     expect(violations).toEqual([]);
   });
