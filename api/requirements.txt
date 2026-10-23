@@ -20,4 +20,4 @@ email_validator==2.2.0
 python-dotenv==1.2.2
 asyncpg==0.30.0
 SpeechRecognition==3.10.4
-azure-communication-email==1.0.0
+azure-communication-email==1.1.0
