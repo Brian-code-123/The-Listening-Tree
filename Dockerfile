@@ -13,7 +13,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install Python dependencies first (layer cache friendly)
-COPY requirements.txt .
+COPY api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source
@@ -21,6 +21,10 @@ COPY run.py translations.py ./
 COPY app/ app/
 COPY templates/ templates/
 COPY static/ static/
+
+# Run as an ordinary user: a bug in the app should not hand out root in the container.
+RUN useradd --create-home --uid 10001 app
+USER app
 
 EXPOSE 5000
 

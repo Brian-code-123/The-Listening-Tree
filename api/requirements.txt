@@ -11,13 +11,13 @@
 # again without also setting HF_API_KEY, or the fallback goes dead silently.
 
 fastapi==0.115.12
-python-multipart==0.0.20
+python-multipart==0.0.31
 jinja2==3.1.6
 itsdangerous==2.2.0
 httpx==0.28.1
-Authlib==1.3.2
+Authlib==1.6.12
 email_validator==2.2.0
-python-dotenv==1.0.0
+python-dotenv==1.2.2
 asyncpg==0.30.0
 SpeechRecognition==3.10.4
 azure-communication-email==1.0.0

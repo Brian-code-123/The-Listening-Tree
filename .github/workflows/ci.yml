@@ -6,7 +6,43 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
+  dependency-audit:
+    name: Dependency audit and secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for the secret scan)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan the repo and its history for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Audit shipped Node dependencies (web-next)
+        working-directory: web-next
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Audit Python dependencies
+        run: |
+          pip install pip-audit
+          pip-audit -r api/requirements.txt
+
   unit-tests:
     name: Vitest Unit Tests
     runs-on: ubuntu-latest
@@ -53,7 +89,7 @@ jobs:
           pip install pytest
 
       - name: Run backend unit tests (mocked DB, no live DB needed)
-        run: pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py tests/test_schema_cold_start.py tests/test_lazy_stt_import.py tests/test_daily_reminder_checkin.py
+        run: pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py tests/test_schema_cold_start.py tests/test_lazy_stt_import.py tests/test_daily_reminder_checkin.py tests/test_password_policy.py tests/test_rate_limit_ip.py tests/test_security_headers.py tests/test_safety.py tests/test_prompt_hygiene.py
 
   integration-tests:
     name: Pytest Integration Tests
@@ -227,7 +263,7 @@ jobs:
           path: |
             playwright-report/
             test-results/
-          retention-days: 14
+          retention-days: 3
 
   stress-smoke:
     name: k6 stress smoke
@@ -289,4 +325,4 @@ jobs:
         with:
           name: ci-artifacts-stress
           path: test-results/stress-summary.json
-          retention-days: 14
+          retention-days: 3

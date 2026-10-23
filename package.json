@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "python run.py",
     "sync:translations": "python3 scripts/sync-translations.py",
-    "test:backend": "pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py tests/test_schema_cold_start.py tests/test_lazy_stt_import.py tests/test_daily_reminder_checkin.py",
+    "test:backend": "pytest -q tests/test_core_flows.py tests/test_session_persistence_unit.py tests/test_redirect_target.py tests/test_schema_cold_start.py tests/test_lazy_stt_import.py tests/test_daily_reminder_checkin.py tests/test_password_policy.py tests/test_rate_limit_ip.py tests/test_security_headers.py tests/test_safety.py tests/test_prompt_hygiene.py",
     "test:unit": "npx vitest run --config vitest.config.ts",
     "test:integration": "SKIP_ENV_LOCAL=1 DATABASE_URL=\"postgresql://$(whoami)@127.0.0.1:5432/listening_tree_e2e?sslmode=disable\" SUPABASE_POOLER_URL= POSTGRES_POOLER_URL= DATABASE_POOLER_URL= RUN_LIVE_DB=1 PYTHONPATH=. pytest -q tests/integration",
     "test:e2e": "playwright test",
@@ -29,13 +29,14 @@
     "dev:android": "bash scripts/mobile-dev.sh android",
     "cap:copy": "npx cap copy",
     "build": "npm run cap:sync",
-    "build-and-sync": "npm run cap:sync && npx cap copy ios && npx cap copy android"
+    "build-and-sync": "npm run cap:sync && npx cap copy ios && npx cap copy android",
+    "test:stress:multiuser": "bash tests/stress/run-multiuser.sh",
+    "test:stress:realai": "PYTHONPATH=. python tests/stress/real_ai_small.py"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
     "@capacitor/app": "^6.0.0",
     "@capacitor/browser": "^6.0.0",
-    "@capacitor/cli": "^6.2.0",
     "@capacitor/core": "^6.2.0",
     "@capacitor/haptics": "^6.0.0",
     "@capacitor/ios": "^6.2.1",
@@ -44,19 +45,20 @@
     "@capacitor/push-notifications": "^6.0.5",
     "@capacitor/splash-screen": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0",
-    "@vercel/analytics": "^2.0.1",
-    "vercel": "^51.2.0"
+    "@vercel/analytics": "^2.0.1"
   },
   "author": "The Listening Tree Team",
   "license": "GPL-3.0-only",
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^6.2.0",
     "@playwright/test": "^1.52.0",
     "@types/pg": "^8.23.1",
     "jsdom": "^26.1.0",
     "pg": "^8.23.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
+    "vercel": "^51.2.0",
     "vitest": "^4.1.2"
   }
 }

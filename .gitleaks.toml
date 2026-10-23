@@ -1,0 +1,11 @@
+title = "The Listening Tree"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholders and test fixtures, not real secrets"
+paths = [
+  '''\.env\.example$''',
+  '''tests/.*''',
+]

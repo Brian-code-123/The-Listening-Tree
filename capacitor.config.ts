@@ -1,5 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+// Release builds are the default; set CAP_ENV=development to loosen them.
+const isDev = process.env.CAP_ENV === 'development';
+
 const config: CapacitorConfig = {
   appId: 'com.listeningtree.app',
   appName: 'The Listening Tree',
@@ -22,7 +25,8 @@ const config: CapacitorConfig = {
     // exactly as in a browser.
     // ───────────────────────────────────────────────────────────────
     url: 'https://the-listening-tree.vercel.app',
-    cleartext: true,   // Allow HTTP (non-HTTPS) for local dev
+    // Plain HTTP and the debuggable WebView exist for local development only.
+    cleartext: isDev,
   },
   plugins: {
     SplashScreen: {
@@ -55,9 +59,9 @@ const config: CapacitorConfig = {
   },
   // Android specific configuration
   android: {
-    allowMixedContent: true,
+    allowMixedContent: isDev,
     captureInput: true,
-    webContentsDebuggingEnabled: true,  // Disable in production
+    webContentsDebuggingEnabled: isDev,
   },
 };
 

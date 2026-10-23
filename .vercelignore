@@ -15,6 +15,11 @@ android/
 *.apk
 
 # Development & testing
+tests/
+docs/
+scripts/
+supabase/
+alembic/
 __pycache__/
 .pytest_cache/
 .venv/

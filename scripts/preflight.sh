@@ -18,7 +18,8 @@ if command -v gitleaks >/dev/null 2>&1; then
     exit 1
   fi
 else
-  echo "WARN: gitleaks not installed — falling back to Claude-based scan only (less reliable for secrets)." >&2
+  echo "FAIL: gitleaks is not installed, so secrets cannot be scanned. Install it (brew install gitleaks) and retry." >&2
+  exit 1
 fi
 
 # --- 2. Semantic checks that need understanding, not just pattern matching ---
